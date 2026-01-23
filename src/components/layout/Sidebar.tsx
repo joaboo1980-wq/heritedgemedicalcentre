@@ -9,7 +9,8 @@ import {
   BarChart3,
   Heart,
   ChevronDown,
-  Settings
+  Settings,
+  Receipt
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
@@ -22,6 +23,7 @@ const navItems = [
   { icon: UserCog, label: 'Staff', href: '/staff' },
   { icon: FlaskConical, label: 'Laboratory', href: '/laboratory' },
   { icon: Pill, label: 'Pharmacy', href: '/pharmacy' },
+  { icon: Receipt, label: 'Billing', href: '/billing' },
   { icon: BarChart3, label: 'Reports', href: '/reports' },
 ];
 
