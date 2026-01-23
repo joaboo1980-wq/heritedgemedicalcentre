@@ -10,21 +10,30 @@ import {
   Heart,
   ChevronDown,
   Settings,
-  Receipt
+  Receipt,
+  LucideIcon
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import usePermissions, { ModuleName } from '@/hooks/usePermissions';
 
-const navItems = [
-  { icon: LayoutDashboard, label: 'Dashboard', href: '/dashboard' },
-  { icon: Users, label: 'Patients', href: '/patients' },
-  { icon: Calendar, label: 'Appointments', href: '/appointments' },
-  { icon: UserCog, label: 'Staff', href: '/staff' },
-  { icon: FlaskConical, label: 'Laboratory', href: '/laboratory' },
-  { icon: Pill, label: 'Pharmacy', href: '/pharmacy' },
-  { icon: Receipt, label: 'Billing', href: '/billing' },
-  { icon: BarChart3, label: 'Reports', href: '/reports' },
+interface NavItem {
+  icon: LucideIcon;
+  label: string;
+  href: string;
+  module: ModuleName;
+}
+
+const navItems: NavItem[] = [
+  { icon: LayoutDashboard, label: 'Dashboard', href: '/dashboard', module: 'dashboard' },
+  { icon: Users, label: 'Patients', href: '/patients', module: 'patients' },
+  { icon: Calendar, label: 'Appointments', href: '/appointments', module: 'appointments' },
+  { icon: UserCog, label: 'Staff', href: '/staff', module: 'staff' },
+  { icon: FlaskConical, label: 'Laboratory', href: '/laboratory', module: 'laboratory' },
+  { icon: Pill, label: 'Pharmacy', href: '/pharmacy', module: 'pharmacy' },
+  { icon: Receipt, label: 'Billing', href: '/billing', module: 'billing' },
+  { icon: BarChart3, label: 'Reports', href: '/reports', module: 'reports' },
 ];
 
 const adminItems = [
@@ -34,6 +43,7 @@ const adminItems = [
 const Sidebar = () => {
   const location = useLocation();
   const { profile, roles, isAdmin } = useAuth();
+  const { canAccessModule } = usePermissions();
 
   const getInitials = (name: string) => {
     return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
@@ -68,25 +78,27 @@ const Sidebar = () => {
           Navigation
         </p>
         <ul className="space-y-1">
-          {navItems.map((item) => {
-            const isActive = location.pathname === item.href;
-            return (
-              <li key={item.href}>
-                <Link
-                  to={item.href}
-                  className={cn(
-                    'flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors',
-                    isActive 
-                      ? 'bg-white text-primary font-medium' 
-                      : 'hover:bg-white/10 text-primary-foreground'
-                  )}
-                >
-                  <item.icon className="h-5 w-5" />
-                  <span>{item.label}</span>
-                </Link>
-              </li>
-            );
-          })}
+          {navItems
+            .filter((item) => canAccessModule(item.module))
+            .map((item) => {
+              const isActive = location.pathname === item.href;
+              return (
+                <li key={item.href}>
+                  <Link
+                    to={item.href}
+                    className={cn(
+                      'flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors',
+                      isActive 
+                        ? 'bg-white text-primary font-medium' 
+                        : 'hover:bg-white/10 text-primary-foreground'
+                    )}
+                  >
+                    <item.icon className="h-5 w-5" />
+                    <span>{item.label}</span>
+                  </Link>
+                </li>
+              );
+            })}
         </ul>
 
         {/* Admin Section */}
