@@ -29,8 +29,10 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from 'sonner';
-import { Plus, Search, Shield, UserCog } from 'lucide-react';
+import { Plus, Search, Shield, UserCog, Settings } from 'lucide-react';
+import RolePermissionsManager from '@/components/user-management/RolePermissionsManager';
 
 type AppRole = 'admin' | 'doctor' | 'nurse' | 'receptionist' | 'lab_technician' | 'pharmacist';
 
@@ -212,7 +214,7 @@ const UserManagement = () => {
         <div>
           <h1 className="text-3xl font-bold text-primary">User Management</h1>
           <p className="text-muted-foreground mt-1">
-            Manage staff accounts and role assignments
+            Manage staff accounts, roles, and permissions
           </p>
         </div>
         <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
@@ -312,101 +314,120 @@ const UserManagement = () => {
         </Dialog>
       </div>
 
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <CardTitle className="flex items-center gap-2">
-              <UserCog className="h-5 w-5" />
-              Staff Directory
-            </CardTitle>
-            <div className="relative w-64">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Search staff..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-9"
-              />
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent>
-          {isLoading ? (
-            <div className="flex justify-center py-8">
-              <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" />
-            </div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Email</TableHead>
-                  <TableHead>Department</TableHead>
-                  <TableHead>Roles</TableHead>
-                  <TableHead>Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredStaff?.map((member) => (
-                  <TableRow key={member.id}>
-                    <TableCell className="font-medium">
-                      {member.full_name}
-                    </TableCell>
-                    <TableCell>{member.email}</TableCell>
-                    <TableCell>{member.department || '-'}</TableCell>
-                    <TableCell>
-                      <div className="flex flex-wrap gap-1">
-                        {member.roles.map((role) => (
-                          <Badge
-                            key={role}
-                            variant="secondary"
-                            className={`${roleColors[role]} cursor-pointer hover:opacity-80`}
-                            onClick={() =>
-                              removeRoleMutation.mutate({
-                                userId: member.user_id,
-                                role,
-                              })
+      <Tabs defaultValue="staff" className="space-y-6">
+        <TabsList>
+          <TabsTrigger value="staff" className="gap-2">
+            <UserCog className="h-4 w-4" />
+            Staff Management
+          </TabsTrigger>
+          <TabsTrigger value="permissions" className="gap-2">
+            <Settings className="h-4 w-4" />
+            Role Permissions
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="staff">
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle className="flex items-center gap-2">
+                  <UserCog className="h-5 w-5" />
+                  Staff Directory
+                </CardTitle>
+                <div className="relative w-64">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Search staff..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="pl-9"
+                  />
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {isLoading ? (
+                <div className="flex justify-center py-8">
+                  <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Name</TableHead>
+                      <TableHead>Email</TableHead>
+                      <TableHead>Department</TableHead>
+                      <TableHead>Roles</TableHead>
+                      <TableHead>Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredStaff?.map((member) => (
+                      <TableRow key={member.id}>
+                        <TableCell className="font-medium">
+                          {member.full_name}
+                        </TableCell>
+                        <TableCell>{member.email}</TableCell>
+                        <TableCell>{member.department || '-'}</TableCell>
+                        <TableCell>
+                          <div className="flex flex-wrap gap-1">
+                            {member.roles.map((role) => (
+                              <Badge
+                                key={role}
+                                variant="secondary"
+                                className={`${roleColors[role]} cursor-pointer hover:opacity-80`}
+                                onClick={() =>
+                                  removeRoleMutation.mutate({
+                                    userId: member.user_id,
+                                    role,
+                                  })
+                                }
+                              >
+                                {role.replace('_', ' ')} ×
+                              </Badge>
+                            ))}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <Select
+                            onValueChange={(role: AppRole) =>
+                              addRoleMutation.mutate({ userId: member.user_id, role })
                             }
                           >
-                            {role.replace('_', ' ')} ×
-                          </Badge>
-                        ))}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <Select
-                        onValueChange={(role: AppRole) =>
-                          addRoleMutation.mutate({ userId: member.user_id, role })
-                        }
-                      >
-                        <SelectTrigger className="w-32 h-8 text-xs">
-                          <SelectValue placeholder="Add role" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {(['admin', 'doctor', 'nurse', 'receptionist', 'lab_technician', 'pharmacist'] as AppRole[])
-                            .filter((r) => !member.roles.includes(r))
-                            .map((role) => (
-                              <SelectItem key={role} value={role}>
-                                {role.replace('_', ' ')}
-                              </SelectItem>
-                            ))}
-                        </SelectContent>
-                      </Select>
-                    </TableCell>
-                  </TableRow>
-                ))}
-                {filteredStaff?.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
-                      No staff members found
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
+                            <SelectTrigger className="w-32 h-8 text-xs">
+                              <SelectValue placeholder="Add role" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {(['admin', 'doctor', 'nurse', 'receptionist', 'lab_technician', 'pharmacist'] as AppRole[])
+                                .filter((r) => !member.roles.includes(r))
+                                .map((role) => (
+                                  <SelectItem key={role} value={role}>
+                                    {role.replace('_', ' ')}
+                                  </SelectItem>
+                                ))}
+                            </SelectContent>
+                          </Select>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                    {filteredStaff?.length === 0 && (
+                      <TableRow>
+                        <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
+                          No staff members found
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="permissions">
+          <RolePermissionsManager />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 };
