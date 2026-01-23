@@ -15,6 +15,7 @@ import {
   Calendar, 
   DollarSign 
 } from 'lucide-react';
+import PermissionGuard from '@/components/layout/PermissionGuard';
 import {
   BarChart,
   Bar,
@@ -81,10 +82,12 @@ const Reports = () => {
               <SelectItem value="year">This Year</SelectItem>
             </SelectContent>
           </Select>
-          <Button variant="outline">
-            <Download className="h-4 w-4 mr-2" />
-            Export
-          </Button>
+          <PermissionGuard module="reports" action="create">
+            <Button variant="outline">
+              <Download className="h-4 w-4 mr-2" />
+              Export
+            </Button>
+          </PermissionGuard>
         </div>
       </div>
 
@@ -250,27 +253,33 @@ const Reports = () => {
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <Button variant="outline" className="h-auto p-4 flex flex-col items-start gap-2">
-              <Users className="h-5 w-5 text-primary" />
-              <div>
-                <p className="font-medium">Patient Report</p>
-                <p className="text-xs text-muted-foreground">Demographics and visits</p>
-              </div>
-            </Button>
-            <Button variant="outline" className="h-auto p-4 flex flex-col items-start gap-2">
-              <DollarSign className="h-5 w-5 text-primary" />
-              <div>
-                <p className="font-medium">Financial Report</p>
-                <p className="text-xs text-muted-foreground">Revenue and billing</p>
-              </div>
-            </Button>
-            <Button variant="outline" className="h-auto p-4 flex flex-col items-start gap-2">
-              <Calendar className="h-5 w-5 text-primary" />
-              <div>
-                <p className="font-medium">Appointment Report</p>
-                <p className="text-xs text-muted-foreground">Scheduling analytics</p>
-              </div>
-            </Button>
+            <PermissionGuard module="reports" action="create">
+              <Button variant="outline" className="h-auto p-4 flex flex-col items-start gap-2">
+                <Users className="h-5 w-5 text-primary" />
+                <div>
+                  <p className="font-medium">Patient Report</p>
+                  <p className="text-xs text-muted-foreground">Demographics and visits</p>
+                </div>
+              </Button>
+            </PermissionGuard>
+            <PermissionGuard module="reports" action="create">
+              <Button variant="outline" className="h-auto p-4 flex flex-col items-start gap-2">
+                <DollarSign className="h-5 w-5 text-primary" />
+                <div>
+                  <p className="font-medium">Financial Report</p>
+                  <p className="text-xs text-muted-foreground">Revenue and billing</p>
+                </div>
+              </Button>
+            </PermissionGuard>
+            <PermissionGuard module="reports" action="create">
+              <Button variant="outline" className="h-auto p-4 flex flex-col items-start gap-2">
+                <Calendar className="h-5 w-5 text-primary" />
+                <div>
+                  <p className="font-medium">Appointment Report</p>
+                  <p className="text-xs text-muted-foreground">Scheduling analytics</p>
+                </div>
+              </Button>
+            </PermissionGuard>
           </div>
         </CardContent>
       </Card>
