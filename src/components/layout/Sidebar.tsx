@@ -8,7 +8,8 @@ import {
   Pill, 
   BarChart3,
   Heart,
-  ChevronDown
+  ChevronDown,
+  Settings
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
@@ -24,9 +25,13 @@ const navItems = [
   { icon: BarChart3, label: 'Reports', href: '/reports' },
 ];
 
+const adminItems = [
+  { icon: Settings, label: 'User Management', href: '/admin/users' },
+];
+
 const Sidebar = () => {
   const location = useLocation();
-  const { profile, roles } = useAuth();
+  const { profile, roles, isAdmin } = useAuth();
 
   const getInitials = (name: string) => {
     return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
@@ -56,7 +61,7 @@ const Sidebar = () => {
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 px-3 py-4">
+      <nav className="flex-1 px-3 py-4 overflow-y-auto">
         <p className="text-xs font-medium text-primary-foreground/50 uppercase tracking-wider mb-3 px-3">
           Navigation
         </p>
@@ -81,6 +86,36 @@ const Sidebar = () => {
             );
           })}
         </ul>
+
+        {/* Admin Section */}
+        {isAdmin && (
+          <>
+            <p className="text-xs font-medium text-primary-foreground/50 uppercase tracking-wider mb-3 px-3 mt-6">
+              Administration
+            </p>
+            <ul className="space-y-1">
+              {adminItems.map((item) => {
+                const isActive = location.pathname === item.href;
+                return (
+                  <li key={item.href}>
+                    <Link
+                      to={item.href}
+                      className={cn(
+                        'flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors',
+                        isActive 
+                          ? 'bg-white text-primary font-medium' 
+                          : 'hover:bg-white/10 text-primary-foreground'
+                      )}
+                    >
+                      <item.icon className="h-5 w-5" />
+                      <span>{item.label}</span>
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+          </>
+        )}
       </nav>
 
       {/* User Profile */}
