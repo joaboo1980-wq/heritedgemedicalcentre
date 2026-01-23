@@ -33,6 +33,7 @@ import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import { Plus, Search, FlaskConical, Clock, CheckCircle, AlertCircle } from 'lucide-react';
 import { format } from 'date-fns';
+import PermissionGuard from '@/components/layout/PermissionGuard';
 
 interface LabOrder {
   id: string;
@@ -220,11 +221,12 @@ const Laboratory = () => {
           <h1 className="text-3xl font-bold text-primary">Laboratory</h1>
           <p className="text-muted-foreground mt-1">Manage lab tests and results</p>
         </div>
-        <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-          <DialogTrigger asChild>
-            <Button><Plus className="h-4 w-4 mr-2" />New Lab Order</Button>
-          </DialogTrigger>
-          <DialogContent>
+        <PermissionGuard module="laboratory" action="create">
+          <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+            <DialogTrigger asChild>
+              <Button><Plus className="h-4 w-4 mr-2" />New Lab Order</Button>
+            </DialogTrigger>
+            <DialogContent>
             <DialogHeader>
               <DialogTitle>Create Lab Order</DialogTitle>
             </DialogHeader>
@@ -268,6 +270,7 @@ const Laboratory = () => {
             </form>
           </DialogContent>
         </Dialog>
+      </PermissionGuard>
       </div>
 
       {/* Stats */}

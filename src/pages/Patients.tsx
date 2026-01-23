@@ -32,6 +32,7 @@ import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import { Plus, Search, Eye, Edit, Users } from 'lucide-react';
 import { format } from 'date-fns';
+import PermissionGuard from '@/components/layout/PermissionGuard';
 
 interface Patient {
   id: string;
@@ -163,14 +164,15 @@ const Patients = () => {
             Manage patient records and information
           </p>
         </div>
-        <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-          <DialogTrigger asChild>
-            <Button>
-              <Plus className="h-4 w-4 mr-2" />
-              Register Patient
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+        <PermissionGuard module="patients" action="create">
+          <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+            <DialogTrigger asChild>
+              <Button>
+                <Plus className="h-4 w-4 mr-2" />
+                Register Patient
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Register New Patient</DialogTitle>
             </DialogHeader>
@@ -343,6 +345,7 @@ const Patients = () => {
             </form>
           </DialogContent>
         </Dialog>
+      </PermissionGuard>
       </div>
 
       {/* Stats */}
@@ -431,9 +434,11 @@ const Patients = () => {
                         >
                           <Eye className="h-4 w-4" />
                         </Button>
-                        <Button variant="ghost" size="icon">
-                          <Edit className="h-4 w-4" />
-                        </Button>
+                        <PermissionGuard module="patients" action="edit">
+                          <Button variant="ghost" size="icon">
+                            <Edit className="h-4 w-4" />
+                          </Button>
+                        </PermissionGuard>
                       </div>
                     </TableCell>
                   </TableRow>

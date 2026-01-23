@@ -25,6 +25,7 @@ import { Calendar } from '@/components/ui/calendar';
 import { toast } from 'sonner';
 import { Plus, Clock, User, Calendar as CalendarIcon, CheckCircle, XCircle, AlertCircle } from 'lucide-react';
 import { format, isSameDay, parseISO } from 'date-fns';
+import PermissionGuard from '@/components/layout/PermissionGuard';
 
 interface Appointment {
   id: string;
@@ -233,14 +234,15 @@ const Appointments = () => {
             Schedule and manage patient appointments
           </p>
         </div>
-        <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-          <DialogTrigger asChild>
-            <Button>
-              <Plus className="h-4 w-4 mr-2" />
-              New Appointment
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="sm:max-w-md">
+        <PermissionGuard module="appointments" action="create">
+          <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+            <DialogTrigger asChild>
+              <Button>
+                <Plus className="h-4 w-4 mr-2" />
+                New Appointment
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-md">
             <DialogHeader>
               <DialogTitle>Schedule Appointment</DialogTitle>
             </DialogHeader>
@@ -372,6 +374,7 @@ const Appointments = () => {
             </form>
           </DialogContent>
         </Dialog>
+      </PermissionGuard>
       </div>
 
       {/* Stats */}
