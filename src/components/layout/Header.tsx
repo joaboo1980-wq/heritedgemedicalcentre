@@ -1,4 +1,4 @@
-import { Bell, Moon, Search } from 'lucide-react';
+import { Moon, Search } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -13,6 +13,8 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
+import NotificationDropdown from '@/components/notifications/NotificationDropdown';
+import heritageLogo from '@/assets/heritage-logo.jpg';
 
 const Header = () => {
   const { profile, signOut } = useAuth();
@@ -33,9 +35,11 @@ const Header = () => {
       {/* Left - Title & Search */}
       <div className="flex items-center gap-6">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-primary flex items-center justify-center text-primary-foreground font-bold text-sm">
-            HM
-          </div>
+          <img 
+            src={heritageLogo} 
+            alt="Heritage Medical Center" 
+            className="h-10 w-auto rounded"
+          />
           <div>
             <h1 className="font-semibold text-foreground">HERITAGE MEDICAL CENTER</h1>
             <p className="text-xs text-muted-foreground">Management System</p>
@@ -53,12 +57,7 @@ const Header = () => {
 
       {/* Right - Actions */}
       <div className="flex items-center gap-3">
-        <Button variant="ghost" size="icon" className="relative">
-          <Bell className="h-5 w-5 text-muted-foreground" />
-          <span className="absolute -top-1 -right-1 h-5 w-5 rounded-full bg-destructive text-[10px] text-destructive-foreground flex items-center justify-center font-medium">
-            3
-          </span>
-        </Button>
+        <NotificationDropdown />
         
         <Button variant="ghost" size="icon">
           <Moon className="h-5 w-5 text-muted-foreground" />
