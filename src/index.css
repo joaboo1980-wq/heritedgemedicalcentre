@@ -7,25 +7,26 @@
 @layer base {
   :root {
     --background: 0 0% 100%;
-    --foreground: 215 25% 15%;
+    --foreground: 210 50% 20%;
     
     --card: 0 0% 100%;
-    --card-foreground: 215 25% 15%;
+    --card-foreground: 210 50% 20%;
     
     --popover: 0 0% 100%;
-    --popover-foreground: 215 25% 15%;
+    --popover-foreground: 210 50% 20%;
     
-    --primary: 199 89% 48%;
+    /* Dark navy blue from Heritage logo */
+    --primary: 205 60% 28%;
     --primary-foreground: 0 0% 100%;
     
-    --secondary: 210 40% 96%;
-    --secondary-foreground: 215 25% 27%;
+    --secondary: 210 30% 95%;
+    --secondary-foreground: 205 60% 28%;
     
-    --muted: 210 40% 96%;
-    --muted-foreground: 215 16% 47%;
+    --muted: 210 30% 96%;
+    --muted-foreground: 210 20% 50%;
     
-    --accent: 210 40% 96%;
-    --accent-foreground: 215 25% 27%;
+    --accent: 95 35% 45%;
+    --accent-foreground: 0 0% 100%;
     
     --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 100%;
@@ -36,46 +37,47 @@
     --warning: 38 92% 50%;
     --warning-foreground: 0 0% 100%;
     
-    --border: 214 32% 91%;
-    --input: 214 32% 91%;
-    --ring: 199 89% 48%;
+    --border: 210 25% 88%;
+    --input: 210 25% 88%;
+    --ring: 205 60% 28%;
     
-    --sidebar-background: 199 89% 48%;
+    --sidebar-background: 205 60% 28%;
     --sidebar-foreground: 0 0% 100%;
     --sidebar-primary: 0 0% 100%;
-    --sidebar-primary-foreground: 199 89% 48%;
-    --sidebar-accent: 199 89% 42%;
+    --sidebar-primary-foreground: 205 60% 28%;
+    --sidebar-accent: 205 60% 22%;
     --sidebar-accent-foreground: 0 0% 100%;
-    --sidebar-border: 199 89% 42%;
+    --sidebar-border: 205 60% 22%;
     --sidebar-ring: 0 0% 100%;
     
     --radius: 0.5rem;
   }
 
   .dark {
-    --background: 222 47% 11%;
-    --foreground: 210 40% 98%;
+    --background: 210 50% 8%;
+    --foreground: 210 30% 95%;
     
-    --card: 222 47% 14%;
-    --card-foreground: 210 40% 98%;
+    --card: 210 50% 12%;
+    --card-foreground: 210 30% 95%;
     
-    --popover: 222 47% 14%;
-    --popover-foreground: 210 40% 98%;
+    --popover: 210 50% 12%;
+    --popover-foreground: 210 30% 95%;
     
-    --primary: 199 89% 48%;
+    /* Dark navy blue from Heritage logo */
+    --primary: 205 60% 40%;
     --primary-foreground: 0 0% 100%;
     
-    --secondary: 217 33% 17%;
-    --secondary-foreground: 210 40% 98%;
+    --secondary: 210 40% 18%;
+    --secondary-foreground: 210 30% 95%;
     
-    --muted: 217 33% 17%;
-    --muted-foreground: 215 20% 65%;
+    --muted: 210 40% 18%;
+    --muted-foreground: 210 20% 65%;
     
-    --accent: 217 33% 17%;
-    --accent-foreground: 210 40% 98%;
+    --accent: 95 35% 40%;
+    --accent-foreground: 0 0% 100%;
     
     --destructive: 0 62% 30%;
-    --destructive-foreground: 210 40% 98%;
+    --destructive-foreground: 210 30% 95%;
     
     --success: 142 71% 35%;
     --success-foreground: 0 0% 100%;
@@ -83,18 +85,18 @@
     --warning: 38 92% 40%;
     --warning-foreground: 0 0% 100%;
     
-    --border: 217 33% 22%;
-    --input: 217 33% 22%;
-    --ring: 199 89% 48%;
+    --border: 210 40% 22%;
+    --input: 210 40% 22%;
+    --ring: 205 60% 40%;
     
-    --sidebar-background: 222 47% 14%;
-    --sidebar-foreground: 210 40% 98%;
-    --sidebar-primary: 199 89% 48%;
+    --sidebar-background: 210 50% 12%;
+    --sidebar-foreground: 210 30% 95%;
+    --sidebar-primary: 205 60% 40%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 217 33% 17%;
-    --sidebar-accent-foreground: 210 40% 98%;
-    --sidebar-border: 217 33% 22%;
-    --sidebar-ring: 199 89% 48%;
+    --sidebar-accent: 210 40% 18%;
+    --sidebar-accent-foreground: 210 30% 95%;
+    --sidebar-border: 210 40% 22%;
+    --sidebar-ring: 205 60% 40%;
   }
 }
 
