@@ -1,5 +1,7 @@
-import { Users, Calendar, DollarSign, Bed } from 'lucide-react';
+import { Users, Calendar, DollarSign, FlaskConical, PackageX, Clock } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Skeleton } from '@/components/ui/skeleton';
 import StatsCard from '@/components/dashboard/StatsCard';
 import { 
   LineChart, 
@@ -14,26 +16,66 @@ import {
   Cell,
   Legend
 } from 'recharts';
+import { format, formatDistanceToNow } from 'date-fns';
+import {
+  useDashboardStats,
+  usePatientTrend,
+  useDepartmentDistribution,
+  useRecentAppointments,
+  usePendingLabOrders,
+} from '@/hooks/useDashboard';
 
-const patientTrendData = [
-  { month: 'Jul', patients: 2500 },
-  { month: 'Aug', patients: 2200 },
-  { month: 'Sep', patients: 2800 },
-  { month: 'Oct', patients: 2100 },
-  { month: 'Nov', patients: 2400 },
-  { month: 'Dec', patients: 2600 },
-  { month: 'Jan', patients: 2900 },
-];
-
-const departmentData = [
-  { name: 'Cardiology', value: 30, color: '#0EA5E9' },
-  { name: 'Neurology', value: 25, color: '#22C55E' },
-  { name: 'Orthopedics', value: 20, color: '#F59E0B' },
-  { name: 'Pediatrics', value: 15, color: '#8B5CF6' },
-  { name: 'Others', value: 10, color: '#6B7280' },
-];
+const formatCurrency = (value: number) => {
+  if (value >= 1000000) {
+    return `UGX ${(value / 1000000).toFixed(1)}M`;
+  }
+  if (value >= 1000) {
+    return `UGX ${(value / 1000).toFixed(0)}K`;
+  }
+  return `UGX ${value.toLocaleString()}`;
+};
 
 const Dashboard = () => {
+  const { data: stats, isLoading: statsLoading } = useDashboardStats();
+  const { data: patientTrend, isLoading: trendLoading } = usePatientTrend();
+  const { data: departmentData, isLoading: deptLoading } = useDepartmentDistribution();
+  const { data: recentAppointments, isLoading: apptLoading } = useRecentAppointments();
+  const { data: pendingLabOrders, isLoading: labLoading } = usePendingLabOrders();
+
+  const getChangeString = (change: number, prefix = '') => {
+    if (change === 0) return 'No change from last month';
+    const sign = change > 0 ? '+' : '';
+    return `${sign}${change}%${prefix} from last month`;
+  };
+
+  const getStatusColor = (status: string) => {
+    switch (status.toLowerCase()) {
+      case 'scheduled':
+        return 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400';
+      case 'completed':
+        return 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400';
+      case 'cancelled':
+        return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400';
+      case 'in_progress':
+        return 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400';
+      case 'pending':
+        return 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400';
+      default:
+        return 'bg-gray-100 text-gray-700 dark:bg-gray-900/30 dark:text-gray-400';
+    }
+  };
+
+  const getPriorityColor = (priority: string) => {
+    switch (priority.toLowerCase()) {
+      case 'urgent':
+        return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400';
+      case 'high':
+        return 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400';
+      default:
+        return 'bg-gray-100 text-gray-700 dark:bg-gray-900/30 dark:text-gray-400';
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Page Header */}
@@ -45,34 +87,54 @@ const Dashboard = () => {
       </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
         <StatsCard
           title="Total Patients"
-          value="2,847"
-          change="+12% from last month"
-          changeType="positive"
+          value={stats?.totalPatients?.toLocaleString() || '0'}
+          change={getChangeString(stats?.patientChange || 0)}
+          changeType={stats?.patientChange && stats.patientChange > 0 ? 'positive' : stats?.patientChange && stats.patientChange < 0 ? 'negative' : 'neutral'}
           icon={Users}
+          isLoading={statsLoading}
         />
         <StatsCard
           title="Today's Appointments"
-          value="47"
-          change="+3% from last month"
-          changeType="positive"
+          value={stats?.todayAppointments?.toString() || '0'}
+          change={getChangeString(stats?.appointmentChange || 0)}
+          changeType={stats?.appointmentChange && stats.appointmentChange > 0 ? 'positive' : stats?.appointmentChange && stats.appointmentChange < 0 ? 'negative' : 'neutral'}
           icon={Calendar}
+          isLoading={statsLoading}
         />
         <StatsCard
           title="Revenue (Month)"
-          value="UGX 89,432,000"
-          change="+8% from last month"
-          changeType="positive"
+          value={formatCurrency(stats?.monthlyRevenue || 0)}
+          change={getChangeString(stats?.revenueChange || 0)}
+          changeType={stats?.revenueChange && stats.revenueChange > 0 ? 'positive' : stats?.revenueChange && stats.revenueChange < 0 ? 'negative' : 'neutral'}
           icon={DollarSign}
+          isLoading={statsLoading}
         />
         <StatsCard
-          title="Bed Occupancy"
-          value="78%"
-          change="-2% from last month"
-          changeType="negative"
-          icon={Bed}
+          title="Pending Lab Orders"
+          value={stats?.pendingLabOrders?.toString() || '0'}
+          change="Awaiting results"
+          changeType="neutral"
+          icon={FlaskConical}
+          isLoading={statsLoading}
+        />
+        <StatsCard
+          title="Low Stock Items"
+          value={stats?.lowStockMedications?.toString() || '0'}
+          change="Need reorder"
+          changeType={stats?.lowStockMedications && stats.lowStockMedications > 0 ? 'negative' : 'neutral'}
+          icon={PackageX}
+          isLoading={statsLoading}
+        />
+        <StatsCard
+          title="Active Today"
+          value={stats?.todayAppointments?.toString() || '0'}
+          change="In progress"
+          changeType="neutral"
+          icon={Clock}
+          isLoading={statsLoading}
         />
       </div>
 
@@ -90,35 +152,41 @@ const Dashboard = () => {
           </CardHeader>
           <CardContent>
             <div className="h-80">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={patientTrendData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                  <XAxis 
-                    dataKey="month" 
-                    stroke="hsl(var(--muted-foreground))"
-                    fontSize={12}
-                  />
-                  <YAxis 
-                    stroke="hsl(var(--muted-foreground))"
-                    fontSize={12}
-                  />
-                  <Tooltip 
-                    contentStyle={{
-                      backgroundColor: 'hsl(var(--card))',
-                      border: '1px solid hsl(var(--border))',
-                      borderRadius: '8px',
-                    }}
-                  />
-                  <Line 
-                    type="monotone" 
-                    dataKey="patients" 
-                    stroke="hsl(var(--primary))" 
-                    strokeWidth={3}
-                    dot={{ fill: 'hsl(var(--primary))', strokeWidth: 2 }}
-                    activeDot={{ r: 6 }}
-                  />
-                </LineChart>
-              </ResponsiveContainer>
+              {trendLoading ? (
+                <div className="flex items-center justify-center h-full">
+                  <Skeleton className="w-full h-full" />
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={patientTrend || []}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                    <XAxis 
+                      dataKey="month" 
+                      stroke="hsl(var(--muted-foreground))"
+                      fontSize={12}
+                    />
+                    <YAxis 
+                      stroke="hsl(var(--muted-foreground))"
+                      fontSize={12}
+                    />
+                    <Tooltip 
+                      contentStyle={{
+                        backgroundColor: 'hsl(var(--card))',
+                        border: '1px solid hsl(var(--border))',
+                        borderRadius: '8px',
+                      }}
+                    />
+                    <Line 
+                      type="monotone" 
+                      dataKey="patients" 
+                      stroke="hsl(var(--primary))" 
+                      strokeWidth={3}
+                      dot={{ fill: 'hsl(var(--primary))', strokeWidth: 2 }}
+                      activeDot={{ r: 6 }}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -130,43 +198,153 @@ const Dashboard = () => {
               Department Distribution
             </CardTitle>
             <p className="text-sm text-muted-foreground">
-              Patient distribution by department
+              Appointments by department
             </p>
           </CardHeader>
           <CardContent>
             <div className="h-80">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={departmentData}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={60}
-                    outerRadius={100}
-                    paddingAngle={2}
-                    dataKey="value"
-                  >
-                    {departmentData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <Legend 
-                    verticalAlign="bottom" 
-                    height={36}
-                    formatter={(value) => (
-                      <span className="text-sm text-muted-foreground">{value}</span>
-                    )}
-                  />
-                  <Tooltip 
-                    contentStyle={{
-                      backgroundColor: 'hsl(var(--card))',
-                      border: '1px solid hsl(var(--border))',
-                      borderRadius: '8px',
-                    }}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
+              {deptLoading ? (
+                <div className="flex items-center justify-center h-full">
+                  <Skeleton className="w-full h-full rounded-full" />
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={departmentData || []}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={60}
+                      outerRadius={100}
+                      paddingAngle={2}
+                      dataKey="value"
+                    >
+                      {(departmentData || []).map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.color} />
+                      ))}
+                    </Pie>
+                    <Legend 
+                      verticalAlign="bottom" 
+                      height={36}
+                      formatter={(value) => (
+                        <span className="text-sm text-muted-foreground">{value}</span>
+                      )}
+                    />
+                    <Tooltip 
+                      contentStyle={{
+                        backgroundColor: 'hsl(var(--card))',
+                        border: '1px solid hsl(var(--border))',
+                        borderRadius: '8px',
+                      }}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              )}
             </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Recent Activity */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Upcoming Appointments */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg font-semibold text-foreground">
+              Upcoming Appointments
+            </CardTitle>
+            <p className="text-sm text-muted-foreground">
+              Next scheduled appointments
+            </p>
+          </CardHeader>
+          <CardContent>
+            {apptLoading ? (
+              <div className="space-y-3">
+                {[1, 2, 3].map((i) => (
+                  <Skeleton key={i} className="h-16 w-full" />
+                ))}
+              </div>
+            ) : recentAppointments && recentAppointments.length > 0 ? (
+              <div className="space-y-3">
+                {recentAppointments.map((apt) => (
+                  <div
+                    key={apt.id}
+                    className="flex items-center justify-between p-3 rounded-lg bg-muted/50"
+                  >
+                    <div>
+                      <p className="font-medium text-foreground">{apt.patient_name}</p>
+                      <p className="text-sm text-muted-foreground">
+                        {format(new Date(apt.appointment_date), 'MMM d, yyyy')} at {apt.appointment_time}
+                      </p>
+                      {apt.department && (
+                        <p className="text-xs text-muted-foreground">{apt.department}</p>
+                      )}
+                    </div>
+                    <Badge className={getStatusColor(apt.status)}>
+                      {apt.status}
+                    </Badge>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-8 text-muted-foreground">
+                <Calendar className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                <p>No upcoming appointments</p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Pending Lab Orders */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg font-semibold text-foreground">
+              Pending Lab Orders
+            </CardTitle>
+            <p className="text-sm text-muted-foreground">
+              Lab tests awaiting results
+            </p>
+          </CardHeader>
+          <CardContent>
+            {labLoading ? (
+              <div className="space-y-3">
+                {[1, 2, 3].map((i) => (
+                  <Skeleton key={i} className="h-16 w-full" />
+                ))}
+              </div>
+            ) : pendingLabOrders && pendingLabOrders.length > 0 ? (
+              <div className="space-y-3">
+                {pendingLabOrders.map((order) => (
+                  <div
+                    key={order.id}
+                    className="flex items-center justify-between p-3 rounded-lg bg-muted/50"
+                  >
+                    <div>
+                      <p className="font-medium text-foreground">{order.patient_name}</p>
+                      <p className="text-sm text-muted-foreground">{order.test_name}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {formatDistanceToNow(new Date(order.created_at), { addSuffix: true })}
+                      </p>
+                    </div>
+                    <div className="flex flex-col items-end gap-1">
+                      <Badge className={getStatusColor(order.status)}>
+                        {order.status}
+                      </Badge>
+                      {order.priority !== 'normal' && (
+                        <Badge className={getPriorityColor(order.priority)}>
+                          {order.priority}
+                        </Badge>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-8 text-muted-foreground">
+                <FlaskConical className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                <p>No pending lab orders</p>
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>

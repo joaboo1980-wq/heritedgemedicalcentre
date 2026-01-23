@@ -1,14 +1,16 @@
 import { LucideIcon } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
+import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 
 interface StatsCardProps {
   title: string;
   value: string;
   change?: string;
-  changeType?: 'positive' | 'negative';
+  changeType?: 'positive' | 'negative' | 'neutral';
   icon: LucideIcon;
   iconColor?: string;
+  isLoading?: boolean;
 }
 
 const StatsCard = ({ 
@@ -17,8 +19,26 @@ const StatsCard = ({
   change, 
   changeType = 'positive', 
   icon: Icon,
-  iconColor = 'text-primary'
+  iconColor = 'text-primary',
+  isLoading = false
 }: StatsCardProps) => {
+  if (isLoading) {
+    return (
+      <Card className="bg-card">
+        <CardContent className="p-6">
+          <div className="flex items-start justify-between">
+            <div className="space-y-2">
+              <Skeleton className="h-4 w-24" />
+              <Skeleton className="h-8 w-32" />
+              <Skeleton className="h-4 w-28" />
+            </div>
+            <Skeleton className="h-12 w-12 rounded-lg" />
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
     <Card className="bg-card">
       <CardContent className="p-6">
@@ -29,7 +49,8 @@ const StatsCard = ({
             {change && (
               <p className={cn(
                 "text-sm mt-2 font-medium",
-                changeType === 'positive' ? 'text-green-500' : 'text-red-500'
+                changeType === 'positive' ? 'text-green-500' : 
+                changeType === 'negative' ? 'text-red-500' : 'text-muted-foreground'
               )}>
                 {change}
               </p>
