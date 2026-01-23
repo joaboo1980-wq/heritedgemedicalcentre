@@ -32,6 +32,7 @@ import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import { Plus, Search, Receipt, CreditCard, CheckCircle, Clock, DollarSign, Eye } from 'lucide-react';
 import { format } from 'date-fns';
+import PermissionGuard from '@/components/layout/PermissionGuard';
 
 interface Invoice {
   id: string;
@@ -264,11 +265,12 @@ const Billing = () => {
           <h1 className="text-3xl font-bold text-primary">Billing</h1>
           <p className="text-muted-foreground mt-1">Manage invoices and payments</p>
         </div>
-        <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-          <DialogTrigger asChild>
-            <Button><Plus className="h-4 w-4 mr-2" />Create Invoice</Button>
-          </DialogTrigger>
-          <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+        <PermissionGuard module="billing" action="create">
+          <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+            <DialogTrigger asChild>
+              <Button><Plus className="h-4 w-4 mr-2" />Create Invoice</Button>
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Create Invoice</DialogTitle>
             </DialogHeader>
@@ -339,6 +341,7 @@ const Billing = () => {
             </form>
           </DialogContent>
         </Dialog>
+      </PermissionGuard>
       </div>
 
       {/* Stats */}

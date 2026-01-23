@@ -31,6 +31,7 @@ import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import { Plus, Search, Pill, Package, AlertTriangle, TrendingDown, Edit } from 'lucide-react';
 import { format } from 'date-fns';
+import PermissionGuard from '@/components/layout/PermissionGuard';
 
 interface Medication {
   id: string;
@@ -170,14 +171,15 @@ const Pharmacy = () => {
           <h1 className="text-3xl font-bold text-primary">Pharmacy</h1>
           <p className="text-muted-foreground mt-1">Manage medications and inventory</p>
         </div>
-        <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-          <DialogTrigger asChild>
-            <Button><Plus className="h-4 w-4 mr-2" />Add Medication</Button>
-          </DialogTrigger>
-          <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>Add New Medication</DialogTitle>
-            </DialogHeader>
+        <PermissionGuard module="pharmacy" action="create">
+          <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+            <DialogTrigger asChild>
+              <Button><Plus className="h-4 w-4 mr-2" />Add Medication</Button>
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle>Add New Medication</DialogTitle>
+              </DialogHeader>
             <form onSubmit={(e) => { e.preventDefault(); createMedicationMutation.mutate(newMedication); }} className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
@@ -250,6 +252,7 @@ const Pharmacy = () => {
             </form>
           </DialogContent>
         </Dialog>
+      </PermissionGuard>
       </div>
 
       {/* Stats */}
@@ -338,23 +341,27 @@ const Pharmacy = () => {
                       </TableCell>
                       <TableCell>
                         <div className="flex gap-2">
-                          <Button size="sm" variant="ghost" onClick={() => setEditingMedication(med)}>
-                            <Edit className="h-4 w-4" />
-                          </Button>
-                          <Input
-                            type="number"
-                            className="w-20 h-8 text-xs"
-                            placeholder="Qty"
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
-                                const value = parseInt((e.target as HTMLInputElement).value);
-                                if (!isNaN(value)) {
-                                  updateStockMutation.mutate({ id: med.id, quantity: med.stock_quantity + value });
-                                  (e.target as HTMLInputElement).value = '';
+                          <PermissionGuard module="pharmacy" action="edit">
+                            <Button size="sm" variant="ghost" onClick={() => setEditingMedication(med)}>
+                              <Edit className="h-4 w-4" />
+                            </Button>
+                          </PermissionGuard>
+                          <PermissionGuard module="pharmacy" action="edit">
+                            <Input
+                              type="number"
+                              className="w-20 h-8 text-xs"
+                              placeholder="Qty"
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  const value = parseInt((e.target as HTMLInputElement).value);
+                                  if (!isNaN(value)) {
+                                    updateStockMutation.mutate({ id: med.id, quantity: med.stock_quantity + value });
+                                    (e.target as HTMLInputElement).value = '';
+                                  }
                                 }
-                              }
-                            }}
-                          />
+                              }}
+                            />
+                          </PermissionGuard>
                         </div>
                       </TableCell>
                     </TableRow>

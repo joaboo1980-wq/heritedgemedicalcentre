@@ -4,6 +4,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
+import ProtectedRoute from "@/components/layout/ProtectedRoute";
 
 import Auth from "./pages/Auth";
 import DashboardLayout from "./components/layout/DashboardLayout";
@@ -31,15 +32,51 @@ const App = () => (
             <Route path="/" element={<Navigate to="/auth" replace />} />
             <Route path="/auth" element={<Auth />} />
             <Route element={<DashboardLayout />}>
-              <Route path="/dashboard" element={<Dashboard />} />
-              <Route path="/patients" element={<Patients />} />
-              <Route path="/appointments" element={<Appointments />} />
-              <Route path="/staff" element={<Staff />} />
-              <Route path="/laboratory" element={<Laboratory />} />
-              <Route path="/pharmacy" element={<Pharmacy />} />
-              <Route path="/reports" element={<Reports />} />
-              <Route path="/billing" element={<Billing />} />
-              <Route path="/admin/users" element={<UserManagement />} />
+              <Route path="/dashboard" element={
+                <ProtectedRoute module="dashboard">
+                  <Dashboard />
+                </ProtectedRoute>
+              } />
+              <Route path="/patients" element={
+                <ProtectedRoute module="patients">
+                  <Patients />
+                </ProtectedRoute>
+              } />
+              <Route path="/appointments" element={
+                <ProtectedRoute module="appointments">
+                  <Appointments />
+                </ProtectedRoute>
+              } />
+              <Route path="/staff" element={
+                <ProtectedRoute module="staff">
+                  <Staff />
+                </ProtectedRoute>
+              } />
+              <Route path="/laboratory" element={
+                <ProtectedRoute module="laboratory">
+                  <Laboratory />
+                </ProtectedRoute>
+              } />
+              <Route path="/pharmacy" element={
+                <ProtectedRoute module="pharmacy">
+                  <Pharmacy />
+                </ProtectedRoute>
+              } />
+              <Route path="/reports" element={
+                <ProtectedRoute module="reports">
+                  <Reports />
+                </ProtectedRoute>
+              } />
+              <Route path="/billing" element={
+                <ProtectedRoute module="billing">
+                  <Billing />
+                </ProtectedRoute>
+              } />
+              <Route path="/admin/users" element={
+                <ProtectedRoute module="user_management">
+                  <UserManagement />
+                </ProtectedRoute>
+              } />
             </Route>
             <Route path="*" element={<NotFound />} />
           </Routes>
