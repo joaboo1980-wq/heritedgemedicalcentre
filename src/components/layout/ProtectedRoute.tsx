@@ -26,10 +26,11 @@ const ProtectedRoute = ({
   action = 'view',
   fallback 
 }: ProtectedRouteProps) => {
-  const { loading } = useAuth();
+  const { loading, roles } = useAuth();
   const { hasPermission, isLoading } = usePermissions();
 
-  if (loading || isLoading) {
+  // Wait for both auth loading and roles to be loaded
+  if (loading || isLoading || roles.length === 0) {
     return (
       <div className="flex justify-center items-center h-[60vh]">
         <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" />
