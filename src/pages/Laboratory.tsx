@@ -31,7 +31,7 @@ import {
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
-import { Plus, Search, FlaskConical, Clock, CheckCircle, AlertCircle } from 'lucide-react';
+import { Plus, Search, FlaskConical, Clock, CheckCircle, AlertCircle, Download } from 'lucide-react';
 import { format } from 'date-fns';
 import PermissionGuard from '@/components/layout/PermissionGuard';
 
@@ -84,6 +84,7 @@ const Laboratory = () => {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState('');
+  const [filterTab, setFilterTab] = useState<'all' | 'pending' | 'completed' | 'sample'>('all');
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isResultDialogOpen, setIsResultDialogOpen] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<LabOrder | null>(null);
@@ -201,76 +202,121 @@ const Laboratory = () => {
     onError: (error: Error) => toast.error(error.message),
   });
 
-  const filteredOrders = labOrders?.filter(
-    (o) =>
+  const filteredOrders = labOrders?.filter((o) => {
+    const matchesSearch = 
       o.order_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
       o.patients?.first_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       o.patients?.last_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      o.lab_tests?.test_name.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+      o.lab_tests?.test_name.toLowerCase().includes(searchTerm.toLowerCase());
+
+    if (!matchesSearch) return false;
+
+    if (filterTab === 'pending') return o.status === 'pending';
+    if (filterTab === 'completed') return o.status === 'completed';
+    if (filterTab === 'sample') return o.status === 'sample_collected';
+    return true;
+  });
 
   const pendingCount = labOrders?.filter((o) => o.status === 'pending').length || 0;
   const processingCount = labOrders?.filter((o) => o.status === 'processing' || o.status === 'sample_collected').length || 0;
   const completedCount = labOrders?.filter((o) => o.status === 'completed').length || 0;
   const abnormalCount = labOrders?.filter((o) => o.is_abnormal).length || 0;
 
+  const handleExport = () => {
+    // Convert filtered orders to CSV
+    const headers = ['Test ID', 'Patient', 'Test Name', 'Requested By', 'Date', 'Status'];
+    const rows = filteredOrders?.map((o) => [
+      o.order_number,
+      `${o.patients?.first_name} ${o.patients?.last_name}`,
+      o.lab_tests?.test_name || '',
+      'N/A',
+      format(new Date(o.created_at), 'MMM dd, yyyy'),
+      o.status.replace('_', ' '),
+    ]) || [];
+
+    const csv = [
+      headers.join(','),
+      ...rows.map((row) => row.map((cell) => `"${cell}"`).join(',')),
+    ].join('\n');
+
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `lab-tests-${format(new Date(), 'yyyy-MM-dd')}.csv`;
+    a.click();
+    window.URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="space-y-6">
+      {/* Breadcrumb */}
+      <div className="text-sm text-muted-foreground">
+        <span>RURAL HEALTH TEAM UGANDA</span>
+        <span className="mx-2">›</span>
+        <span className="text-foreground font-medium">Laboratory</span>
+      </div>
+
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-primary">Laboratory</h1>
-          <p className="text-muted-foreground mt-1">Manage lab tests and results</p>
+          <h1 className="text-3xl font-bold text-primary">Laboratory Management</h1>
         </div>
-        <PermissionGuard module="laboratory" action="create">
-          <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-            <DialogTrigger asChild>
-              <Button><Plus className="h-4 w-4 mr-2" />New Lab Order</Button>
-            </DialogTrigger>
-            <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Create Lab Order</DialogTitle>
-            </DialogHeader>
-            <form onSubmit={(e) => { e.preventDefault(); createOrderMutation.mutate(newOrder); }} className="space-y-4">
-              <div className="space-y-2">
-                <Label>Patient *</Label>
-                <Select value={newOrder.patient_id} onValueChange={(v) => setNewOrder({ ...newOrder, patient_id: v })}>
-                  <SelectTrigger><SelectValue placeholder="Select patient" /></SelectTrigger>
-                  <SelectContent>
-                    {patients?.map((p) => (
-                      <SelectItem key={p.id} value={p.id}>{p.first_name} {p.last_name} ({p.patient_number})</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>Test *</Label>
-                <Select value={newOrder.test_id} onValueChange={(v) => setNewOrder({ ...newOrder, test_id: v })}>
-                  <SelectTrigger><SelectValue placeholder="Select test" /></SelectTrigger>
-                  <SelectContent>
-                    {labTests?.map((t) => (
-                      <SelectItem key={t.id} value={t.id}>{t.test_name} ({t.test_code})</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>Priority</Label>
-                <Select value={newOrder.priority} onValueChange={(v) => setNewOrder({ ...newOrder, priority: v })}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="normal">Normal</SelectItem>
-                    <SelectItem value="urgent">Urgent</SelectItem>
-                    <SelectItem value="stat">STAT</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <Button type="submit" className="w-full" disabled={createOrderMutation.isPending}>
-                {createOrderMutation.isPending ? 'Creating...' : 'Create Order'}
-              </Button>
-            </form>
-          </DialogContent>
-        </Dialog>
-      </PermissionGuard>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={handleExport}>
+            <Download className="h-4 w-4 mr-2" />
+            Export
+          </Button>
+          <PermissionGuard module="laboratory" action="create">
+            <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+              <DialogTrigger asChild>
+                <Button size="sm"><Plus className="h-4 w-4 mr-2" />New Lab Test</Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Create Lab Order</DialogTitle>
+                </DialogHeader>
+                <form onSubmit={(e) => { e.preventDefault(); createOrderMutation.mutate(newOrder); }} className="space-y-4">
+                  <div className="space-y-2">
+                    <Label>Patient *</Label>
+                    <Select value={newOrder.patient_id} onValueChange={(v) => setNewOrder({ ...newOrder, patient_id: v })}>
+                      <SelectTrigger><SelectValue placeholder="Select patient" /></SelectTrigger>
+                      <SelectContent>
+                        {patients?.map((p) => (
+                          <SelectItem key={p.id} value={p.id}>{p.first_name} {p.last_name} ({p.patient_number})</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Test *</Label>
+                    <Select value={newOrder.test_id} onValueChange={(v) => setNewOrder({ ...newOrder, test_id: v })}>
+                      <SelectTrigger><SelectValue placeholder="Select test" /></SelectTrigger>
+                      <SelectContent>
+                        {labTests?.map((t) => (
+                          <SelectItem key={t.id} value={t.id}>{t.test_name} ({t.test_code})</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Priority</Label>
+                    <Select value={newOrder.priority} onValueChange={(v) => setNewOrder({ ...newOrder, priority: v })}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="normal">Normal</SelectItem>
+                        <SelectItem value="urgent">Urgent</SelectItem>
+                        <SelectItem value="stat">STAT</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <Button type="submit" className="w-full" disabled={createOrderMutation.isPending}>
+                    {createOrderMutation.isPending ? 'Creating...' : 'Create Order'}
+                  </Button>
+                </form>
+              </DialogContent>
+            </Dialog>
+          </PermissionGuard>
+        </div>
       </div>
 
       {/* Stats */}
@@ -301,15 +347,48 @@ const Laboratory = () => {
         </Card>
       </div>
 
-      {/* Orders Table */}
+      {/* Laboratory Tests */}
       <Card>
         <CardHeader>
-          <div className="flex items-center justify-between">
-            <CardTitle>Lab Orders</CardTitle>
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <CardTitle>Laboratory Tests</CardTitle>
+              <p className="text-sm text-muted-foreground mt-1">Manage and track laboratory tests for patients.</p>
+            </div>
             <div className="relative w-64">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input placeholder="Search orders..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="pl-9" />
+              <Input placeholder="Search tests..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="pl-9" />
             </div>
+          </div>
+          <div className="flex gap-2">
+            <Button
+              variant={filterTab === 'all' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setFilterTab('all')}
+            >
+              All Tests
+            </Button>
+            <Button
+              variant={filterTab === 'pending' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setFilterTab('pending')}
+            >
+              Pending
+            </Button>
+            <Button
+              variant={filterTab === 'completed' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setFilterTab('completed')}
+            >
+              Completed
+            </Button>
+            <Button
+              variant={filterTab === 'sample' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setFilterTab('sample')}
+            >
+              Sample Collection
+            </Button>
           </div>
         </CardHeader>
         <CardContent>
@@ -319,53 +398,48 @@ const Laboratory = () => {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Order ID</TableHead>
+                  <TableHead>Test ID</TableHead>
                   <TableHead>Patient</TableHead>
-                  <TableHead>Test</TableHead>
-                  <TableHead>Priority</TableHead>
-                  <TableHead>Status</TableHead>
+                  <TableHead>Test Name</TableHead>
+                  <TableHead>Requested By</TableHead>
                   <TableHead>Date</TableHead>
+                  <TableHead>Status</TableHead>
                   <TableHead>Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filteredOrders?.map((order) => (
                   <TableRow key={order.id}>
-                    <TableCell><Badge variant="outline" className="font-mono">{order.order_number}</Badge></TableCell>
-                    <TableCell>{order.patients?.first_name} {order.patients?.last_name}</TableCell>
-                    <TableCell>{order.lab_tests?.test_name}</TableCell>
-                    <TableCell><Badge className={priorityColors[order.priority]}>{order.priority}</Badge></TableCell>
+                    <TableCell className="text-sm font-mono">{order.order_number}</TableCell>
+                    <TableCell className="text-sm">{order.patients?.first_name} {order.patients?.last_name}</TableCell>
+                    <TableCell className="text-sm">{order.lab_tests?.test_name}</TableCell>
+                    <TableCell className="text-sm text-muted-foreground">N/A</TableCell>
+                    <TableCell className="text-sm">{format(new Date(order.created_at), 'MMM dd, yyyy')}</TableCell>
                     <TableCell>
                       <Badge className={statusColors[order.status]}>
-                        {order.is_abnormal && order.status === 'completed' && <AlertCircle className="h-3 w-3 mr-1" />}
-                        {order.status.replace('_', ' ')}
+                        {order.status === 'pending' && 'Pending'}
+                        {order.status === 'sample_collected' && 'Sample Needed'}
+                        {order.status === 'processing' && 'In Progress'}
+                        {order.status === 'completed' && 'Completed'}
+                        {order.status === 'cancelled' && 'Cancelled'}
                       </Badge>
                     </TableCell>
-                    <TableCell>{format(new Date(order.created_at), 'MMM d, yyyy')}</TableCell>
                     <TableCell>
-                      <div className="flex gap-2">
-                        {order.status !== 'completed' && order.status !== 'cancelled' && (
-                          <Select value={order.status} onValueChange={(status) => updateStatusMutation.mutate({ id: order.id, status })}>
-                            <SelectTrigger className="w-32 h-8 text-xs"><SelectValue /></SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="pending">Pending</SelectItem>
-                              <SelectItem value="sample_collected">Sample Collected</SelectItem>
-                              <SelectItem value="processing">Processing</SelectItem>
-                              <SelectItem value="cancelled">Cancelled</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        )}
-                        {order.status === 'processing' && (
-                          <Button size="sm" variant="outline" onClick={() => { setSelectedOrder(order); setIsResultDialogOpen(true); }}>
-                            Enter Results
-                          </Button>
-                        )}
-                      </div>
+                      <Select value={order.status} onValueChange={(status) => updateStatusMutation.mutate({ id: order.id, status })}>
+                        <SelectTrigger className="w-20 h-8 text-xs"><SelectValue placeholder="Update" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="pending">Pending</SelectItem>
+                          <SelectItem value="sample_collected">Sample Collected</SelectItem>
+                          <SelectItem value="processing">Processing</SelectItem>
+                          <SelectItem value="completed">Completed</SelectItem>
+                          <SelectItem value="cancelled">Cancelled</SelectItem>
+                        </SelectContent>
+                      </Select>
                     </TableCell>
                   </TableRow>
                 ))}
                 {filteredOrders?.length === 0 && (
-                  <TableRow><TableCell colSpan={7} className="text-center py-8 text-muted-foreground">No lab orders found</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={7} className="text-center py-8 text-muted-foreground">No lab tests found</TableCell></TableRow>
                 )}
               </TableBody>
             </Table>

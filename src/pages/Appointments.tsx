@@ -22,9 +22,17 @@ import {
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Calendar } from '@/components/ui/calendar';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 import { toast } from 'sonner';
-import { Plus, Clock, User, Calendar as CalendarIcon, CheckCircle, XCircle, AlertCircle } from 'lucide-react';
-import { format, isSameDay, parseISO } from 'date-fns';
+import { Plus, Clock, User, Calendar as CalendarIcon, CheckCircle, XCircle, AlertCircle, MessageSquare } from 'lucide-react';
+import { format, isSameDay, parseISO, isAfter, isBefore, startOfDay, endOfDay } from 'date-fns';
 import PermissionGuard from '@/components/layout/PermissionGuard';
 
 interface Appointment {
@@ -82,6 +90,7 @@ const statusIcons = {
 const Appointments = () => {
   const queryClient = useQueryClient();
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
+  const [filterTab, setFilterTab] = useState<'upcoming' | 'today' | 'past'>('today');
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [newAppointment, setNewAppointment] = useState({
     patient_id: '',
@@ -214,9 +223,53 @@ const Appointments = () => {
     },
   });
 
-  const filteredAppointments = appointments?.filter((apt) =>
-    isSameDay(parseISO(apt.appointment_date), selectedDate)
-  );
+  // Send SMS reminder mutation
+  const sendSmsReminderMutation = useMutation({
+    mutationFn: async ({ appointmentId, patientId }: { appointmentId: string; patientId: string }) => {
+      // Get patient phone number
+      const { data: patientData } = await supabase
+        .from('patients')
+        .select('phone')
+        .eq('id', patientId)
+        .single();
+
+      if (!patientData?.phone) {
+        throw new Error('Patient phone number not found');
+      }
+
+      // Call Edge Function to send SMS
+      const { error } = await supabase.functions.invoke('send-appointment-reminder', {
+        body: {
+          phone: patientData.phone,
+          appointmentId,
+        },
+      });
+
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success('Reminder SMS sent successfully');
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
+  });
+
+  const filteredAppointments = appointments?.filter((apt) => {
+    const appointmentDate = parseISO(apt.appointment_date);
+    const today = new Date();
+    const todayStart = startOfDay(today);
+    const todayEnd = endOfDay(today);
+
+    if (filterTab === 'today') {
+      return isSameDay(appointmentDate, today);
+    } else if (filterTab === 'upcoming') {
+      return isAfter(appointmentDate, todayEnd);
+    } else if (filterTab === 'past') {
+      return isBefore(appointmentDate, todayStart);
+    }
+    return true;
+  });
 
   const todayAppointments = appointments?.filter((apt) =>
     isSameDay(parseISO(apt.appointment_date), new Date())
@@ -456,12 +509,35 @@ const Appointments = () => {
           </CardContent>
         </Card>
 
-        {/* Appointments List */}
+        {/* Appointments Table */}
         <Card className="lg:col-span-2">
           <CardHeader>
-            <CardTitle>
-              Appointments for {format(selectedDate, 'MMMM d, yyyy')}
-            </CardTitle>
+            <div className="flex items-center justify-between">
+              <CardTitle>Appointments</CardTitle>
+            </div>
+            <div className="flex gap-2 mt-4">
+              <Button
+                variant={filterTab === 'upcoming' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setFilterTab('upcoming')}
+              >
+                Upcoming
+              </Button>
+              <Button
+                variant={filterTab === 'today' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setFilterTab('today')}
+              >
+                Today
+              </Button>
+              <Button
+                variant={filterTab === 'past' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setFilterTab('past')}
+              >
+                Past
+              </Button>
+            </div>
           </CardHeader>
           <CardContent>
             {isLoading ? (
@@ -470,75 +546,102 @@ const Appointments = () => {
               </div>
             ) : filteredAppointments?.length === 0 ? (
               <div className="text-center py-8 text-muted-foreground">
-                No appointments scheduled for this date
+                No {filterTab} appointments
               </div>
             ) : (
-              <div className="space-y-4">
-                {filteredAppointments?.map((apt) => {
-                  const StatusIcon = statusIcons[apt.status];
-                  return (
-                    <div
-                      key={apt.id}
-                      className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50 transition-colors"
-                    >
-                      <div className="flex items-center gap-4">
-                        <div className="text-center min-w-[60px]">
-                          <p className="text-lg font-bold text-primary">
-                            {apt.appointment_time.slice(0, 5)}
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            {apt.duration_minutes} min
-                          </p>
-                        </div>
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <User className="h-4 w-4 text-muted-foreground" />
-                            <span className="font-medium">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Date</TableHead>
+                    <TableHead>Time</TableHead>
+                    <TableHead>Patient</TableHead>
+                    <TableHead>Doctor</TableHead>
+                    <TableHead>Type</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filteredAppointments?.map((apt) => {
+                    const StatusIcon = statusIcons[apt.status];
+                    return (
+                      <TableRow key={apt.id}>
+                        <TableCell className="text-sm">
+                          {format(parseISO(apt.appointment_date), 'MMM dd, yyyy')}
+                        </TableCell>
+                        <TableCell className="text-sm font-medium">
+                          {apt.appointment_time.slice(0, 5)}
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex flex-col">
+                            <span className="font-medium text-sm">
                               {apt.patients?.first_name} {apt.patients?.last_name}
                             </span>
-                            <Badge variant="outline" className="text-xs">
-                              {apt.patients?.patient_number}
-                            </Badge>
+                            <span className="text-xs text-muted-foreground">
+                              #{apt.patients?.patient_number}
+                            </span>
                           </div>
-                          <p className="text-sm text-muted-foreground">
-                            Dr. {apt.profiles?.full_name || 'Unknown'}
-                            {apt.department && ` • ${apt.department}`}
-                          </p>
-                          {apt.reason && (
-                            <p className="text-sm text-muted-foreground mt-1">
-                              {apt.reason}
-                            </p>
+                        </TableCell>
+                        <TableCell className="text-sm">
+                          <div className="flex flex-col">
+                            <span className="font-medium">Dr. {apt.profiles?.full_name || 'Unknown'}</span>
+                            {apt.department && (
+                              <span className="text-xs text-muted-foreground">{apt.department}</span>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-sm max-w-xs">
+                          {apt.reason ? (
+                            <span className="text-muted-foreground">{apt.reason}</span>
+                          ) : (
+                            <span className="text-muted-foreground italic">-</span>
                           )}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <Badge className={statusColors[apt.status]}>
-                          <StatusIcon className="h-3 w-3 mr-1" />
-                          {apt.status.replace('_', ' ')}
-                        </Badge>
-                        <Select
-                          value={apt.status}
-                          onValueChange={(status) =>
-                            updateStatusMutation.mutate({ id: apt.id, status })
-                          }
-                        >
-                          <SelectTrigger className="w-32 h-8 text-xs">
-                            <SelectValue placeholder="Update" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="scheduled">Scheduled</SelectItem>
-                            <SelectItem value="confirmed">Confirmed</SelectItem>
-                            <SelectItem value="in_progress">In Progress</SelectItem>
-                            <SelectItem value="completed">Completed</SelectItem>
-                            <SelectItem value="cancelled">Cancelled</SelectItem>
-                            <SelectItem value="no_show">No Show</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+                        </TableCell>
+                        <TableCell>
+                          <Badge className={statusColors[apt.status]}>
+                            <StatusIcon className="h-3 w-3 mr-1" />
+                            {apt.status.replace('_', ' ')}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="flex gap-2">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() =>
+                              sendSmsReminderMutation.mutate({
+                                appointmentId: apt.id,
+                                patientId: apt.patient_id,
+                              })
+                            }
+                            disabled={sendSmsReminderMutation.isPending}
+                            title="Send SMS reminder"
+                          >
+                            <MessageSquare className="h-4 w-4" />
+                          </Button>
+                          <Select
+                            value={apt.status}
+                            onValueChange={(status) =>
+                              updateStatusMutation.mutate({ id: apt.id, status })
+                            }
+                          >
+                            <SelectTrigger className="w-32 h-8 text-xs">
+                              <SelectValue placeholder="Update" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="scheduled">Scheduled</SelectItem>
+                              <SelectItem value="confirmed">Confirmed</SelectItem>
+                              <SelectItem value="in_progress">In Progress</SelectItem>
+                              <SelectItem value="completed">Completed</SelectItem>
+                              <SelectItem value="cancelled">Cancelled</SelectItem>
+                              <SelectItem value="no_show">No Show</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
             )}
           </CardContent>
         </Card>
