@@ -56,7 +56,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       
       if (rolesError) {
         console.error('Roles fetch error:', rolesError);
-        // If roles query fails, set default empty array to prevent hanging
         setRoles([]);
       } else if (rolesData && Array.isArray(rolesData)) {
         setRoles(rolesData as AppRole[]);
@@ -72,38 +71,43 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     // Set up auth state listener
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
+      (event, session) => {
         try {
           setSession(session);
           setUser(session?.user ?? null);
           
           if (session?.user) {
-            // Fetch user data and keep loading true until complete
-            await fetchUserData(session.user.id);
+            // Fetch user data in background, don't wait for it
+            fetchUserData(session.user.id).catch(error => {
+              console.error('Error fetching user data:', error);
+            });
           } else {
             setProfile(null);
             setRoles([]);
           }
+          setLoading(false);
         } catch (error) {
-          console.error('Error loading user data:', error);
-        } finally {
+          console.error('Auth state change error:', error);
           setLoading(false);
         }
       }
     );
 
     // Check for existing session
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
       try {
         setSession(session);
         setUser(session?.user ?? null);
         
         if (session?.user) {
-          await fetchUserData(session.user.id);
+          // Fetch user data in background
+          fetchUserData(session.user.id).catch(error => {
+            console.error('Error fetching user session data:', error);
+          });
         }
+        setLoading(false);
       } catch (error) {
-        console.error('Error loading user session data:', error);
-      } finally {
+        console.error('Get session error:', error);
         setLoading(false);
       }
     });
