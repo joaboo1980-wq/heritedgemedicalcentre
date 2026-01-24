@@ -35,21 +35,37 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState(true);
 
   const fetchUserData = async (userId: string) => {
-    // Fetch profile
-    const { data: profileData } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('user_id', userId)
-      .single();
-    
-    if (profileData) {
-      setProfile(profileData as Profile);
-    }
+    try {
+      // Fetch profile
+      const { data: profileData, error: profileError } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('user_id', userId)
+        .single();
+      
+      if (profileError) {
+        console.error('Profile fetch error:', profileError);
+      }
+      
+      if (profileData) {
+        setProfile(profileData as Profile);
+      }
 
-    // Fetch roles using RPC
-    const { data: rolesData } = await supabase.rpc('get_user_roles', { _user_id: userId });
-    if (rolesData) {
-      setRoles(rolesData as AppRole[]);
+      // Fetch roles using RPC
+      const { data: rolesData, error: rolesError } = await supabase.rpc('get_user_roles', { _user_id: userId });
+      
+      if (rolesError) {
+        console.error('Roles fetch error:', rolesError);
+        // If roles query fails, set default empty array to prevent hanging
+        setRoles([]);
+      } else if (rolesData && Array.isArray(rolesData)) {
+        setRoles(rolesData as AppRole[]);
+      } else {
+        setRoles([]);
+      }
+    } catch (error) {
+      console.error('Error in fetchUserData:', error);
+      setRoles([]);
     }
   };
 
