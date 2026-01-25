@@ -709,6 +709,24 @@ export type Database = {
         }
         Returns: boolean
       }
+      insert_patient: {
+        Args: {
+          p_first_name: string
+          p_last_name: string
+          p_date_of_birth: string
+          p_gender: string
+          p_phone?: string | null
+          p_email?: string | null
+          p_address?: string | null
+          p_blood_type?: string | null
+          p_emergency_contact_name?: string | null
+          p_emergency_contact_phone?: string | null
+          p_insurance_provider?: string | null
+          p_insurance_number?: string | null
+          p_created_by?: string | null
+        }
+        Returns: Database["public"]["Tables"]["patients"]["Row"][]
+      }
     }
     Enums: {
       app_role:

@@ -1,4 +1,5 @@
 -- Insert internationally standardized lab tests
+-- Using ON CONFLICT to handle existing tests (update if exists, insert if new)
 INSERT INTO public.lab_tests (test_code, test_name, category, description, normal_range, unit, price, turnaround_hours) VALUES
 -- Hematology Tests
 ('CBC', 'Complete Blood Count (CBC)', 'Hematology', 'Measures white blood cells, red blood cells, hemoglobin, hematocrit, and platelets', 'Variable by age/sex', 'Cells/mcL', 15.00, 4),
@@ -117,4 +118,12 @@ INSERT INTO public.lab_tests (test_code, test_name, category, description, norma
 ('AMY', 'Amylase', 'Chemistry', 'Enzyme indicating pancreatic disease', '30-110', 'U/L', 12.00, 4),
 ('LIP', 'Lipase', 'Chemistry', 'Enzyme indicating pancreatic disease', '0-60', 'U/L', 12.00, 4),
 ('PHE', 'Phenylalanine', 'Chemistry', 'Newborn screening for PKU', '<2', 'mg/dL', 20.00, 4),
-('TSH-NB', 'TSH Newborn Screening', 'Endocrinology', 'Newborn thyroid screening', '<10', 'mIU/L', 15.00, 4);
+('TSH-NB', 'TSH Newborn Screening', 'Endocrinology', 'Newborn thyroid screening', '<10', 'mIU/L', 15.00, 4)
+ON CONFLICT (test_code) DO UPDATE SET 
+  test_name = EXCLUDED.test_name,
+  category = EXCLUDED.category,
+  description = EXCLUDED.description,
+  normal_range = EXCLUDED.normal_range,
+  unit = EXCLUDED.unit,
+  price = EXCLUDED.price,
+  turnaround_hours = EXCLUDED.turnaround_hours;

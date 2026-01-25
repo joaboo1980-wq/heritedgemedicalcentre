@@ -88,6 +88,8 @@ const Laboratory = () => {
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isResultDialogOpen, setIsResultDialogOpen] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<LabOrder | null>(null);
+  const [testSearch, setTestSearch] = useState('');
+  const [showTestList, setShowTestList] = useState(false);
   const [newOrder, setNewOrder] = useState({
     patient_id: '',
     test_id: '',
@@ -117,17 +119,40 @@ const Laboratory = () => {
   });
 
   // Fetch lab tests catalog
-  const { data: labTests } = useQuery({
+  const { data: labTests, isLoading: testsLoading, error: testsError } = useQuery({
     queryKey: ['lab-tests'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('lab_tests')
-        .select('*')
-        .order('test_name');
-      if (error) throw error;
-      return data as LabTest[];
+      try {
+        console.log('Fetching lab tests...');
+        const { data, error } = await supabase
+          .from('lab_tests')
+          .select('test_code, test_name, category, price, id')
+          .order('test_code');
+        
+        console.log('Supabase response - Data:', data, 'Error:', error);
+        
+        if (error) {
+          console.error('Lab tests fetch error:', error);
+          throw error;
+        }
+        
+        console.log('Lab tests returned:', data?.length || 0, 'tests');
+        console.log('First test:', data?.[0]);
+        
+        return data as any[];
+      } catch (err) {
+        console.error('Exception:', err);
+        return [];
+      }
     },
   });
+
+  // Filter tests based on search term
+  const filteredTests = labTests?.filter(t =>
+    t.test_name.toLowerCase().includes(testSearch.toLowerCase()) ||
+    t.test_code.toLowerCase().includes(testSearch.toLowerCase()) ||
+    t.category.toLowerCase().includes(testSearch.toLowerCase())
+  ) || [];
 
   // Fetch patients
   const { data: patients } = useQuery({
@@ -158,6 +183,8 @@ const Laboratory = () => {
       queryClient.invalidateQueries({ queryKey: ['lab-orders'] });
       setIsAddDialogOpen(false);
       setNewOrder({ patient_id: '', test_id: '', priority: 'normal' });
+      setTestSearch('');
+      setShowTestList(false);
       toast.success('Lab order created successfully');
     },
     onError: (error: Error) => toast.error(error.message),
@@ -288,15 +315,51 @@ const Laboratory = () => {
                     </Select>
                   </div>
                   <div className="space-y-2">
-                    <Label>Test *</Label>
-                    <Select value={newOrder.test_id} onValueChange={(v) => setNewOrder({ ...newOrder, test_id: v })}>
-                      <SelectTrigger><SelectValue placeholder="Select test" /></SelectTrigger>
-                      <SelectContent>
-                        {labTests?.map((t) => (
-                          <SelectItem key={t.id} value={t.id}>{t.test_name} ({t.test_code})</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <Label>Test * {testsLoading && <span className="text-xs text-gray-500">(loading...)</span>} {testsError && <span className="text-xs text-red-500">(error loading tests)</span>}</Label>
+                    <div className="relative">
+                      <Input
+                        placeholder={testsLoading ? "Loading tests..." : "Search tests by name, code, or category..."}
+                        value={testSearch}
+                        onChange={(e) => {
+                          setTestSearch(e.target.value);
+                          setShowTestList(true);
+                        }}
+                        onFocus={() => setShowTestList(true)}
+                        className="w-full"
+                        disabled={testsLoading}
+                      />
+                      {showTestList && testSearch && (
+                        <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-50 max-h-64 overflow-y-auto">
+                          {filteredTests.length > 0 ? (
+                            filteredTests.map((test) => (
+                              <button
+                                key={test.id}
+                                type="button"
+                                onClick={() => {
+                                  setNewOrder({ ...newOrder, test_id: test.id });
+                                  setTestSearch(`${test.test_name} (${test.test_code})`);
+                                  setShowTestList(false);
+                                }}
+                                className="w-full text-left px-4 py-3 hover:bg-gray-100 border-b last:border-b-0 transition"
+                              >
+                                <div className="font-medium text-sm">{test.test_name}</div>
+                                <div className="text-xs text-gray-500">{test.test_code} • {test.category} • ${test.price}</div>
+                              </button>
+                            ))
+                          ) : (
+                            <div className="px-4 py-3 text-sm text-gray-500 text-center">No tests found</div>
+                          )}
+                        </div>
+                      )}
+                      {newOrder.test_id && !testSearch && (
+                        <div className="absolute top-full left-0 right-0 mt-1 bg-blue-50 border border-blue-200 rounded-lg p-3 z-50">
+                          <div className="text-sm font-medium text-blue-900">Selected:</div>
+                          <div className="text-sm text-blue-700">
+                            {labTests?.find(t => t.id === newOrder.test_id)?.test_name}
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   </div>
                   <div className="space-y-2">
                     <Label>Priority</Label>

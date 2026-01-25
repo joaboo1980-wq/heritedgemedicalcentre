@@ -17,6 +17,7 @@ import {
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -140,37 +141,63 @@ const Billing = () => {
   // Create invoice
   const createInvoiceMutation = useMutation({
     mutationFn: async (data: typeof newInvoice) => {
-      const subtotal = data.items.reduce((sum, item) => sum + item.quantity * item.unit_price, 0);
+      // Validate required fields
+      if (!data.patient_id) {
+        throw new Error('Patient is required');
+      }
+
+      // Validate items
+      if (data.items.length === 0) {
+        throw new Error('At least one item is required');
+      }
+
+      // Validate items have required fields
+      const invalidItems = data.items.filter(
+        (item) => !item.description || item.quantity <= 0 || item.unit_price <= 0
+      );
+      if (invalidItems.length > 0) {
+        throw new Error('All items must have description, quantity > 0, and unit price > 0');
+      }
+
+      const subtotal = data.items.reduce((sum, item) => sum + (item.quantity * item.unit_price), 0);
       const totalAmount = subtotal;
 
       const { data: invoice, error: invoiceError } = await supabase
         .from('invoices')
         .insert({
           patient_id: data.patient_id,
-          due_date: data.due_date || null,
-          subtotal,
+          due_date: data.due_date && data.due_date.trim() ? data.due_date : null,
+          subtotal: subtotal,
           total_amount: totalAmount,
-          created_by: user?.id,
-          invoice_number: '',
-          status: 'pending',
+          tax_amount: 0,
+          discount_amount: 0,
+          amount_paid: 0,
+          invoice_number: `INV-${Date.now()}`,
+          status: 'draft',
         })
         .select()
         .single();
 
-      if (invoiceError) throw invoiceError;
+      if (invoiceError) {
+        console.error('Invoice creation error:', invoiceError);
+        throw new Error(`Failed to create invoice: ${invoiceError.message}`);
+      }
 
       // Create invoice items
       const items = data.items.map((item) => ({
         invoice_id: invoice.id,
-        description: item.description,
+        description: item.description.trim(),
         item_type: item.item_type,
-        quantity: item.quantity,
-        unit_price: item.unit_price,
-        total_price: item.quantity * item.unit_price,
+        quantity: parseInt(item.quantity.toString()),
+        unit_price: parseFloat(item.unit_price.toString()),
+        total_price: parseFloat((item.quantity * item.unit_price).toString()),
       }));
 
       const { error: itemsError } = await supabase.from('invoice_items').insert(items);
-      if (itemsError) throw itemsError;
+      if (itemsError) {
+        console.error('Invoice items creation error:', itemsError);
+        throw new Error(`Failed to create invoice items: ${itemsError.message}`);
+      }
 
       return invoice;
     },
@@ -190,14 +217,19 @@ const Billing = () => {
   // Record payment
   const recordPaymentMutation = useMutation({
     mutationFn: async ({ invoiceId, data }: { invoiceId: string; data: typeof paymentData }) => {
-      // Create payment record
+      // Validate amount
+      if (!data.amount || data.amount <= 0) {
+        throw new Error('Amount must be greater than 0');
+      }
+
+      // Create payment record with generated payment number
       const { error: paymentError } = await supabase.from('payments').insert({
         invoice_id: invoiceId,
         amount: data.amount,
         payment_method: data.payment_method,
         reference_number: data.reference_number || null,
         received_by: user?.id,
-        payment_number: '',
+        payment_number: `PAY-${Date.now()}`,
       });
 
       if (paymentError) throw paymentError;
@@ -205,7 +237,7 @@ const Billing = () => {
       // Update invoice
       const invoice = invoices?.find((i) => i.id === invoiceId);
       if (invoice) {
-        const newAmountPaid = invoice.amount_paid + data.amount;
+        const newAmountPaid = (invoice.amount_paid || 0) + data.amount;
         const newStatus = newAmountPaid >= invoice.total_amount ? 'paid' : 'partially_paid';
 
         const { error: updateError } = await supabase
@@ -273,8 +305,20 @@ const Billing = () => {
             <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Create Invoice</DialogTitle>
+              <DialogDescription>Create a new invoice for patient billing.</DialogDescription>
             </DialogHeader>
-            <form onSubmit={(e) => { e.preventDefault(); createInvoiceMutation.mutate(newInvoice); }} className="space-y-4">
+            <form onSubmit={(e) => { 
+              e.preventDefault(); 
+              if (!newInvoice.patient_id) {
+                toast.error('Please select a patient');
+                return;
+              }
+              if (newInvoice.items.some(item => !item.description || item.quantity <= 0 || item.unit_price <= 0)) {
+                toast.error('Please fill in all item details (description, quantity > 0, price > 0)');
+                return;
+              }
+              createInvoiceMutation.mutate(newInvoice); 
+            }} className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Patient *</Label>
@@ -314,10 +358,10 @@ const Billing = () => {
                       </Select>
                     </div>
                     <div className="col-span-2">
-                      <Input type="number" placeholder="Qty" value={item.quantity} onChange={(e) => updateItem(index, 'quantity', parseInt(e.target.value))} min={1} required />
+                      <Input type="number" placeholder="Qty" value={item.quantity || 1} onChange={(e) => updateItem(index, 'quantity', parseInt(e.target.value) || 1)} min={1} required />
                     </div>
                     <div className="col-span-3">
-                      <Input type="number" placeholder="Price" value={item.unit_price} onChange={(e) => updateItem(index, 'unit_price', parseFloat(e.target.value))} required />
+                      <Input type="number" placeholder="Price" value={item.unit_price || 0} onChange={(e) => updateItem(index, 'unit_price', parseFloat(e.target.value) || 0)} required />
                     </div>
                     <div className="col-span-1">
                       {newInvoice.items.length > 1 && (
@@ -440,6 +484,7 @@ const Billing = () => {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Record Payment</DialogTitle>
+            <DialogDescription>Record a payment for the selected invoice.</DialogDescription>
           </DialogHeader>
           {selectedInvoice && (
             <form onSubmit={(e) => { e.preventDefault(); recordPaymentMutation.mutate({ invoiceId: selectedInvoice.id, data: paymentData }); }} className="space-y-4">
@@ -449,7 +494,14 @@ const Billing = () => {
               </div>
               <div className="space-y-2">
                 <Label>Amount *</Label>
-                <Input type="number" value={paymentData.amount} onChange={(e) => setPaymentData({ ...paymentData, amount: parseFloat(e.target.value) })} max={selectedInvoice.total_amount - selectedInvoice.amount_paid} required />
+                <Input 
+                  type="number" 
+                  value={paymentData.amount || ''} 
+                  placeholder="Enter amount"
+                  onChange={(e) => setPaymentData({ ...paymentData, amount: parseFloat(e.target.value) || 0 })} 
+                  max={selectedInvoice.total_amount - selectedInvoice.amount_paid} 
+                  required 
+                />
               </div>
               <div className="space-y-2">
                 <Label>Payment Method *</Label>
@@ -481,6 +533,7 @@ const Billing = () => {
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>Invoice Details</DialogTitle>
+            <DialogDescription>View complete invoice information and payment status.</DialogDescription>
           </DialogHeader>
           {selectedInvoice && (
             <div className="space-y-4">

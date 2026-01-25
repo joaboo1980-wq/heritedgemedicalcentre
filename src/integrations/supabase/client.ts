@@ -2,16 +2,63 @@
 import { createClient } from '@supabase/supabase-js';
 import type { Database } from './types';
 
-const SUPABASE_URL = "https://bnpudutmocqufcayneai.supabase.co";
-const SUPABASE_PUBLISHABLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJucHVkdXRtb2NxdWZjYXluZWFpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjkxNjExOTUsImV4cCI6MjA4NDczNzE5NX0.17jBXfPMxmL13xEwLYN2FxSN_g6x4OSqURIsPs0xoF0";
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "https://krhpwnjcwmwpocfkthog.supabase.co";
+const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtyaHB3bmpjd213cG9jZmt0aG9nIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njg5ODYzMzEsImV4cCI6MjA4NDU2MjMzMX0._C8omYNoo1dXGcZyn6F7nmnhTrOEgTeptZtLJuyypc0";
 
 // Import the supabase client like this:
 // import { supabase } from "@/integrations/supabase/client";
+
+// Intercept fetch to add proper headers for REST API calls
+// Temporarily disabled as it may be corrupting Supabase query strings
+/*
+const originalFetch = globalThis.fetch;
+globalThis.fetch = function (...args: Parameters<typeof globalThis.fetch>) {
+  const [resource, config] = args;
+  
+  let url: string | undefined;
+  if (typeof resource === 'string') {
+    url = resource;
+  } else if (resource instanceof Request) {
+    url = resource.url;
+  } else if (resource instanceof URL) {
+    url = resource.href;
+  }
+  
+  // Add headers for Supabase REST API calls
+  if (url && url.includes('supabase.co')) {
+    const fetchConfig = (typeof config === 'object' ? config : {}) as Record<string, unknown>;
+    const existingHeaders = fetchConfig.headers;
+    
+    // Convert Headers object to plain object if needed
+    let headersObj: Record<string, string> = {};
+    if (existingHeaders instanceof Headers) {
+      existingHeaders.forEach((value, key) => {
+        headersObj[key] = value;
+      });
+    } else if (typeof existingHeaders === 'object' && existingHeaders !== null) {
+      headersObj = { ...existingHeaders as Record<string, string> };
+    }
+    
+    // Add missing headers without overwriting existing ones
+    if (!headersObj['accept']) {
+      headersObj['accept'] = 'application/json';
+    }
+    if (!headersObj['content-type'] && fetchConfig.method && typeof fetchConfig.method === 'string' && fetchConfig.method.toUpperCase() !== 'GET') {
+      headersObj['content-type'] = 'application/json';
+    }
+    
+    fetchConfig.headers = headersObj;
+    return originalFetch(resource as RequestInfo | URL, fetchConfig as RequestInit);
+  }
+  
+  return originalFetch(resource as RequestInfo | URL, config as RequestInit);
+};
+*/
 
 export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
   auth: {
     storage: localStorage,
     persistSession: true,
     autoRefreshToken: true,
-  }
+  },
 });

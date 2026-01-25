@@ -37,6 +37,21 @@ export const usePermissions = () => {
   const { data: permissions, isLoading } = useQuery({
     queryKey: ['user-permissions', user?.id, roles],
     queryFn: async () => {
+      // If admin, grant all permissions without querying
+      if (isAdmin) {
+        return [
+          { role: 'admin', module: 'dashboard', can_view: true, can_create: true, can_edit: true, can_delete: true },
+          { role: 'admin', module: 'patients', can_view: true, can_create: true, can_edit: true, can_delete: true },
+          { role: 'admin', module: 'appointments', can_view: true, can_create: true, can_edit: true, can_delete: true },
+          { role: 'admin', module: 'laboratory', can_view: true, can_create: true, can_edit: true, can_delete: true },
+          { role: 'admin', module: 'pharmacy', can_view: true, can_create: true, can_edit: true, can_delete: true },
+          { role: 'admin', module: 'billing', can_view: true, can_create: true, can_edit: true, can_delete: true },
+          { role: 'admin', module: 'reports', can_view: true, can_create: true, can_edit: true, can_delete: true },
+          { role: 'admin', module: 'staff', can_view: true, can_create: true, can_edit: true, can_delete: true },
+          { role: 'admin', module: 'user_management', can_view: true, can_create: true, can_edit: true, can_delete: true },
+        ] as RolePermission[];
+      }
+      
       if (!user || roles.length === 0) return [];
       
       const { data, error } = await supabase
@@ -44,10 +59,13 @@ export const usePermissions = () => {
         .select('*')
         .in('role', roles);
 
-      if (error) throw error;
+      if (error) {
+        console.error('Permission fetch error:', error);
+        return [];
+      }
       return data as RolePermission[];
     },
-    enabled: !!user && roles.length > 0,
+    enabled: !!user,
   });
 
   // Check if user has permission for a specific module and action
