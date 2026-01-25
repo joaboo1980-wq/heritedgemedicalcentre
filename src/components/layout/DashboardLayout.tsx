@@ -32,7 +32,7 @@ const DashboardLayout = () => {
   return (
     <div className="min-h-screen bg-muted/30">
       <Sidebar />
-      <div className="ml-64">
+      <div className="ml-20 lg:ml-64 transition-all duration-300 ease-in-out">
         <Header />
         <main className="p-6">
           <Outlet />

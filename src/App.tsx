@@ -18,6 +18,8 @@ import Pharmacy from "./pages/Pharmacy";
 import Reports from "./pages/Reports";
 import UserManagement from "./pages/UserManagement";
 import Billing from "./pages/Billing";
+import Invoices from "./pages/Invoices";
+import Accounts from "./pages/Accounts";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -88,6 +90,16 @@ const App = () => (
               <Route path="/billing" element={
                 <ProtectedRoute module="billing">
                   <Billing />
+                </ProtectedRoute>
+              } />
+              <Route path="/invoices" element={
+                <ProtectedRoute module="billing">
+                  <Invoices />
+                </ProtectedRoute>
+              } />
+              <Route path="/accounts" element={
+                <ProtectedRoute module="accounts">
+                  <Accounts />
                 </ProtectedRoute>
               } />
               <Route path="/admin/users" element={

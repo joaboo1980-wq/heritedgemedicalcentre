@@ -7,13 +7,22 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { 
-  BarChart3, 
-  Download, 
-  TrendingUp, 
-  Users, 
-  Calendar, 
-  DollarSign 
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from '@/components/ui/tabs';
+import {
+  BarChart3,
+  Download,
+  TrendingUp,
+  Users,
+  Calendar,
+  DollarSign,
+  TrendingDown,
+  ArrowUpRight,
+  ArrowDownLeft,
 } from 'lucide-react';
 import PermissionGuard from '@/components/layout/PermissionGuard';
 import {
@@ -31,21 +40,57 @@ import {
   Cell,
   Legend,
 } from 'recharts';
+import { Badge } from '@/components/ui/badge';
 
 const monthlyRevenue = [
-  { month: 'Jul', revenue: 75000000 },
-  { month: 'Aug', revenue: 82000000 },
-  { month: 'Sep', revenue: 78000000 },
-  { month: 'Oct', revenue: 91000000 },
-  { month: 'Nov', revenue: 85000000 },
-  { month: 'Dec', revenue: 89432000 },
+  { month: 'Jan', revenue: 4800000 },
+  { month: 'Feb', revenue: 5200000 },
+  { month: 'Mar', revenue: 4900000 },
+  { month: 'Apr', revenue: 6100000 },
+  { month: 'May', revenue: 5800000 },
+  { month: 'Jun', revenue: 7100000 },
+  { month: 'Jul', revenue: 7500000 },
+  { month: 'Aug', revenue: 8200000 },
+  { month: 'Sep', revenue: 7800000 },
+  { month: 'Oct', revenue: 9100000 },
+  { month: 'Nov', revenue: 8500000 },
+  { month: 'Dec', revenue: 8900000 },
+];
+
+const newPatientRegistration = [
+  { month: 'Jan', patients: 35 },
+  { month: 'Feb', patients: 42 },
+  { month: 'Mar', patients: 38 },
+  { month: 'Apr', patients: 55 },
+  { month: 'May', patients: 48 },
+  { month: 'Jun', patients: 61 },
+];
+
+const departmentPerformance = [
+  { name: 'General', appointments: 95 },
+  { name: 'Cardiology', appointments: 82 },
+  { name: 'Pediatrics', appointments: 76 },
+  { name: 'Neurology', appointments: 68 },
+  { name: 'Laboratory', appointments: 112 },
+];
+
+const patientAgeDistribution = [
+  { range: '0-18', value: 156 },
+  { range: '19-35', value: 324 },
+  { range: '36-55', value: 445 },
+  { range: '56+', value: 323 },
+];
+
+const genderDistribution = [
+  { name: 'Female', value: 648 },
+  { name: 'Male', value: 600 },
 ];
 
 const patientsByDepartment = [
-  { name: 'Outpatient', value: 45 },
-  { name: 'Inpatient', value: 25 },
-  { name: 'Emergency', value: 20 },
-  { name: 'ICU', value: 10 },
+  { name: 'General', value: 156 },
+  { name: 'Cardiology', value: 234 },
+  { name: 'Pediatrics', value: 189 },
+  { name: 'Neurology', value: 145 },
 ];
 
 const appointmentStats = [
@@ -283,6 +328,284 @@ const Reports = () => {
           </div>
         </CardContent>
       </Card>
+
+      {/* Detailed Analytics */}
+      <Tabs defaultValue="patients" className="w-full">
+        <TabsList>
+          <TabsTrigger value="patients">Patient Analytics</TabsTrigger>
+          <TabsTrigger value="appointments">Appointments</TabsTrigger>
+          <TabsTrigger value="revenue">Revenue</TabsTrigger>
+          <TabsTrigger value="staff">Staff</TabsTrigger>
+          <TabsTrigger value="lab">Laboratory</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="patients" className="space-y-6">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Total Patients</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-3xl font-bold">1,248</p>
+                <p className="text-sm text-green-600 flex items-center gap-1 mt-1">
+                  <TrendingUp className="h-4 w-4" />
+                  +55 this month
+                </p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">New Patients</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-3xl font-bold">55</p>
+                <p className="text-sm text-green-600 flex items-center gap-1 mt-1">
+                  <TrendingUp className="h-4 w-4" />
+                  +12% from last month
+                </p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Return Rate</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-3xl font-bold">78%</p>
+                <p className="text-sm text-green-600 flex items-center gap-1 mt-1">
+                  <TrendingUp className="h-4 w-4" />
+                  +3% from last month
+                </p>
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>Age Distribution</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  {patientAgeDistribution.map((dist) => (
+                    <div key={dist.range}>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-sm">{dist.range} years</span>
+                        <span className="text-sm font-medium">{dist.value} patients</span>
+                      </div>
+                      <div className="w-full bg-muted rounded-full h-2">
+                        <div 
+                          className="bg-primary h-2 rounded-full" 
+                          style={{width: `${(dist.value / 450) * 100}%`}}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Gender Distribution</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="h-64">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={genderDistribution}
+                        cx="50%"
+                        cy="50%"
+                        outerRadius={80}
+                        dataKey="value"
+                        label={({name, value}) => `${name} ${value}`}
+                        labelLine={false}
+                      >
+                        {genderDistribution.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                        ))}
+                      </Pie>
+                      <Legend />
+                      <Tooltip />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="appointments" className="space-y-6">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Total Appointments</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-3xl font-bold">456</p>
+                <p className="text-sm text-green-600 flex items-center gap-1 mt-1">
+                  <TrendingUp className="h-4 w-4" />
+                  +8% from last month
+                </p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Completion Rate</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-3xl font-bold">92%</p>
+                <p className="text-sm text-green-600 flex items-center gap-1 mt-1">
+                  <TrendingUp className="h-4 w-4" />
+                  +1% from last month
+                </p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">No-shows</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-3xl font-bold">8%</p>
+                <p className="text-sm text-red-600 flex items-center gap-1 mt-1">
+                  <TrendingDown className="h-4 w-4" />
+                  +1% from last month
+                </p>
+              </CardContent>
+            </Card>
+          </div>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Department Performance</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="h-80">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={departmentPerformance} layout="vertical">
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                    <XAxis type="number" stroke="hsl(var(--muted-foreground))" fontSize={12} />
+                    <YAxis dataKey="name" width={80} stroke="hsl(var(--muted-foreground))" fontSize={12} />
+                    <Tooltip 
+                      contentStyle={{
+                        backgroundColor: 'hsl(var(--card))',
+                        border: '1px solid hsl(var(--border))',
+                        borderRadius: '8px',
+                      }}
+                    />
+                    <Bar dataKey="appointments" fill="hsl(var(--primary))" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="revenue">
+          <Card>
+            <CardHeader>
+              <CardTitle>Revenue Overview</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="h-80">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={monthlyRevenue}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                    <XAxis dataKey="month" stroke="hsl(var(--muted-foreground))" fontSize={12} />
+                    <YAxis 
+                      stroke="hsl(var(--muted-foreground))" 
+                      fontSize={12}
+                      tickFormatter={(value) => `${(value / 1000000).toFixed(0)}M`}
+                    />
+                    <Tooltip 
+                      contentStyle={{
+                        backgroundColor: 'hsl(var(--card))',
+                        border: '1px solid hsl(var(--border))',
+                        borderRadius: '8px',
+                      }}
+                      formatter={(value: number) => `UGX ${(value / 1000000).toFixed(1)}M`}
+                    />
+                    <Line 
+                      type="monotone" 
+                      dataKey="revenue" 
+                      stroke="hsl(var(--primary))" 
+                      dot={{ fill: 'hsl(var(--primary))' }}
+                      name="Revenue"
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="staff" className="space-y-6">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Total Staff</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-3xl font-bold">156</p>
+                <p className="text-sm text-muted-foreground mt-1">Active staff members</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">On Duty</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-3xl font-bold text-green-600">156</p>
+                <p className="text-sm text-muted-foreground mt-1">Currently working</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Pending Labs</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-3xl font-bold text-yellow-600">12</p>
+                <p className="text-sm text-muted-foreground mt-1">Tests awaiting results</p>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="lab" className="space-y-6">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Total Tests</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-3xl font-bold">189</p>
+                <p className="text-sm text-green-600 flex items-center gap-1 mt-1">
+                  <TrendingUp className="h-4 w-4" />
+                  From last month
+                </p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Completed</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-3xl font-bold">165</p>
+                <p className="text-sm text-muted-foreground mt-1">87% completion rate</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Pending</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-3xl font-bold text-yellow-600">24</p>
+                <p className="text-sm text-muted-foreground mt-1">13% pending</p>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 };

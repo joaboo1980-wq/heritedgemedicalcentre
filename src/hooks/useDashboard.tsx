@@ -78,17 +78,19 @@ export const useDashboardStats = () => {
         .lte('created_at', endOfLastMonth.toISOString());
 
       // Get today's appointments
+      const todayDate = format(now, 'yyyy-MM-dd');
       const { count: todayAppointments } = await supabase
         .from('appointments')
         .select('*', { count: 'exact', head: true })
-        .eq('appointment_date', format(now, 'yyyy-MM-dd'));
+        .eq('appointment_date', todayDate);
 
       // Get last month same day appointments for comparison
       const lastMonthSameDay = subMonths(now, 1);
+      const lastMonthDate = format(lastMonthSameDay, 'yyyy-MM-dd');
       const { count: lastMonthAppointments } = await supabase
         .from('appointments')
         .select('*', { count: 'exact', head: true })
-        .eq('appointment_date', format(lastMonthSameDay, 'yyyy-MM-dd'));
+        .eq('appointment_date', lastMonthDate);
 
       // Get monthly revenue (sum of paid invoices)
       const { data: currentRevenueData } = await supabase
@@ -219,7 +221,9 @@ export const useRecentAppointments = () => {
   return useQuery({
     queryKey: ['recent-appointments'],
     queryFn: async (): Promise<RecentAppointment[]> => {
-      const today = format(new Date(), 'yyyy-MM-dd');
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const todayString = today.toISOString().split('T')[0];
       
       const { data, error } = await supabase
         .from('appointments')
@@ -235,7 +239,7 @@ export const useRecentAppointments = () => {
             last_name
           )
         `)
-        .gte('appointment_date', today)
+        .gte('appointment_date', todayString)
         .order('appointment_date', { ascending: true })
         .order('appointment_time', { ascending: true })
         .limit(5);

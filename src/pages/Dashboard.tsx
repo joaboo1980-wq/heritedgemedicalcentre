@@ -245,8 +245,139 @@ const Dashboard = () => {
         </Card>
       </div>
 
-      {/* Recent Activity */}
+      {/* Weekly Appointments */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg font-semibold text-foreground">
+            Weekly Appointments
+          </CardTitle>
+          <p className="text-sm text-muted-foreground">
+            Appointment bookings for this week
+          </p>
+        </CardHeader>
+        <CardContent>
+          <div className="text-center py-8 text-muted-foreground">
+            <Calendar className="h-12 w-12 mx-auto mb-2 opacity-50" />
+            <p>No valid data available</p>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Recent Activity and Alerts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Recent Activity */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg font-semibold text-foreground">
+              Recent Activity
+            </CardTitle>
+            <p className="text-sm text-muted-foreground">
+              Latest updates from your clinic
+            </p>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              {recentAppointments && recentAppointments.length > 0 ? (
+                <div className="space-y-3">
+                  {recentAppointments.slice(0, 3).map((apt) => (
+                    <div key={apt.id} className="flex gap-3 pb-3 border-b last:border-b-0">
+                      <div className="w-2 h-2 rounded-full bg-primary mt-2 flex-shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-foreground text-sm">
+                          New appointment scheduled with {apt.patient_name}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {formatDistanceToNow(new Date(apt.appointment_date), { addSuffix: true })}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-8 text-muted-foreground">
+                  <Calendar className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                  <p>No recent activity</p>
+                </div>
+              )}
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 text-sm text-muted-foreground pb-2">
+                  <div className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                  Patient John Doe checked in
+                </div>
+                <div className="text-xs text-muted-foreground">12 minutes ago</div>
+              </div>
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 text-sm text-muted-foreground pb-2">
+                  <div className="w-1.5 h-1.5 rounded-full bg-green-500" />
+                  Lab results ready for Patient ID: 12345
+                </div>
+                <div className="text-xs text-muted-foreground">25 minutes ago</div>
+              </div>
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 text-sm text-muted-foreground pb-2">
+                  <div className="w-1.5 h-1.5 rounded-full bg-orange-500" />
+                  Payment received from Insurance Co.
+                </div>
+                <div className="text-xs text-muted-foreground">1 hour ago</div>
+              </div>
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 text-sm text-muted-foreground pb-2">
+                  <div className="w-1.5 h-1.5 rounded-full bg-purple-500" />
+                  Emergency patient admitted to ICU
+                </div>
+                <div className="text-xs text-muted-foreground">5 hours ago</div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Alerts & Notifications */}
+        <Card className="border-amber-200 bg-amber-50/50 dark:bg-amber-950/20 dark:border-amber-900">
+          <CardHeader>
+            <CardTitle className="text-lg font-semibold text-foreground flex items-center gap-2">
+              <div className="w-2 h-2 rounded-full bg-red-500" />
+              Alerts & Notifications
+            </CardTitle>
+            <p className="text-sm text-muted-foreground">
+              Important updates requiring attention
+            </p>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              <div className="p-3 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900 rounded-lg">
+                <div className="flex items-start gap-2">
+                  <div className="w-2 h-2 rounded-full bg-red-500 mt-1 flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-sm text-red-900 dark:text-red-200">Low Inventory Alert</p>
+                    <p className="text-xs text-red-700 dark:text-red-300">Paracetamol stock is running low (17 units remaining)</p>
+                  </div>
+                  <Badge variant="secondary" className="bg-red-500 text-white ml-2">warning</Badge>
+                </div>
+              </div>
+              <div className="p-3 bg-pink-50 dark:bg-pink-950/30 border border-pink-200 dark:border-pink-900 rounded-lg">
+                <div className="flex items-start gap-2">
+                  <div className="w-2 h-2 rounded-full bg-pink-500 mt-1 flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-sm text-pink-900 dark:text-pink-200">Equipment Maintenance</p>
+                    <p className="text-xs text-pink-700 dark:text-pink-300">Mill Machine #2 scheduled for maintenance tomorrow</p>
+                  </div>
+                  <Badge variant="secondary" className="bg-pink-500 text-white ml-2">info</Badge>
+                </div>
+              </div>
+              <div className="p-3 bg-purple-50 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-900 rounded-lg">
+                <div className="flex items-start gap-2">
+                  <div className="w-2 h-2 rounded-full bg-purple-500 mt-1 flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-sm text-purple-900 dark:text-purple-200">Staff Schedule</p>
+                    <p className="text-xs text-purple-700 dark:text-purple-300">Dr. Johnson requested schedule change for next week</p>
+                  </div>
+                  <Badge variant="secondary" className="bg-purple-500 text-white ml-2">info</Badge>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
         {/* Upcoming Appointments */}
         <Card>
           <CardHeader>
