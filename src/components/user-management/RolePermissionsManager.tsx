@@ -103,7 +103,7 @@ const RolePermissionsManager = () => {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="flex items-center gap-2">
+        <CardTitle className="flex items-center gap-2 text-xl md:text-2xl">
           <Shield className="h-5 w-5" />
           Role Permissions
         </CardTitle>
@@ -113,14 +113,16 @@ const RolePermissionsManager = () => {
       </CardHeader>
       <CardContent>
         <Tabs value={selectedRole} onValueChange={(v) => setSelectedRole(v as AppRole)}>
-          <TabsList className="grid grid-cols-6 mb-6">
+          {/* Role Tabs - Responsive Grid */}
+          <TabsList className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 mb-6 w-full">
             {ROLES.map((role) => (
               <TabsTrigger 
                 key={role.value} 
                 value={role.value}
-                className="text-xs"
+                className="text-xs md:text-sm"
               >
-                {role.label}
+                <span className="hidden sm:inline">{role.label}</span>
+                <span className="sm:hidden">{role.label.split(' ')[0]}</span>
               </TabsTrigger>
             ))}
           </TabsList>
@@ -128,7 +130,7 @@ const RolePermissionsManager = () => {
           {ROLES.map((role) => (
             <TabsContent key={role.value} value={role.value}>
               {selectedRole === 'admin' && (
-                <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-800 text-sm">
+                <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-800 text-xs md:text-sm">
                   Admin role has full access to all modules and cannot be restricted.
                 </div>
               )}
@@ -138,7 +140,7 @@ const RolePermissionsManager = () => {
                   <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" />
                 </div>
               ) : (
-                <div className="space-y-4">
+                <div className="space-y-3 md:space-y-4">
                   {MODULES.map((module) => {
                     const permission = getPermissionForModule(module.value);
                     if (!permission) return null;
@@ -146,18 +148,20 @@ const RolePermissionsManager = () => {
                     return (
                       <div
                         key={module.value}
-                        className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50 transition-colors"
+                        className="flex flex-col md:flex-row md:items-center md:justify-between p-3 md:p-4 border rounded-lg hover:bg-muted/50 transition-colors gap-3 md:gap-0"
                       >
-                        <div className="flex-1">
-                          <h4 className="font-medium text-foreground">{module.label}</h4>
-                          <p className="text-sm text-muted-foreground">{module.description}</p>
+                        {/* Module Info */}
+                        <div className="flex-1 min-w-0">
+                          <h4 className="font-medium text-foreground text-sm md:text-base">{module.label}</h4>
+                          <p className="text-xs md:text-sm text-muted-foreground truncate">{module.description}</p>
                         </div>
 
-                        <div className="flex items-center gap-6">
+                        {/* Permissions Grid - Responsive */}
+                        <div className="grid grid-cols-2 md:flex md:items-center md:gap-6 gap-3 w-full md:w-auto">
                           {/* View Permission */}
-                          <div className="flex items-center gap-2">
-                            <Eye className="h-4 w-4 text-muted-foreground" />
-                            <Label htmlFor={`${module.value}-view`} className="text-xs text-muted-foreground">
+                          <div className="flex items-center gap-2 bg-slate-50 md:bg-transparent p-2 md:p-0 rounded">
+                            <Eye className="h-3.5 w-3.5 md:h-4 md:w-4 text-muted-foreground flex-shrink-0" />
+                            <Label htmlFor={`${module.value}-view`} className="text-xs md:text-xs text-muted-foreground hidden md:inline">
                               View
                             </Label>
                             <Switch
@@ -171,9 +175,9 @@ const RolePermissionsManager = () => {
                           </div>
 
                           {/* Create Permission */}
-                          <div className="flex items-center gap-2">
-                            <Plus className="h-4 w-4 text-muted-foreground" />
-                            <Label htmlFor={`${module.value}-create`} className="text-xs text-muted-foreground">
+                          <div className="flex items-center gap-2 bg-slate-50 md:bg-transparent p-2 md:p-0 rounded">
+                            <Plus className="h-3.5 w-3.5 md:h-4 md:w-4 text-muted-foreground flex-shrink-0" />
+                            <Label htmlFor={`${module.value}-create`} className="text-xs md:text-xs text-muted-foreground hidden md:inline">
                               Create
                             </Label>
                             <Switch
@@ -187,9 +191,9 @@ const RolePermissionsManager = () => {
                           </div>
 
                           {/* Edit Permission */}
-                          <div className="flex items-center gap-2">
-                            <Pencil className="h-4 w-4 text-muted-foreground" />
-                            <Label htmlFor={`${module.value}-edit`} className="text-xs text-muted-foreground">
+                          <div className="flex items-center gap-2 bg-slate-50 md:bg-transparent p-2 md:p-0 rounded">
+                            <Pencil className="h-3.5 w-3.5 md:h-4 md:w-4 text-muted-foreground flex-shrink-0" />
+                            <Label htmlFor={`${module.value}-edit`} className="text-xs md:text-xs text-muted-foreground hidden md:inline">
                               Edit
                             </Label>
                             <Switch
@@ -203,9 +207,9 @@ const RolePermissionsManager = () => {
                           </div>
 
                           {/* Delete Permission */}
-                          <div className="flex items-center gap-2">
-                            <Trash2 className="h-4 w-4 text-muted-foreground" />
-                            <Label htmlFor={`${module.value}-delete`} className="text-xs text-muted-foreground">
+                          <div className="flex items-center gap-2 bg-slate-50 md:bg-transparent p-2 md:p-0 rounded">
+                            <Trash2 className="h-3.5 w-3.5 md:h-4 md:w-4 text-muted-foreground flex-shrink-0" />
+                            <Label htmlFor={`${module.value}-delete`} className="text-xs md:text-xs text-muted-foreground hidden md:inline">
                               Delete
                             </Label>
                             <Switch
