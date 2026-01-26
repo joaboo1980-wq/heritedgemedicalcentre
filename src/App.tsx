@@ -11,8 +11,10 @@ import Auth from "./pages/Auth";
 import DashboardLayout from "./components/layout/DashboardLayout";
 import Dashboard from "./pages/Dashboard";
 import Patients from "./pages/Patients";
+import DoctorExamination from "./pages/DoctorExamination";
 import Appointments from "./pages/Appointments";
 import Staff from "./pages/Staff";
+import StaffSchedule from "./pages/StaffSchedule";
 import Laboratory from "./pages/Laboratory";
 import Pharmacy from "./pages/Pharmacy";
 import Reports from "./pages/Reports";
@@ -62,6 +64,11 @@ const App = () => (
                   <Patients />
                 </ProtectedRoute>
               } />
+              <Route path="/doctor-examination" element={
+                <ProtectedRoute module="patients">
+                  <DoctorExamination />
+                </ProtectedRoute>
+              } />
               <Route path="/appointments" element={
                 <ProtectedRoute module="appointments">
                   <Appointments />
@@ -70,6 +77,11 @@ const App = () => (
               <Route path="/staff" element={
                 <ProtectedRoute module="staff">
                   <Staff />
+                </ProtectedRoute>
+              } />
+              <Route path="/staff-schedule" element={
+                <ProtectedRoute module="staff">
+                  <StaffSchedule />
                 </ProtectedRoute>
               } />
               <Route path="/laboratory" element={

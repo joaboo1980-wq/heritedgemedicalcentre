@@ -23,6 +23,15 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -30,8 +39,15 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { toast } from 'sonner';
-import { Plus, Search, Eye, Edit, Users } from 'lucide-react';
+import { Plus, Search, Eye, Edit, Users, MoreHorizontal, Calendar, History, Trash2 } from 'lucide-react';
 import { format } from 'date-fns';
 import PermissionGuard from '@/components/layout/PermissionGuard';
 
@@ -51,6 +67,20 @@ interface Patient {
   created_at: string;
 }
 
+interface MedicalExamination {
+  id: string;
+  patient_id: string;
+  examination_date: string;
+  chief_complaint: string;
+  assessment_diagnosis: string;
+  triage_temperature: number | null;
+  triage_blood_pressure: string | null;
+  triage_pulse_rate: number | null;
+  medications_prescribed: string | null;
+  plan_treatment: string | null;
+  [key: string]: any;
+}
+
 const Patients = () => {
   const { user } = useAuth();
   const queryClient = useQueryClient();
@@ -58,6 +88,30 @@ const Patients = () => {
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [isMedicalHistoryDialogOpen, setIsMedicalHistoryDialogOpen] = useState(false);
+  const [medicalExaminations, setMedicalExaminations] = useState<MedicalExamination[]>([]);
+
+  // Edit patient mutation
+  const editPatientMutation = useMutation({
+    mutationFn: async (patient: Patient) => {
+      const { id, ...updateFields } = patient;
+      const { error } = await supabase
+        .from('patients')
+        .update(updateFields)
+        .eq('id', id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['patients'] });
+      setIsEditDialogOpen(false);
+      toast.success('Patient details updated successfully');
+    },
+    onError: (error: any) => {
+      toast.error(error.message || 'Failed to update patient');
+    },
+  });
   
   // Log user authentication state
   console.log('[AUTH] Current user:', user?.id, 'Email:', user?.email);
@@ -98,6 +152,22 @@ const Patients = () => {
     },
     staleTime: 5 * 60 * 1000, // 5 minutes
     gcTime: 10 * 60 * 1000, // 10 minutes (formerly cacheTime)
+  });
+
+  // Fetch medical examinations for selected patient
+  const { data: patientExaminations } = useQuery({
+    queryKey: ['medical-examinations', selectedPatient?.id],
+    queryFn: async () => {
+      if (!selectedPatient?.id) return [];
+      const { data, error } = await supabase
+        .from('medical_examinations' as any)
+        .select('*')
+        .eq('patient_id', selectedPatient.id)
+        .order('examination_date', { ascending: false });
+      if (error) throw error;
+      return data as MedicalExamination[];
+    },
+    enabled: isMedicalHistoryDialogOpen && !!selectedPatient?.id,
   });
 
   // Create patient mutation
@@ -160,6 +230,39 @@ const Patients = () => {
     onError: (error: Error) => {
       console.error('[MUTATION ERROR]', error.message);
       toast.error(error.message);
+    },
+  });
+
+  // Delete patient mutation
+  const deletePatientMutation = useMutation({
+    mutationFn: async (patientId: string) => {
+      console.log('[DELETE] Starting patient deletion for ID:', patientId);
+      
+      const { error, data } = await supabase
+        .from('patients')
+        .delete()
+        .eq('id', patientId)
+        .select();
+      
+      if (error) {
+        console.error('[DELETE ERROR]', error.message, error.details, error.hint, error.code);
+        throw new Error(error.message || 'Failed to delete patient');
+      }
+      
+      console.log('[DELETE SUCCESS] Patient deleted:', data);
+      return data;
+    },
+    onSuccess: () => {
+      console.log('[DELETE] Cache invalidation starting...');
+      queryClient.invalidateQueries({ queryKey: ['patients'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] });
+      setIsDeleteDialogOpen(false);
+      setSelectedPatient(null);
+      toast.success('Patient deleted successfully');
+    },
+    onError: (error: Error) => {
+      console.error('[DELETE MUTATION ERROR]', error.message);
+      toast.error(`Failed to delete patient: ${error.message}`);
     },
   });
 
@@ -454,26 +557,76 @@ const Patients = () => {
                       )}
                     </TableCell>
                     <TableCell>
-                      {format(new Date(patient.created_at), 'MMM d, yyyy')}
+                      {patient.created_at ? format(new Date(patient.created_at), 'MMM d, yyyy') : '-'}
                     </TableCell>
                     <TableCell>
-                      <div className="flex gap-2">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => {
-                            setSelectedPatient(patient);
-                            setIsViewDialogOpen(true);
-                          }}
-                        >
-                          <Eye className="h-4 w-4" />
-                        </Button>
-                        <PermissionGuard module="patients" action="edit">
-                          <Button variant="ghost" size="icon">
-                            <Edit className="h-4 w-4" />
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon" className="h-8 w-8 p-0">
+                            <MoreHorizontal className="h-4 w-4" />
+                            <span className="sr-only">Open menu</span>
                           </Button>
-                        </PermissionGuard>
-                      </div>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-56">
+                          <DropdownMenuItem
+                            onClick={() => {
+                              setSelectedPatient(patient);
+                              setIsViewDialogOpen(true);
+                            }}
+                          >
+                            <Eye className="mr-2 h-4 w-4" />
+                            <span>View Details</span>
+                          </DropdownMenuItem>
+
+                          <PermissionGuard module="patients" action="edit">
+                            <DropdownMenuItem
+                              onClick={() => {
+                                setSelectedPatient(patient);
+                                setIsEditDialogOpen(true);
+                              }}
+                            >
+                              <Edit className="mr-2 h-4 w-4" />
+                              <span>Edit Patient</span>
+                            </DropdownMenuItem>
+                          </PermissionGuard>
+
+                          <DropdownMenuItem
+                            onClick={() => {
+                              setSelectedPatient(patient);
+                              // Navigate to appointments with patient selected
+                              window.location.href = `/appointments?patientId=${patient.id}`;
+                            }}
+                          >
+                            <Calendar className="mr-2 h-4 w-4" />
+                            <span>Schedule Appointment</span>
+                          </DropdownMenuItem>
+
+                          <DropdownMenuItem
+                            onClick={() => {
+                              setSelectedPatient(patient);
+                              setIsMedicalHistoryDialogOpen(true);
+                            }}
+                          >
+                            <History className="mr-2 h-4 w-4" />
+                            <span>View Medical History</span>
+                          </DropdownMenuItem>
+
+                          <DropdownMenuSeparator />
+
+                          <PermissionGuard module="patients" action="delete">
+                            <DropdownMenuItem
+                              onClick={() => {
+                                setSelectedPatient(patient);
+                                setIsDeleteDialogOpen(true);
+                              }}
+                              className="text-red-600 focus:text-red-600 focus:bg-red-50"
+                            >
+                              <Trash2 className="mr-2 h-4 w-4" />
+                              <span>Delete Patient</span>
+                            </DropdownMenuItem>
+                          </PermissionGuard>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -515,7 +668,7 @@ const Patients = () => {
               <div className="grid grid-cols-2 gap-4 text-sm">
                 <div>
                   <p className="text-muted-foreground">Date of Birth</p>
-                  <p className="font-medium">{format(new Date(selectedPatient.date_of_birth), 'MMMM d, yyyy')}</p>
+                  <p className="font-medium">{selectedPatient.date_of_birth ? format(new Date(selectedPatient.date_of_birth), 'MMMM d, yyyy') : 'N/A'}</p>
                 </div>
                 <div>
                   <p className="text-muted-foreground">Gender</p>
@@ -547,6 +700,296 @@ const Patients = () => {
               )}
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Patient Dialog */}
+      <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Patient</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete {selectedPatient?.first_name} {selectedPatient?.last_name}? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="flex justify-end gap-4">
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (selectedPatient?.id) {
+                  deletePatientMutation.mutate(selectedPatient.id);
+                }
+              }}
+              className="bg-red-600 hover:bg-red-700 focus:ring-red-600"
+            >
+              {deletePatientMutation.isPending ? 'Deleting...' : 'Delete'}
+            </AlertDialogAction>
+          </div>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Edit Patient Dialog */}
+      <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+        <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Edit Patient</DialogTitle>
+            <DialogDescription>
+              Update patient information. Click save when done.
+            </DialogDescription>
+          </DialogHeader>
+          {selectedPatient && (
+            <div className="space-y-6">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="edit_first_name">First Name</Label>
+                  <Input
+                    id="edit_first_name"
+                    value={selectedPatient.first_name}
+                    onChange={(e) =>
+                      setSelectedPatient({
+                        ...selectedPatient,
+                        first_name: e.target.value,
+                      })
+                    }
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit_last_name">Last Name</Label>
+                  <Input
+                    id="edit_last_name"
+                    value={selectedPatient.last_name}
+                    onChange={(e) =>
+                      setSelectedPatient({
+                        ...selectedPatient,
+                        last_name: e.target.value,
+                      })
+                    }
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="edit_dob">Date of Birth</Label>
+                  <Input
+                    id="edit_dob"
+                    type="date"
+                    value={selectedPatient.date_of_birth}
+                    onChange={(e) =>
+                      setSelectedPatient({
+                        ...selectedPatient,
+                        date_of_birth: e.target.value,
+                      })
+                    }
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit_gender">Gender</Label>
+                  <Select
+                    value={selectedPatient.gender}
+                    onValueChange={(value) =>
+                      setSelectedPatient({
+                        ...selectedPatient,
+                        gender: value,
+                      })
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="male">Male</SelectItem>
+                      <SelectItem value="female">Female</SelectItem>
+                      <SelectItem value="other">Other</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="edit_phone">Phone</Label>
+                  <Input
+                    id="edit_phone"
+                    value={selectedPatient.phone || ''}
+                    onChange={(e) =>
+                      setSelectedPatient({
+                        ...selectedPatient,
+                        phone: e.target.value,
+                      })
+                    }
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit_email">Email</Label>
+                  <Input
+                    id="edit_email"
+                    type="email"
+                    value={selectedPatient.email || ''}
+                    onChange={(e) =>
+                      setSelectedPatient({
+                        ...selectedPatient,
+                        email: e.target.value,
+                      })
+                    }
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="edit_address">Address</Label>
+                <Input
+                  id="edit_address"
+                  value={selectedPatient.address || ''}
+                  onChange={(e) =>
+                    setSelectedPatient({
+                      ...selectedPatient,
+                      address: e.target.value,
+                    })
+                  }
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="edit_blood_type">Blood Type</Label>
+                  <Select
+                    value={selectedPatient.blood_type || ''}
+                    onValueChange={(value) =>
+                      setSelectedPatient({
+                        ...selectedPatient,
+                        blood_type: value,
+                      })
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select blood type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="A+">A+</SelectItem>
+                      <SelectItem value="A-">A-</SelectItem>
+                      <SelectItem value="B+">B+</SelectItem>
+                      <SelectItem value="B-">B-</SelectItem>
+                      <SelectItem value="AB+">AB+</SelectItem>
+                      <SelectItem value="AB-">AB-</SelectItem>
+                      <SelectItem value="O+">O+</SelectItem>
+                      <SelectItem value="O-">O-</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit_insurance">Insurance Provider</Label>
+                  <Input
+                    id="edit_insurance"
+                    value={selectedPatient.insurance_provider || ''}
+                    onChange={(e) =>
+                      setSelectedPatient({
+                        ...selectedPatient,
+                        insurance_provider: e.target.value,
+                      })
+                    }
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-4">
+                <Button
+                  variant="outline"
+                  onClick={() => setIsEditDialogOpen(false)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={() => {
+                    if (selectedPatient) {
+                      editPatientMutation.mutate(selectedPatient);
+                    }
+                  }}
+                  disabled={editPatientMutation.isPending}
+                >
+                  {editPatientMutation.isPending ? 'Saving...' : 'Save Changes'}
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* View Medical History Dialog */}
+      <Dialog open={isMedicalHistoryDialogOpen} onOpenChange={setIsMedicalHistoryDialogOpen}>
+        <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Medical History - {selectedPatient?.first_name} {selectedPatient?.last_name}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-6">
+            {patientExaminations && patientExaminations.length > 0 ? (
+              <>
+                {patientExaminations.map((exam) => (
+                  <div key={exam.id} className="border rounded-lg p-4 space-y-3">
+                    <div className="flex items-center justify-between border-b pb-3">
+                      <div>
+                        <p className="font-semibold">Examination Date</p>
+                        <p className="text-sm text-muted-foreground">
+                          {format(new Date(exam.examination_date), 'MMMM d, yyyy HH:mm')}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <p className="font-semibold text-sm">Chief Complaint</p>
+                        <p className="text-sm text-muted-foreground">{exam.chief_complaint}</p>
+                      </div>
+                      <div>
+                        <p className="font-semibold text-sm">Diagnosis</p>
+                        <p className="text-sm text-muted-foreground">{exam.assessment_diagnosis}</p>
+                      </div>
+                    </div>
+
+                    {/* Vital Signs */}
+                    {(exam.triage_temperature || exam.triage_blood_pressure) && (
+                      <div className="bg-slate-50 p-3 rounded">
+                        <p className="font-semibold text-sm mb-2">Vital Signs</p>
+                        <div className="grid grid-cols-2 gap-2 text-sm">
+                          {exam.triage_temperature && (
+                            <p>Temperature: <span className="font-medium">{exam.triage_temperature}°C</span></p>
+                          )}
+                          {exam.triage_blood_pressure && (
+                            <p>Blood Pressure: <span className="font-medium">{exam.triage_blood_pressure}</span></p>
+                          )}
+                          {exam.triage_pulse_rate && (
+                            <p>Pulse Rate: <span className="font-medium">{exam.triage_pulse_rate} bpm</span></p>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Treatment Plan and Medications */}
+                    {(exam.plan_treatment || exam.medications_prescribed) && (
+                      <div className="space-y-2">
+                        {exam.plan_treatment && (
+                          <div>
+                            <p className="font-semibold text-sm">Treatment Plan</p>
+                            <p className="text-sm text-muted-foreground">{exam.plan_treatment}</p>
+                          </div>
+                        )}
+                        {exam.medications_prescribed && (
+                          <div>
+                            <p className="font-semibold text-sm">Medications Prescribed</p>
+                            <p className="text-sm text-muted-foreground">{exam.medications_prescribed}</p>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </>
+            ) : (
+              <div className="text-center py-8 text-muted-foreground">
+                No medical examination records found for this patient
+              </div>
+            )}
+          </div>
         </DialogContent>
       </Dialog>
     </div>

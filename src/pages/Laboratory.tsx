@@ -23,6 +23,13 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -31,7 +38,7 @@ import {
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
-import { Plus, Search, FlaskConical, Clock, CheckCircle, AlertCircle, Download } from 'lucide-react';
+import { Plus, Search, FlaskConical, Clock, CheckCircle, AlertCircle, Download, MoreHorizontal, Eye, FileText, Printer, Droplet } from 'lucide-react';
 import { format } from 'date-fns';
 import PermissionGuard from '@/components/layout/PermissionGuard';
 
@@ -87,6 +94,8 @@ const Laboratory = () => {
   const [filterTab, setFilterTab] = useState<'all' | 'pending' | 'completed' | 'sample'>('all');
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isResultDialogOpen, setIsResultDialogOpen] = useState(false);
+  const [isDetailsDialogOpen, setIsDetailsDialogOpen] = useState(false);
+  const [isSampleDialogOpen, setIsSampleDialogOpen] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<LabOrder | null>(null);
   const [testSearch, setTestSearch] = useState('');
   const [showTestList, setShowTestList] = useState(false);
@@ -273,6 +282,61 @@ const Laboratory = () => {
     a.download = `lab-tests-${format(new Date(), 'yyyy-MM-dd')}.csv`;
     a.click();
     window.URL.revokeObjectURL(url);
+  };
+
+  const handlePrintReport = (order: LabOrder) => {
+    const printWindow = window.open('', '_blank');
+    if (printWindow) {
+      const html = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Lab Test Report - ${order.order_number}</title>
+          <style>
+            body { font-family: Arial, sans-serif; margin: 20px; }
+            .header { text-align: center; margin-bottom: 30px; border-bottom: 2px solid #000; padding-bottom: 10px; }
+            .header h1 { margin: 0; }
+            .section { margin: 20px 0; }
+            .label { font-weight: bold; }
+            .value { margin-left: 10px; }
+            table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+            th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+            th { background-color: #f5f5f5; }
+            .abnormal { color: red; font-weight: bold; }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <h1>Laboratory Test Report</h1>
+            <p>Rural Health Team Uganda</p>
+          </div>
+          
+          <div class="section">
+            <div><span class="label">Test ID:</span><span class="value">${order.order_number}</span></div>
+            <div><span class="label">Patient:</span><span class="value">${order.patients?.first_name} ${order.patients?.last_name} (${order.patients?.patient_number})</span></div>
+            <div><span class="label">Test Name:</span><span class="value">${order.lab_tests?.test_name}</span></div>
+            <div><span class="label">Test Code:</span><span class="value">${order.lab_tests?.test_code}</span></div>
+            <div><span class="label">Category:</span><span class="value">${order.lab_tests?.category}</span></div>
+            <div><span class="label">Date Requested:</span><span class="value">${format(new Date(order.created_at), 'MMM dd, yyyy')}</span></div>
+            <div><span class="label">Status:</span><span class="value">${order.status.replace('_', ' ').toUpperCase()}</span></div>
+          </div>
+
+          ${order.result_value ? `
+            <div class="section">
+              <h2>Results</h2>
+              <div><span class="label">Result Value:</span><span class="value ${order.is_abnormal ? 'abnormal' : ''}">${order.result_value}</span></div>
+              ${order.result_notes ? `<div><span class="label">Notes:</span><span class="value">${order.result_notes}</span></div>` : ''}
+              ${order.is_abnormal ? '<div class="abnormal">⚠️ ABNORMAL RESULT</div>' : ''}
+            </div>
+          ` : '<div class="section"><p>Results pending...</p></div>'}
+
+          <script>window.print();</script>
+        </body>
+        </html>
+      `;
+      printWindow.document.write(html);
+      printWindow.document.close();
+    }
   };
 
   return (
@@ -488,16 +552,53 @@ const Laboratory = () => {
                       </Badge>
                     </TableCell>
                     <TableCell>
-                      <Select value={order.status} onValueChange={(status) => updateStatusMutation.mutate({ id: order.id, status })}>
-                        <SelectTrigger className="w-20 h-8 text-xs"><SelectValue placeholder="Update" /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="pending">Pending</SelectItem>
-                          <SelectItem value="sample_collected">Sample Collected</SelectItem>
-                          <SelectItem value="processing">Processing</SelectItem>
-                          <SelectItem value="completed">Completed</SelectItem>
-                          <SelectItem value="cancelled">Cancelled</SelectItem>
-                        </SelectContent>
-                      </Select>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon" className="h-8 w-8 p-0">
+                            <MoreHorizontal className="h-4 w-4" />
+                            <span className="sr-only">Open menu</span>
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-56">
+                          <DropdownMenuItem
+                            onClick={() => {
+                              setSelectedOrder(order);
+                              setIsDetailsDialogOpen(true);
+                            }}
+                          >
+                            <Eye className="mr-2 h-4 w-4" />
+                            <span>View Details</span>
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() => {
+                              setSelectedOrder(order);
+                              setIsResultDialogOpen(true);
+                            }}
+                          >
+                            <FileText className="mr-2 h-4 w-4" />
+                            <span>Update Status</span>
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() => {
+                              setSelectedOrder(order);
+                              handlePrintReport(order);
+                            }}
+                          >
+                            <Printer className="mr-2 h-4 w-4" />
+                            <span>Print Report</span>
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            onClick={() => {
+                              setSelectedOrder(order);
+                              setIsSampleDialogOpen(true);
+                            }}
+                          >
+                            <Droplet className="mr-2 h-4 w-4" />
+                            <span>Sample Collection</span>
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -538,6 +639,155 @@ const Laboratory = () => {
                 {submitResultMutation.isPending ? 'Submitting...' : 'Submit Results'}
               </Button>
             </form>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Test Details Dialog */}
+      <Dialog open={isDetailsDialogOpen} onOpenChange={setIsDetailsDialogOpen}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Test Details - {selectedOrder?.order_number}</DialogTitle>
+          </DialogHeader>
+          {selectedOrder && (
+            <div className="space-y-6">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">Test ID</p>
+                  <p className="text-lg font-semibold">{selectedOrder.order_number}</p>
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">Date Requested</p>
+                  <p className="text-lg font-semibold">{format(new Date(selectedOrder.created_at), 'MMM dd, yyyy')}</p>
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">Patient</p>
+                  <p className="text-lg font-semibold">{selectedOrder.patients?.first_name} {selectedOrder.patients?.last_name}</p>
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">Patient Number</p>
+                  <p className="text-lg font-semibold">{selectedOrder.patients?.patient_number}</p>
+                </div>
+              </div>
+
+              <div className="border-t pt-4">
+                <h3 className="font-semibold mb-3">Test Information</h3>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-sm font-medium text-muted-foreground">Test Name</p>
+                    <p className="text-base">{selectedOrder.lab_tests?.test_name}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-muted-foreground">Test Code</p>
+                    <p className="text-base">{selectedOrder.lab_tests?.test_code}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-muted-foreground">Category</p>
+                    <p className="text-base">{selectedOrder.lab_tests?.category}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-muted-foreground">Priority</p>
+                    <Badge className={priorityColors[selectedOrder.priority]}>{selectedOrder.priority}</Badge>
+                  </div>
+                </div>
+              </div>
+
+              <div className="border-t pt-4">
+                <h3 className="font-semibold mb-3">Status</h3>
+                <Badge className={statusColors[selectedOrder.status]}>
+                  {selectedOrder.status === 'pending' && 'Pending'}
+                  {selectedOrder.status === 'sample_collected' && 'Sample Needed'}
+                  {selectedOrder.status === 'processing' && 'In Progress'}
+                  {selectedOrder.status === 'completed' && 'Completed'}
+                  {selectedOrder.status === 'cancelled' && 'Cancelled'}
+                </Badge>
+              </div>
+
+              {selectedOrder.result_value && (
+                <div className="border-t pt-4">
+                  <h3 className="font-semibold mb-3">Results</h3>
+                  <div className="space-y-2">
+                    <div>
+                      <p className="text-sm font-medium text-muted-foreground">Result Value</p>
+                      <p className={`text-base ${selectedOrder.is_abnormal ? 'font-semibold text-red-600' : ''}`}>
+                        {selectedOrder.result_value}
+                      </p>
+                    </div>
+                    {selectedOrder.result_notes && (
+                      <div>
+                        <p className="text-sm font-medium text-muted-foreground">Notes</p>
+                        <p className="text-base">{selectedOrder.result_notes}</p>
+                      </div>
+                    )}
+                    {selectedOrder.is_abnormal && (
+                      <div className="mt-2 p-3 bg-red-50 border border-red-200 rounded-lg">
+                        <p className="text-red-700 font-semibold">⚠️ Abnormal Result</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex justify-end gap-4 pt-4">
+                <Button variant="outline" onClick={() => setIsDetailsDialogOpen(false)}>Close</Button>
+                <Button onClick={() => {
+                  setIsDetailsDialogOpen(false);
+                  handlePrintReport(selectedOrder);
+                }}>
+                  <Printer className="mr-2 h-4 w-4" />
+                  Print Report
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Sample Collection Dialog */}
+      <Dialog open={isSampleDialogOpen} onOpenChange={setIsSampleDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Sample Collection - {selectedOrder?.order_number}</DialogTitle>
+          </DialogHeader>
+          {selectedOrder && (
+            <div className="space-y-4">
+              <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                <p className="font-medium text-blue-900">{selectedOrder.lab_tests?.test_name}</p>
+                <p className="text-sm text-blue-700 mt-1">Patient: {selectedOrder.patients?.first_name} {selectedOrder.patients?.last_name}</p>
+              </div>
+
+              <div className="space-y-3">
+                <div>
+                  <Label className="font-semibold">Sample Collection Status</Label>
+                  <Select 
+                    value={selectedOrder.status} 
+                    onValueChange={(status) => {
+                      updateStatusMutation.mutate({ id: selectedOrder.id, status });
+                      setIsSampleDialogOpen(false);
+                    }}
+                  >
+                    <SelectTrigger className="mt-2">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="pending">Pending Collection</SelectItem>
+                      <SelectItem value="sample_collected">Sample Collected</SelectItem>
+                      <SelectItem value="processing">Processing</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                  <p className="text-sm text-amber-700">
+                    <span className="font-semibold">Note:</span> Mark as "Sample Collected" once the patient has provided their sample.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-4 pt-2">
+                <Button variant="outline" onClick={() => setIsSampleDialogOpen(false)}>Cancel</Button>
+              </div>
+            </div>
           )}
         </DialogContent>
       </Dialog>

@@ -17,7 +17,9 @@ import {
   LucideIcon,
   Menu,
   X,
-  DollarSign
+  DollarSign,
+  Stethoscope,
+  Clock
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
@@ -35,8 +37,10 @@ interface NavItem {
 const navItems: NavItem[] = [
   { icon: LayoutDashboard, label: 'Dashboard', href: '/dashboard', module: 'dashboard' },
   { icon: Users, label: 'Patients', href: '/patients', module: 'patients' },
+  { icon: Stethoscope, label: 'Doctor Examination', href: '/doctor-examination', module: 'patients' },
   { icon: Calendar, label: 'Appointments', href: '/appointments', module: 'appointments' },
   { icon: UserCog, label: 'Staff', href: '/staff', module: 'staff' },
+  { icon: Clock, label: 'Staff Schedule', href: '/staff-schedule', module: 'staff' },
   { icon: FlaskConical, label: 'Laboratory', href: '/laboratory', module: 'laboratory' },
   { icon: Pill, label: 'Pharmacy', href: '/pharmacy', module: 'pharmacy' },
   { icon: Receipt, label: 'Billing', href: '/billing', module: 'billing' },

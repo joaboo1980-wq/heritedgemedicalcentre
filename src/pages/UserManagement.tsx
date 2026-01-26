@@ -17,6 +17,7 @@ import {
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -42,6 +43,7 @@ interface StaffMember {
   full_name: string;
   email: string;
   department: string | null;
+  department_id: string | null;
   roles: AppRole[];
 }
 
@@ -63,8 +65,21 @@ const UserManagement = () => {
     email: '',
     password: '',
     full_name: '',
-    department: '',
+    department_id: '',
     role: 'doctor' as AppRole,
+  });
+
+  // Fetch departments
+  const { data: departments } = useQuery({
+    queryKey: ['departments'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('departments')
+        .select('id, name')
+        .order('name');
+      if (error) throw error;
+      return data || [];
+    },
   });
 
   // Fetch staff with their roles
@@ -101,40 +116,81 @@ const UserManagement = () => {
   // Create user mutation
   const createUserMutation = useMutation({
     mutationFn: async (userData: typeof newUser) => {
-      // Create auth user via edge function (we'll create this)
-      const { data: authData, error: authError } = await supabase.auth.signUp({
-        email: userData.email,
-        password: userData.password,
-        options: {
-          emailRedirectTo: `${window.location.origin}/`,
-          data: {
-            full_name: userData.full_name,
+      // Validate inputs
+      if (!userData.email || !userData.password || !userData.full_name) {
+        throw new Error('Email, password, and full name are required');
+      }
+
+      if (userData.password.length < 6) {
+        throw new Error('Password must be at least 6 characters');
+      }
+
+      try {
+        // Get the current admin's session before creating the new user
+        const { data: { session: adminSession } } = await supabase.auth.getSession();
+        
+        if (!adminSession) {
+          throw new Error('Admin session not found');
+        }
+
+        // Create auth user via signUp
+        const { data: authData, error: authError } = await supabase.auth.signUp({
+          email: userData.email.trim().toLowerCase(),
+          password: userData.password,
+          options: {
+            data: {
+              full_name: userData.full_name,
+            },
           },
-        },
-      });
+        });
 
-      if (authError) throw authError;
-      if (!authData.user) throw new Error('User creation failed');
+        if (authError) {
+          console.error('Auth error details:', authError);
+          throw authError;
+        }
 
-      // Create profile
-      const { error: profileError } = await supabase.from('profiles').insert({
-        user_id: authData.user.id,
-        full_name: userData.full_name,
-        email: userData.email,
-        department: userData.department || null,
-      });
+        if (!authData.user) {
+          throw new Error('User creation failed - no user returned');
+        }
 
-      if (profileError) throw profileError;
+        const newUserId = authData.user.id;
 
-      // Assign role
-      const { error: roleError } = await supabase.from('user_roles').insert({
-        user_id: authData.user.id,
-        role: userData.role,
-      });
+        // Create profile
+        const { error: profileError } = await supabase.from('profiles').insert({
+          user_id: newUserId,
+          full_name: userData.full_name.trim(),
+          email: userData.email.trim().toLowerCase(),
+          department_id: userData.department_id || null,
+        });
 
-      if (roleError) throw roleError;
+        if (profileError) {
+          console.error('Profile error:', profileError);
+          throw profileError;
+        }
 
-      return authData.user;
+        // Assign role
+        const { error: roleError } = await supabase.from('user_roles').insert({
+          user_id: newUserId,
+          role: userData.role,
+        });
+
+        if (roleError) {
+          console.error('Role error:', roleError);
+          throw roleError;
+        }
+
+        // Restore the admin's session to prevent auto-login of new user
+        const { error: restoreError } = await supabase.auth.setSession(adminSession);
+        if (restoreError) {
+          console.error('Error restoring admin session:', restoreError);
+          // Continue anyway, the user was created successfully
+        }
+
+        return authData.user;
+      } catch (error) {
+        console.error('User creation error:', error);
+        throw error;
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['staff-management'] });
@@ -143,13 +199,15 @@ const UserManagement = () => {
         email: '',
         password: '',
         full_name: '',
-        department: '',
+        department_id: '',
         role: 'doctor',
       });
       toast.success('Staff member created successfully');
     },
     onError: (error: Error) => {
-      toast.error(error.message);
+      console.error('Mutation error:', error);
+      const errorMessage = error.message || 'Failed to create staff member';
+      toast.error(errorMessage);
     },
   });
 
@@ -224,13 +282,31 @@ const UserManagement = () => {
               Add Staff Member
             </Button>
           </DialogTrigger>
-          <DialogContent className="sm:max-w-md">
+          <DialogContent className="sm:max-w-md" title="Add New Staff Member">
             <DialogHeader>
               <DialogTitle>Add New Staff Member</DialogTitle>
+              <DialogDescription>
+                Create a new staff member account and assign roles.
+              </DialogDescription>
             </DialogHeader>
             <form
               onSubmit={(e) => {
                 e.preventDefault();
+                
+                // Client-side validation
+                if (!newUser.email.includes('@')) {
+                  toast.error('Please enter a valid email address');
+                  return;
+                }
+                if (newUser.password.length < 6) {
+                  toast.error('Password must be at least 6 characters');
+                  return;
+                }
+                if (!newUser.full_name.trim()) {
+                  toast.error('Full name is required');
+                  return;
+                }
+                
                 createUserMutation.mutate(newUser);
               }}
               className="space-y-4"
@@ -273,13 +349,23 @@ const UserManagement = () => {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="department">Department</Label>
-                <Input
-                  id="department"
-                  value={newUser.department}
-                  onChange={(e) =>
-                    setNewUser({ ...newUser, department: e.target.value })
+                <Select
+                  value={newUser.department_id}
+                  onValueChange={(value) =>
+                    setNewUser({ ...newUser, department_id: value })
                   }
-                />
+                >
+                  <SelectTrigger id="department">
+                    <SelectValue placeholder="Select a department" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {departments?.map((dept) => (
+                      <SelectItem key={dept.id} value={dept.id}>
+                        {dept.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="role">Role</Label>

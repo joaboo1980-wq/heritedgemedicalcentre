@@ -52,16 +52,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setProfile(profileDataArray[0] as Profile);
       }
 
-      // Fetch roles using RPC with timeout
-      console.log('Fetching roles via RPC...');
-      const { data: rolesData, error: rolesError } = await supabase.rpc('get_user_roles', { _user_id: userId });
+      // Fetch roles directly from user_roles table instead of RPC
+      console.log('Fetching roles...');
+      const { data: rolesData, error: rolesError } = await supabase
+        .from('user_roles')
+        .select('role')
+        .eq('user_id', userId);
       
       if (rolesError) {
         console.error('Roles fetch error:', rolesError);
         setRoles([]);
       } else if (rolesData && Array.isArray(rolesData)) {
-        console.log('Roles fetched:', rolesData);
-        setRoles(rolesData as AppRole[]);
+        const roles = rolesData.map((item: any) => item.role as AppRole);
+        console.log('Roles fetched:', roles);
+        setRoles(roles);
       } else {
         console.log('No roles data received');
         setRoles([]);

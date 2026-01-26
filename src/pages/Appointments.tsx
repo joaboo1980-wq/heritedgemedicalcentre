@@ -9,6 +9,7 @@ import { Textarea } from '@/components/ui/textarea';
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -64,8 +65,9 @@ interface Patient {
 }
 
 interface Doctor {
-  user_id: string;
-  full_name: string;
+  doctor_id: string;
+  email: string;
+  display_name: string;
   department: string | null;
 }
 
@@ -88,7 +90,8 @@ const statusIcons = {
 };
 
 const Appointments = () => {
-  const queryClient = useQueryClient();
+  const queryClient = useQueryClient(); // Only declare queryClient once
+  // Only declare these state variables once
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [filterTab, setFilterTab] = useState<'upcoming' | 'today' | 'past'>('today');
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
@@ -102,34 +105,52 @@ const Appointments = () => {
     department: '',
   });
 
+  // Debug: Log newAppointment state on change
+  // (This will log every render, but is useful for debugging form state)
+  console.log('newAppointment state:', newAppointment);
+
+  // Helper to validate UUID (simple check for length and dashes)
+  const isValidUUID = (uuid: string) => {
+    return uuid && uuid.length === 36 && uuid.includes('-');
+  };
+
   // Fetch appointments
   const { data: appointments, isLoading } = useQuery({
     queryKey: ['appointments'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('appointments')
-        .select(`
-          *,
-          patients (first_name, last_name, patient_number)
-        `)
-        .order('appointment_date', { ascending: true })
-        .order('appointment_time', { ascending: true });
-
-      if (error) throw error;
-      
-      // Fetch doctor profiles separately
-      const appointmentsWithDoctors = await Promise.all(
-        (data || []).map(async (apt) => {
-          const { data: profile } = await supabase
-            .from('profiles')
-            .select('full_name')
-            .eq('user_id', apt.doctor_id)
-            .single();
-          return { ...apt, profiles: profile };
-        })
-      );
-      
-      return appointmentsWithDoctors as Appointment[];
+      try {
+        const { data, error } = await supabase
+          .from('appointments')
+          .select(`
+            *,
+            patients (first_name, last_name, patient_number)
+          `)
+          .order('appointment_date', { ascending: true })
+          .order('appointment_time', { ascending: true });
+        if (error) {
+          console.error('Error fetching appointments:', error);
+          throw error;
+        }
+        // Fetch doctor profiles separately
+        const appointmentsWithDoctors = await Promise.all(
+          (data || []).map(async (apt) => {
+            const { data: profile, error: profileError } = await supabase
+              .from('profiles')
+              .select('full_name')
+              .eq('user_id', apt.doctor_id)
+              .single();
+            if (profileError) {
+              console.error('Error fetching doctor profile for', apt.doctor_id, profileError);
+            }
+            return { ...apt, profiles: profile };
+          })
+        );
+        console.log('Fetched appointments:', appointmentsWithDoctors);
+        return appointmentsWithDoctors as Appointment[];
+      } catch (err) {
+        console.error('Exception in appointments queryFn:', err);
+        throw err;
+      }
     },
   });
 
@@ -137,57 +158,94 @@ const Appointments = () => {
   const { data: patients } = useQuery({
     queryKey: ['patients-list'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('patients')
-        .select('id, first_name, last_name, patient_number')
-        .order('first_name');
-      if (error) throw error;
-      return data as Patient[];
+      try {
+        const { data, error } = await supabase
+          .from('patients')
+          .select('id, first_name, last_name, patient_number')
+          .order('first_name');
+        if (error) {
+          console.error('Error fetching patients:', error);
+          throw error;
+        }
+        console.log('Fetched patients:', data);
+        return data as Patient[];
+      } catch (err) {
+        console.error('Exception in patients queryFn:', err);
+        throw err;
+      }
     },
   });
 
-  // Fetch doctors (users with doctor role)
+  // Fetch departments for dropdown
+  const { data: departments } = useQuery({
+    queryKey: ['departments'],
+    queryFn: async () => {
+      try {
+        const { data, error } = await supabase
+          .from('departments' as any)
+          .select('id, name')
+          .order('name');
+        if (error) {
+          console.error('Error fetching departments:', error);
+          throw error;
+        }
+        console.log('Fetched departments:', data);
+        return data || [];
+      } catch (err) {
+        console.error('Exception in departments queryFn:', err);
+        throw err;
+      }
+    },
+  });
+
+  // Fetch doctors from doctor_directory view
   const { data: doctors } = useQuery({
     queryKey: ['doctors-list'],
     queryFn: async () => {
-      const { data: roles, error } = await supabase
-        .from('user_roles')
-        .select('user_id')
-        .eq('role', 'doctor');
-      
-      if (error) throw error;
-      
-      if (!roles?.length) return [];
-      
-      const doctorProfiles = await Promise.all(
-        roles.map(async (r) => {
-          const { data: profile } = await supabase
-            .from('profiles')
-            .select('user_id, full_name, department')
-            .eq('user_id', r.user_id)
-            .single();
-          return profile;
-        })
-      );
-      
-      return doctorProfiles.filter(Boolean) as Doctor[];
+      try {
+        const { data, error } = await supabase
+          .from('doctor_directory')
+          .select('*');
+        if (error) {
+          console.error('Error fetching doctor_directory:', error);
+          throw error;
+        }
+        return data as Doctor[];
+      } catch (err) {
+        console.error('Exception in doctors queryFn:', err);
+        throw err;
+      }
     },
   });
 
   // Create appointment mutation
   const createAppointmentMutation = useMutation({
     mutationFn: async (data: typeof newAppointment) => {
-      const { error } = await supabase.from('appointments').insert({
-        patient_id: data.patient_id,
-        doctor_id: data.doctor_id,
-        appointment_date: data.appointment_date,
-        appointment_time: data.appointment_time,
-        duration_minutes: data.duration_minutes,
-        reason: data.reason || null,
-        department: data.department || null,
-        status: 'scheduled',
-      });
-      if (error) throw error;
+      try {
+        // Extra validation for doctor_id
+        if (!isValidUUID(data.doctor_id)) {
+          toast.error('Please select a valid doctor.');
+          throw new Error('Invalid doctor_id');
+        }
+        console.log('Creating appointment with data:', data);
+        const { error } = await supabase.from('appointments').insert({
+          patient_id: data.patient_id,
+          doctor_id: data.doctor_id,
+          appointment_date: data.appointment_date,
+          appointment_time: data.appointment_time,
+          duration_minutes: data.duration_minutes,
+          reason: data.reason || null,
+          department: data.department || null,
+          status: 'scheduled',
+        });
+        if (error) {
+          console.error('Error inserting appointment:', error);
+          throw error;
+        }
+      } catch (err) {
+        console.error('Exception in createAppointmentMutation:', err);
+        throw err;
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['appointments'] });
@@ -211,11 +269,20 @@ const Appointments = () => {
   // Update status mutation
   const updateStatusMutation = useMutation({
     mutationFn: async ({ id, status }: { id: string; status: string }) => {
-      const { error } = await supabase
-        .from('appointments')
-        .update({ status })
-        .eq('id', id);
-      if (error) throw error;
+      try {
+        console.log('Updating appointment status:', { id, status });
+        const { error } = await supabase
+          .from('appointments')
+          .update({ status })
+          .eq('id', id);
+        if (error) {
+          console.error('Error updating appointment status:', error);
+          throw error;
+        }
+      } catch (err) {
+        console.error('Exception in updateStatusMutation:', err);
+        throw err;
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['appointments'] });
@@ -226,26 +293,37 @@ const Appointments = () => {
   // Send SMS reminder mutation
   const sendSmsReminderMutation = useMutation({
     mutationFn: async ({ appointmentId, patientId }: { appointmentId: string; patientId: string }) => {
-      // Get patient phone number
-      const { data: patientData } = await supabase
-        .from('patients')
-        .select('phone')
-        .eq('id', patientId)
-        .single();
-
-      if (!patientData?.phone) {
-        throw new Error('Patient phone number not found');
+      try {
+        console.log('Sending SMS reminder for appointment:', appointmentId, 'patient:', patientId);
+        // Get patient phone number
+        const { data: patientData, error: patientError } = await supabase
+          .from('patients')
+          .select('phone')
+          .eq('id', patientId)
+          .single();
+        if (patientError) {
+          console.error('Error fetching patient phone:', patientError);
+          throw patientError;
+        }
+        if (!patientData?.phone) {
+          console.error('Patient phone number not found for', patientId);
+          throw new Error('Patient phone number not found');
+        }
+        // Call Edge Function to send SMS
+        const { error } = await supabase.functions.invoke('send-appointment-reminder', {
+          body: {
+            phone: patientData.phone,
+            appointmentId,
+          },
+        });
+        if (error) {
+          console.error('Error sending SMS reminder:', error);
+          throw error;
+        }
+      } catch (err) {
+        console.error('Exception in sendSmsReminderMutation:', err);
+        throw err;
       }
-
-      // Call Edge Function to send SMS
-      const { error } = await supabase.functions.invoke('send-appointment-reminder', {
-        body: {
-          phone: patientData.phone,
-          appointmentId,
-        },
-      });
-
-      if (error) throw error;
     },
     onSuccess: () => {
       toast.success('Reminder SMS sent successfully');
@@ -298,6 +376,9 @@ const Appointments = () => {
             <DialogContent className="sm:max-w-md">
             <DialogHeader>
               <DialogTitle>Schedule Appointment</DialogTitle>
+              <DialogDescription>
+                Create a new appointment for a patient with a doctor.
+              </DialogDescription>
             </DialogHeader>
             <form
               onSubmit={(e) => {
@@ -330,18 +411,20 @@ const Appointments = () => {
               <div className="space-y-2">
                 <Label>Doctor *</Label>
                 <Select
-                  value={newAppointment.doctor_id}
-                  onValueChange={(value) =>
-                    setNewAppointment({ ...newAppointment, doctor_id: value })
-                  }
+                  value={isValidUUID(newAppointment.doctor_id) ? newAppointment.doctor_id : ''}
+                  onValueChange={(value) => {
+                    if (isValidUUID(value)) {
+                      setNewAppointment({ ...newAppointment, doctor_id: value });
+                    }
+                  }}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Select doctor" />
                   </SelectTrigger>
                   <SelectContent>
-                    {doctors?.map((d) => (
-                      <SelectItem key={d.user_id} value={d.user_id}>
-                        Dr. {d.full_name} {d.department && `(${d.department})`}
+                    {doctors?.filter(d => isValidUUID(d.doctor_id)).map((d) => (
+                      <SelectItem key={d.doctor_id} value={d.doctor_id}>
+                        Dr. {d.display_name} {d.department && `(${d.department})`}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -395,13 +478,20 @@ const Appointments = () => {
                 </div>
                 <div className="space-y-2">
                   <Label>Department</Label>
-                  <Input
-                    value={newAppointment.department}
-                    onChange={(e) =>
-                      setNewAppointment({ ...newAppointment, department: e.target.value })
-                    }
-                    placeholder="e.g., Cardiology"
-                  />
+                  <Select value={newAppointment.department} onValueChange={(value) =>
+                    setNewAppointment({ ...newAppointment, department: value })
+                  }>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select department" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {departments?.map((dept: any) => (
+                        <SelectItem key={dept.id} value={dept.id}>
+                          {dept.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
 
