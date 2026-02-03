@@ -43,7 +43,6 @@ interface StaffMember {
   full_name: string;
   email: string;
   department: string | null;
-  department_id: string | null;
   roles: AppRole[];
 }
 
@@ -65,21 +64,7 @@ const UserManagement = () => {
     email: '',
     password: '',
     full_name: '',
-    department_id: '',
     role: 'doctor' as AppRole,
-  });
-
-  // Fetch departments
-  const { data: departments } = useQuery({
-    queryKey: ['departments'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('departments')
-        .select('id, name')
-        .order('name');
-      if (error) throw error;
-      return data || [];
-    },
   });
 
   // Fetch staff with their roles
@@ -88,7 +73,7 @@ const UserManagement = () => {
     queryFn: async () => {
       const { data: profiles, error } = await supabase
         .from('profiles')
-        .select('*')
+        .select('id, user_id, full_name, email, department')
         .order('full_name');
 
       if (error) throw error;
@@ -102,9 +87,13 @@ const UserManagement = () => {
             .eq('user_id', profile.user_id);
 
           return {
-            ...profile,
+            id: profile.id,
+            user_id: profile.user_id,
+            full_name: profile.full_name,
+            email: profile.email,
+            department: profile.department,
             roles: (roles?.map((r) => r.role as AppRole) || []),
-          };
+          } as StaffMember;
         })
       );
 
@@ -160,7 +149,6 @@ const UserManagement = () => {
           user_id: newUserId,
           full_name: userData.full_name.trim(),
           email: userData.email.trim().toLowerCase(),
-          department_id: userData.department_id || null,
         });
 
         if (profileError) {
@@ -199,7 +187,6 @@ const UserManagement = () => {
         email: '',
         password: '',
         full_name: '',
-        department_id: '',
         role: 'doctor',
       });
       toast.success('Staff member created successfully');
@@ -346,26 +333,6 @@ const UserManagement = () => {
                   required
                   minLength={6}
                 />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="department">Department</Label>
-                <Select
-                  value={newUser.department_id}
-                  onValueChange={(value) =>
-                    setNewUser({ ...newUser, department_id: value })
-                  }
-                >
-                  <SelectTrigger id="department">
-                    <SelectValue placeholder="Select a department" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {departments?.map((dept) => (
-                      <SelectItem key={dept.id} value={dept.id}>
-                        {dept.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="role">Role</Label>

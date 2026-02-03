@@ -75,6 +75,12 @@ export const usePermissions = () => {
     // Admins always have full access
     if (isAdmin) return true;
     
+    // Special handling for dashboard - any user should have access to dashboard module
+    // as they'll be routed to their role-specific dashboard
+    if (module === 'dashboard') {
+      return true;
+    }
+    
     if (!permissions) return false;
     
     const modulePermissions = permissions.filter(p => p.module === module);

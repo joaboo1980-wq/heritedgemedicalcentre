@@ -34,6 +34,8 @@ import { Plus, Calendar, Clock, MapPin, AlertCircle, CheckCircle } from 'lucide-
 import { format, addDays } from 'date-fns';
 import PermissionGuard from '@/components/layout/PermissionGuard';
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
 interface DutyRoster {
   id: string;
   staff_id: string;
@@ -77,7 +79,7 @@ const statusColors: Record<string, string> = {
 const shiftTypes = ['morning', 'afternoon', 'night', 'on-call'];
 
 const StaffSchedule = () => {
-  const { user, isAdmin } = useAuth();
+  const { user } = useAuth();
   const queryClient = useQueryClient();
   const [selectedDate, setSelectedDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [isCreateRosterDialogOpen, setIsCreateRosterDialogOpen] = useState(false);

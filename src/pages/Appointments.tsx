@@ -36,6 +36,8 @@ import { Plus, Clock, User, Calendar as CalendarIcon, CheckCircle, XCircle, Aler
 import { format, isSameDay, parseISO, isAfter, isBefore, startOfDay, endOfDay } from 'date-fns';
 import PermissionGuard from '@/components/layout/PermissionGuard';
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
 interface Appointment {
   id: string;
   patient_id: string;
@@ -64,11 +66,22 @@ interface Patient {
   patient_number: string;
 }
 
+
 interface Doctor {
-  doctor_id: string;
+  user_id: string;
   email: string;
-  display_name: string;
+  full_name: string;
   department: string | null;
+}
+
+// Type guard for Doctor
+function isDoctor(d: unknown): d is Doctor {
+  if (typeof d !== 'object' || d === null) return false;
+  const obj = d as Record<string, unknown>;
+  return (
+    typeof obj['user_id'] === 'string' &&
+    typeof obj['full_name'] === 'string'
+  );
 }
 
 const statusColors = {
@@ -109,11 +122,6 @@ const Appointments = () => {
   // (This will log every render, but is useful for debugging form state)
   console.log('newAppointment state:', newAppointment);
 
-  // Helper to validate UUID (simple check for length and dashes)
-  const isValidUUID = (uuid: string) => {
-    return uuid && uuid.length === 36 && uuid.includes('-');
-  };
-
   // Fetch appointments
   const { data: appointments, isLoading } = useQuery({
     queryKey: ['appointments'],
@@ -121,32 +129,66 @@ const Appointments = () => {
       try {
         const { data, error } = await supabase
           .from('appointments')
-          .select(`
-            *,
-            patients (first_name, last_name, patient_number)
-          `)
+          .select('*')
           .order('appointment_date', { ascending: true })
           .order('appointment_time', { ascending: true });
+        
         if (error) {
           console.error('Error fetching appointments:', error);
           throw error;
         }
-        // Fetch doctor profiles separately
-        const appointmentsWithDoctors = await Promise.all(
-          (data || []).map(async (apt) => {
-            const { data: profile, error: profileError } = await supabase
-              .from('profiles')
-              .select('full_name')
-              .eq('user_id', apt.doctor_id)
-              .single();
-            if (profileError) {
-              console.error('Error fetching doctor profile for', apt.doctor_id, profileError);
-            }
-            return { ...apt, profiles: profile };
-          })
-        );
-        console.log('Fetched appointments:', appointmentsWithDoctors);
-        return appointmentsWithDoctors as Appointment[];
+
+        console.log('Raw appointments data:', data);
+
+        // Fetch patient and doctor data separately
+        const appointmentData = data || [];
+        const patientIds = [...new Set(appointmentData.map((apt: any) => apt.patient_id).filter(Boolean))] as string[];
+        const doctorIds = [...new Set(appointmentData.map((apt: any) => apt.doctor_id).filter(Boolean))] as string[];
+
+        let patients: Record<string, any> = {};
+        let doctors: Record<string, any> = {};
+
+        if (patientIds.length > 0) {
+          const { data: patientData } = await supabase
+            .from('patients')
+            .select('id, first_name, last_name, patient_number')
+            .in('id', patientIds);
+          patients = (patientData || []).reduce((acc: Record<string, any>, p: any) => {
+            acc[p.id] = p;
+            return acc;
+          }, {});
+        }
+
+        if (doctorIds.length > 0) {
+          const { data: profileData } = await supabase
+            .from('profiles')
+            .select('user_id, full_name')
+            .in('user_id', doctorIds);
+          doctors = (profileData || []).reduce((acc: Record<string, any>, d: any) => {
+            acc[d.user_id] = d;
+            return acc;
+          }, {});
+        }
+
+        // Map the data together
+        const appointmentsWithDetails = appointmentData.map((apt: any) => {
+          const patient = patients[apt.patient_id];
+          const doctor = doctors[apt.doctor_id];
+          return {
+            ...apt,
+            patients: patient ? {
+              first_name: patient.first_name,
+              last_name: patient.last_name,
+              patient_number: patient.patient_number,
+            } : null,
+            profiles: doctor ? {
+              full_name: doctor.full_name,
+            } : null,
+          };
+        });
+
+        console.log('Appointments with details:', appointmentsWithDetails);
+        return appointmentsWithDetails as Appointment[];
       } catch (err) {
         console.error('Exception in appointments queryFn:', err);
         throw err;
@@ -176,44 +218,56 @@ const Appointments = () => {
     },
   });
 
-  // Fetch departments for dropdown
-  const { data: departments } = useQuery({
-    queryKey: ['departments'],
-    queryFn: async () => {
-      try {
-        const { data, error } = await supabase
-          .from('departments' as any)
-          .select('id, name')
-          .order('name');
-        if (error) {
-          console.error('Error fetching departments:', error);
-          throw error;
-        }
-        console.log('Fetched departments:', data);
-        return data || [];
-      } catch (err) {
-        console.error('Exception in departments queryFn:', err);
-        throw err;
-      }
-    },
-  });
-
-  // Fetch doctors from doctor_directory view
+  // Fetch doctors from profiles with doctor role
   const { data: doctors } = useQuery({
     queryKey: ['doctors-list'],
     queryFn: async () => {
       try {
-        const { data, error } = await supabase
-          .from('doctor_directory')
-          .select('*');
-        if (error) {
-          console.error('Error fetching doctor_directory:', error);
-          throw error;
+        // Get all users with doctor role from user_roles table
+        const { data: doctorRoles, error: rolesError } = await supabase
+          .from('user_roles')
+          .select('user_id')
+          .eq('role', 'doctor');
+        
+        if (rolesError) {
+          console.error('Error fetching doctor roles:', rolesError);
+          throw rolesError;
         }
-        return data as Doctor[];
+
+        if (!doctorRoles || doctorRoles.length === 0) {
+          console.log('No doctors found with doctor role');
+          return [];
+        }
+
+        // Get the user IDs of all doctors
+        const doctorUserIds = (doctorRoles as Array<{ user_id: string }>).map((role) => role.user_id);
+        console.log('Doctor user IDs from user_roles:', doctorUserIds);
+
+        // Fetch their profiles
+        const { data: doctorProfiles, error: profilesError } = await supabase
+          .from('profiles')
+          .select('user_id, full_name, email, department')
+          .in('user_id', doctorUserIds);
+
+        if (profilesError) {
+          console.error('Error fetching doctor profiles:', profilesError);
+          throw profilesError;
+        }
+
+        console.log('Doctor profiles fetched:', doctorProfiles);
+        const doctors = (doctorProfiles || []).map((profile: { user_id: string; email?: string; full_name?: string; department?: string | null }) => ({
+          user_id: profile.user_id,
+          email: profile.email || '',
+          full_name: profile.full_name || 'Unknown Doctor',
+          department: profile.department || null,
+        }));
+        
+        console.log('Processed doctors for dropdown:', doctors);
+        return doctors;
       } catch (err) {
         console.error('Exception in doctors queryFn:', err);
-        throw err;
+        toast.error(`Failed to load doctors: ${err instanceof Error ? err.message : 'Unknown error'}`);
+        return [];
       }
     },
   });
@@ -222,13 +276,18 @@ const Appointments = () => {
   const createAppointmentMutation = useMutation({
     mutationFn: async (data: typeof newAppointment) => {
       try {
-        // Extra validation for doctor_id
-        if (!isValidUUID(data.doctor_id)) {
-          toast.error('Please select a valid doctor.');
-          throw new Error('Invalid doctor_id');
+        // Validate required fields
+        if (!data.patient_id) {
+          throw new Error('Please select a patient.');
+        }
+        if (!data.doctor_id) {
+          throw new Error('Please select a doctor.');
         }
         console.log('Creating appointment with data:', data);
-        const { error } = await supabase.from('appointments').insert({
+        console.log('Doctor ID being used:', data.doctor_id);
+        console.log('Available doctors:', doctors);
+        
+        const { data: result, error } = await supabase.from('appointments').insert({
           patient_id: data.patient_id,
           doctor_id: data.doctor_id,
           appointment_date: data.appointment_date,
@@ -238,10 +297,17 @@ const Appointments = () => {
           department: data.department || null,
           status: 'scheduled',
         });
+        
         if (error) {
           console.error('Error inserting appointment:', error);
+          console.error('Error details:', {
+            code: error.code,
+            message: error.message,
+            details: error.details,
+          });
           throw error;
         }
+        console.log('Appointment created:', result);
       } catch (err) {
         console.error('Exception in createAppointmentMutation:', err);
         throw err;
@@ -334,27 +400,47 @@ const Appointments = () => {
   });
 
   const filteredAppointments = appointments?.filter((apt) => {
-    const appointmentDate = parseISO(apt.appointment_date);
-    const today = new Date();
-    const todayStart = startOfDay(today);
-    const todayEnd = endOfDay(today);
+    try {
+      // Parse date - appointment_date is in YYYY-MM-DD format (string)
+      const appointmentDate = parseISO(apt.appointment_date + 'T00:00:00');
+      
+      const today = new Date();
+      const todayStart = startOfDay(today);
+      const todayEnd = endOfDay(today);
 
-    if (filterTab === 'today') {
-      return isSameDay(appointmentDate, today);
-    } else if (filterTab === 'upcoming') {
-      return isAfter(appointmentDate, todayEnd);
-    } else if (filterTab === 'past') {
-      return isBefore(appointmentDate, todayStart);
+      if (filterTab === 'today') {
+        return isSameDay(appointmentDate, today);
+      } else if (filterTab === 'upcoming') {
+        return isAfter(appointmentDate, todayEnd);
+      } else if (filterTab === 'past') {
+        return isBefore(appointmentDate, todayStart);
+      }
+      return true;
+    } catch (err) {
+      console.error('Error parsing appointment date:', apt.appointment_date, err);
+      return false;
     }
-    return true;
   });
 
-  const todayAppointments = appointments?.filter((apt) =>
-    isSameDay(parseISO(apt.appointment_date), new Date())
-  );
+  const todayAppointments = appointments?.filter((apt) => {
+    try {
+      const appointmentDate = parseISO(apt.appointment_date + 'T00:00:00');
+      return isSameDay(appointmentDate, new Date());
+    } catch (err) {
+      console.error('Error parsing appointment date for today filter:', apt.appointment_date, err);
+      return false;
+    }
+  });
 
   // Get dates with appointments for calendar highlighting
-  const appointmentDates = appointments?.map((apt) => parseISO(apt.appointment_date)) || [];
+  const appointmentDates = appointments?.map((apt) => {
+    try {
+      return parseISO(apt.appointment_date + 'T00:00:00');
+    } catch (err) {
+      console.error('Error parsing appointment date for calendar:', apt.appointment_date, err);
+      return new Date();
+    }
+  }) || [];
 
   return (
     <div className="space-y-6">
@@ -411,22 +497,26 @@ const Appointments = () => {
               <div className="space-y-2">
                 <Label>Doctor *</Label>
                 <Select
-                  value={isValidUUID(newAppointment.doctor_id) ? newAppointment.doctor_id : ''}
-                  onValueChange={(value) => {
-                    if (isValidUUID(value)) {
-                      setNewAppointment({ ...newAppointment, doctor_id: value });
-                    }
-                  }}
+                  value={newAppointment.doctor_id}
+                  onValueChange={(value) =>
+                    setNewAppointment({ ...newAppointment, doctor_id: value })
+                  }
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Select doctor" />
                   </SelectTrigger>
                   <SelectContent>
-                    {doctors?.filter(d => isValidUUID(d.doctor_id)).map((d) => (
-                      <SelectItem key={d.doctor_id} value={d.doctor_id}>
-                        Dr. {d.display_name} {d.department && `(${d.department})`}
+                    {doctors && doctors.length > 0 ? (
+                      doctors.map((d) => (
+                        <SelectItem key={d.user_id} value={d.user_id}>
+                          Dr. {d.full_name} {d.department && `(${d.department})`}
+                        </SelectItem>
+                      ))
+                    ) : (
+                      <SelectItem disabled value="">
+                        No doctors available
                       </SelectItem>
-                    ))}
+                    )}
                   </SelectContent>
                 </Select>
               </div>
@@ -478,21 +568,14 @@ const Appointments = () => {
                 </div>
                 <div className="space-y-2">
                   <Label>Department</Label>
-                  <Select value={newAppointment.department} onValueChange={(value) =>
-                    setNewAppointment({ ...newAppointment, department: value })
-                  }>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select department" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {departments?.map((dept: any) => (
-                        <SelectItem key={dept.id} value={dept.id}>
-                          {dept.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+                <Input
+                  value={newAppointment.department}
+                  onChange={(e) =>
+                    setNewAppointment({ ...newAppointment, department: e.target.value })
+                  }
+                  placeholder="Department or specialty"
+                />
+              </div>
               </div>
 
               <div className="space-y-2">

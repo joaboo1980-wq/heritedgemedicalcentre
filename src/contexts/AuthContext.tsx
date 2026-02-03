@@ -2,6 +2,8 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
 type AppRole = 'admin' | 'doctor' | 'nurse' | 'receptionist' | 'lab_technician' | 'pharmacist';
 
 interface Profile {
@@ -38,11 +40,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       console.log('Fetching user data for:', userId);
       
+      // Set a timeout of 5 seconds for data fetching
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('User data fetch timeout')), 5000)
+      );
+
       // Fetch profile
-      const { data: profileDataArray, error: profileError } = await supabase
+      const profilePromise = supabase
         .from('profiles')
         .select('*')
         .eq('user_id', userId);
+      
+      const { data: profileDataArray, error: profileError } = await Promise.race([profilePromise, timeoutPromise]) as any;
       
       if (profileError) {
         console.error('Profile fetch error:', profileError);
@@ -54,10 +63,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       // Fetch roles directly from user_roles table instead of RPC
       console.log('Fetching roles...');
-      const { data: rolesData, error: rolesError } = await supabase
+      const rolesPromise = supabase
         .from('user_roles')
         .select('role')
         .eq('user_id', userId);
+
+      const { data: rolesData, error: rolesError } = await Promise.race([rolesPromise, timeoutPromise]) as any;
       
       if (rolesError) {
         console.error('Roles fetch error:', rolesError);
@@ -70,6 +81,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         console.log('No roles data received');
         setRoles([]);
       }
+      console.log('User data fetch completed');
     } catch (error) {
       console.error('Error in fetchUserData:', error);
       setRoles([]);
@@ -85,15 +97,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setUser(session?.user ?? null);
           
           if (session?.user) {
-            // Fetch user data in background, don't wait for it
+            // Fetch user data without waiting in the callback
             fetchUserData(session.user.id).catch(error => {
               console.error('Error fetching user data:', error);
+              setLoading(false);
+            }).then(() => {
+              setLoading(false);
             });
           } else {
             setProfile(null);
             setRoles([]);
+            setLoading(false);
           }
-          setLoading(false);
         } catch (error) {
           console.error('Auth state change error:', error);
           setLoading(false);
@@ -108,12 +123,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setUser(session?.user ?? null);
         
         if (session?.user) {
-          // Fetch user data in background
+          // Fetch user data
           fetchUserData(session.user.id).catch(error => {
             console.error('Error fetching user session data:', error);
+            setLoading(false);
+          }).then(() => {
+            setLoading(false);
           });
+        } else {
+          setLoading(false);
         }
-        setLoading(false);
       } catch (error) {
         console.error('Get session error:', error);
         setLoading(false);

@@ -4,12 +4,18 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
+import { ThemeProvider } from "@/contexts/ThemeContext";
 import { useAuth } from "@/contexts/AuthContext";
 import ProtectedRoute from "@/components/layout/ProtectedRoute";
 
 import Auth from "./pages/Auth";
 import DashboardLayout from "./components/layout/DashboardLayout";
 import Dashboard from "./pages/Dashboard";
+import ReceptionDashboard from "./pages/ReceptionDashboard";
+import DoctorDashboard from "./pages/DoctorDashboard";
+import LaboratoryDashboard from "./pages/LaboratoryDashboard";
+import NursingDashboard from "./pages/NursingDashboard";
+import PharmacyDashboard from "./pages/PharmacyDashboard";
 import Patients from "./pages/Patients";
 import DoctorExamination from "./pages/DoctorExamination";
 import Appointments from "./pages/Appointments";
@@ -26,8 +32,18 @@ import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
 
+
+const roleDashboardMap: Record<string, string> = {
+  receptionist: "/reception-dashboard",
+  doctor: "/doctor-dashboard",
+  lab_technician: "/laboratory-dashboard",
+  nurse: "/nursing-dashboard",
+  pharmacist: "/pharmacy-dashboard",
+  admin: "/dashboard", // fallback for admin
+};
+
 const RootRedirect = () => {
-  const { user, loading } = useAuth();
+  const { user, loading, roles } = useAuth();
 
   if (loading) {
     return (
@@ -40,25 +56,78 @@ const RootRedirect = () => {
     );
   }
 
-  return <Navigate to={user ? "/dashboard" : "/auth"} replace />;
+  if (!user) return <Navigate to="/auth" replace />;
+
+  // Redirect to the dashboard for the user's primary role
+  const primaryRole = roles && roles.length > 0 ? roles[0] : "admin";
+  const dashboardPath = roleDashboardMap[primaryRole] || "/dashboard";
+  return <Navigate to={dashboardPath} replace />;
+};
+
+const DashboardRedirect = () => {
+  const { loading, roles } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+          <p className="text-muted-foreground">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Redirect /dashboard to the user's role-specific dashboard
+  const primaryRole = roles && roles.length > 0 ? roles[0] : "admin";
+  const dashboardPath = roleDashboardMap[primaryRole] || "/dashboard";
+  return <Navigate to={dashboardPath} replace />;
 };
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
-    <TooltipProvider>
-      <Toaster />
-      <Sonner />
-      <BrowserRouter future={{ v7_relativeSplatPath: true, v7_startTransition: true }}>
-        <AuthProvider>
+    <ThemeProvider>
+      <TooltipProvider>
+        <Toaster />
+        <Sonner />
+        <BrowserRouter future={{ v7_relativeSplatPath: true, v7_startTransition: true }}>
+          <AuthProvider>
           <Routes>
             <Route path="/" element={<RootRedirect />} />
             <Route path="/auth" element={<Auth />} />
             <Route element={<DashboardLayout />}>
               <Route path="/dashboard" element={
-                <ProtectedRoute module="dashboard">
+                <ProtectedRoute module="dashboard" requiredRole="admin">
                   <Dashboard />
                 </ProtectedRoute>
               } />
+              {/* Role-based dashboards */}
+              <Route path="/reception-dashboard" element={
+                <ProtectedRoute module="dashboard" requiredRole="receptionist">
+                  <ReceptionDashboard />
+                </ProtectedRoute>
+              } />
+                <Route path="/doctor-dashboard" element={
+                <ProtectedRoute module="dashboard">
+                  <DoctorDashboard />
+                </ProtectedRoute>
+              } />
+              <Route path="/laboratory-dashboard" element={
+                <ProtectedRoute module="dashboard" requiredRole="lab_technician">
+                  <LaboratoryDashboard />
+                </ProtectedRoute>
+              } />
+              <Route path="/nursing-dashboard" element={
+                <ProtectedRoute module="dashboard" requiredRole="nurse">
+                  <NursingDashboard />
+                </ProtectedRoute>
+              } />
+              <Route path="/pharmacy-dashboard" element={
+                <ProtectedRoute module="dashboard" requiredRole="pharmacist">
+                  <PharmacyDashboard />
+                </ProtectedRoute>
+              } />
+              {/* Existing routes */}
               <Route path="/patients" element={
                 <ProtectedRoute module="patients">
                   <Patients />
@@ -124,7 +193,8 @@ const App = () => (
           </Routes>
         </AuthProvider>
       </BrowserRouter>
-    </TooltipProvider>
+      </TooltipProvider>
+    </ThemeProvider>
   </QueryClientProvider>
 );
 

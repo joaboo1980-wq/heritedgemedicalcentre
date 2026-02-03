@@ -135,6 +135,19 @@ const RolePermissionsManager = () => {
                 </div>
               )}
 
+              {selectedRole !== 'admin' && (
+                <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg text-blue-800 text-xs md:text-sm">
+                  <strong>Dashboard Access:</strong> Each role automatically has access to their specific role dashboard:
+                  <ul className="mt-2 ml-4 list-disc text-xs">
+                    <li><strong>Receptionist</strong> → Reception Dashboard</li>
+                    <li><strong>Doctor</strong> → Doctor Dashboard</li>
+                    <li><strong>Nurse</strong> → Nursing Dashboard</li>
+                    <li><strong>Lab Technician</strong> → Laboratory Dashboard</li>
+                    <li><strong>Pharmacist</strong> → Pharmacy Dashboard</li>
+                  </ul>
+                </div>
+              )}
+
               {isLoading ? (
                 <div className="flex justify-center py-8">
                   <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" />
