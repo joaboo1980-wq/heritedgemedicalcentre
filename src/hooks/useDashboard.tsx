@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
-import { startOfMonth, endOfMonth, subMonths, format, startOfDay, endOfDay } from 'date-fns';
+import { startOfMonth, endOfMonth, subMonths, format, startOfDay, endOfDay, startOfWeek, endOfWeek, addDays, differenceInDays, isToday, isTomorrow, isThisWeek } from 'date-fns';
 
 export interface DashboardStats {
   totalPatients: number;
@@ -34,6 +34,26 @@ export interface RecentAppointment {
   department: string | null;
 }
 
+export interface WeeklyAppointment {
+  id: string;
+  patient_name: string;
+  appointment_date: string;
+  appointment_time: string;
+  department: string | null;
+  status: string;
+  daysFromNow: number;
+  displayDay: string;
+}
+
+export interface ActivityLog {
+  id: string;
+  type: 'appointment' | 'lab_order' | 'patient' | 'prescription';
+  description: string;
+  timestamp: string;
+  timeAgo: string;
+  icon: string;
+}
+
 const departmentColors: Record<string, string> = {
   'Cardiology': '#1e4a6e',
   'Neurology': '#22C55E',
@@ -51,6 +71,7 @@ export const useDashboardStats = () => {
     queryKey: ['dashboard-stats'],
     queryFn: async (): Promise<DashboardStats> => {
       try {
+        console.log('[Dashboard] Fetching stats...');
         const now = new Date();
         const startOfCurrentMonth = startOfMonth(now);
         const endOfCurrentMonth = endOfMonth(now);
@@ -60,9 +81,12 @@ export const useDashboardStats = () => {
         const todayEnd = endOfDay(now);
 
         // Get total patients
-        const { count: totalPatients } = await supabase
+        const { count: totalPatients, error: patientsError } = await supabase
           .from('patients')
           .select('*', { count: 'exact', head: true });
+        
+        if (patientsError) console.warn('[Dashboard] Error fetching total patients:', patientsError);
+        console.log('[Dashboard] Total patients:', totalPatients);
 
         // Get patients registered this month
         const { count: currentMonthPatients } = await supabase
@@ -71,6 +95,8 @@ export const useDashboardStats = () => {
           .gte('created_at', startOfCurrentMonth.toISOString())
           .lte('created_at', endOfCurrentMonth.toISOString());
 
+        console.log('[Dashboard] Current month patients:', currentMonthPatients);
+
         // Get patients registered last month
         const { count: lastMonthPatients } = await supabase
           .from('patients')
@@ -78,15 +104,20 @@ export const useDashboardStats = () => {
           .gte('created_at', startOfLastMonth.toISOString())
           .lte('created_at', endOfLastMonth.toISOString());
 
+        console.log('[Dashboard] Last month patients:', lastMonthPatients);
+
         // Get today's appointments - handle potential query errors
         const todayDate = format(now, 'yyyy-MM-dd');
         let todayAppointments = 0;
         try {
-          const { count } = await supabase
+          const { count, error: apptError } = await supabase
             .from('appointments')
             .select('*', { count: 'exact', head: true })
             .eq('appointment_date', todayDate);
+          
+          if (apptError) console.warn('[Dashboard] Error fetching today appointments:', apptError);
           todayAppointments = count || 0;
+          console.log('[Dashboard] Today appointments:', todayAppointments);
         } catch (err) {
           console.warn('Error fetching today appointments:', err);
         }
@@ -101,19 +132,22 @@ export const useDashboardStats = () => {
             .select('*', { count: 'exact', head: true })
             .eq('appointment_date', lastMonthDate);
           lastMonthAppointments = count || 0;
+          console.log('[Dashboard] Last month appointments:', lastMonthAppointments);
         } catch (err) {
           console.warn('Error fetching last month appointments:', err);
         }
 
         // Get monthly revenue (sum of paid invoices)
-        const { data: currentRevenueData } = await supabase
+        const { data: currentRevenueData, error: revenueError } = await supabase
           .from('invoices')
           .select('total_amount')
           .gte('created_at', startOfCurrentMonth.toISOString())
           .lte('created_at', endOfCurrentMonth.toISOString())
           .in('status', ['paid', 'partially_paid']);
 
+        if (revenueError) console.warn('[Dashboard] Error fetching revenue:', revenueError);
         const monthlyRevenue = currentRevenueData?.reduce((sum, inv) => sum + Number(inv.total_amount), 0) || 0;
+        console.log('[Dashboard] Monthly revenue:', monthlyRevenue);
 
         // Get last month revenue
         const { data: lastRevenueData } = await supabase
@@ -124,18 +158,25 @@ export const useDashboardStats = () => {
           .in('status', ['paid', 'partially_paid']);
 
         const lastMonthRevenue = lastRevenueData?.reduce((sum, inv) => sum + Number(inv.total_amount), 0) || 0;
+        console.log('[Dashboard] Last month revenue:', lastMonthRevenue);
 
         // Get pending lab orders
-        const { count: pendingLabOrders } = await supabase
+        const { count: pendingLabOrders, error: labError } = await supabase
           .from('lab_orders')
           .select('*', { count: 'exact', head: true })
           .in('status', ['pending', 'in_progress']);
+        
+        if (labError) console.warn('[Dashboard] Error fetching lab orders:', labError);
+        console.log('[Dashboard] Pending lab orders:', pendingLabOrders);
 
         // Get low stock medications
-        const { count: lowStockMedications } = await supabase
+        const { count: lowStockMedications, error: stockError } = await supabase
           .from('medications')
           .select('*', { count: 'exact', head: true })
           .lt('stock_quantity', 50); // Less than reorder level
+        
+        if (stockError) console.warn('[Dashboard] Error fetching low stock:', stockError);
+        console.log('[Dashboard] Low stock medications:', lowStockMedications);
 
         // Calculate percentage changes
         const patientChange = lastMonthPatients && lastMonthPatients > 0
@@ -150,7 +191,7 @@ export const useDashboardStats = () => {
           ? Math.round((monthlyRevenue - lastMonthRevenue) / lastMonthRevenue * 100)
           : 0;
 
-        return {
+        const result = {
           totalPatients: totalPatients || 0,
           todayAppointments: todayAppointments || 0,
           monthlyRevenue,
@@ -160,6 +201,9 @@ export const useDashboardStats = () => {
           appointmentChange,
           revenueChange,
         };
+
+        console.log('[Dashboard] Final stats:', result);
+        return result;
       } catch (error) {
         console.error('Error fetching dashboard stats:', error);
         // Return default values on error
@@ -176,6 +220,7 @@ export const useDashboardStats = () => {
       }
     },
     refetchInterval: 60000, // Refetch every minute
+    gcTime: 0, // Don't cache, always refetch when component remounts
   });
 };
 
@@ -325,4 +370,146 @@ export const usePendingLabOrders = () => {
       }));
     },
   });
+};
+export const useWeeklyAppointments = () => {
+  return useQuery({
+    queryKey: ['weekly-appointments'],
+    queryFn: async (): Promise<WeeklyAppointment[]> => {
+      const today = new Date();
+      const weekEnd = addDays(today, 7);
+      
+      const todayString = format(today, 'yyyy-MM-dd');
+      const weekEndString = format(weekEnd, 'yyyy-MM-dd');
+      
+      const { data, error } = await supabase
+        .from('appointments')
+        .select(`
+          id,
+          appointment_date,
+          appointment_time,
+          status,
+          department,
+          patients (
+            first_name,
+            last_name
+          )
+        `)
+        .gte('appointment_date', todayString)
+        .lte('appointment_date', weekEndString)
+        .order('appointment_date', { ascending: true })
+        .order('appointment_time', { ascending: true });
+
+      if (error) {
+        console.error('Error fetching weekly appointments:', error);
+        return [];
+      }
+
+      return (data || []).map((apt: any) => {
+        const aptDate = new Date(apt.appointment_date);
+        const daysFromNow = differenceInDays(aptDate, today);
+        
+        let displayDay = '';
+        if (isToday(aptDate)) {
+          displayDay = 'Today';
+        } else if (isTomorrow(aptDate)) {
+          displayDay = 'Tomorrow';
+        } else {
+          displayDay = format(aptDate, 'EEEE');
+        }
+
+        return {
+          id: apt.id,
+          patient_name: apt.patients ? `${apt.patients.first_name} ${apt.patients.last_name}` : 'Unknown',
+          appointment_date: apt.appointment_date,
+          appointment_time: apt.appointment_time,
+          department: apt.department,
+          status: apt.status,
+          daysFromNow,
+          displayDay,
+        };
+      });
+    },
+    refetchInterval: 60000, // Refetch every minute for live updates
+  });
+};
+
+export const useActivityLog = () => {
+  return useQuery({
+    queryKey: ['activity-log'],
+    queryFn: async (): Promise<ActivityLog[]> => {
+      const activities: ActivityLog[] = [];
+      
+      // Recent appointments
+      const { data: appointments } = await supabase
+        .from('appointments')
+        .select(`
+          id,
+          appointment_date,
+          appointment_time,
+          status,
+          created_at,
+          patients (
+            first_name,
+            last_name
+          )
+        `)
+        .order('created_at', { ascending: false })
+        .limit(5);
+
+      if (appointments) {
+        activities.push(...appointments.map((apt: any) => ({
+          id: `apt-${apt.id}`,
+          type: 'appointment' as const,
+          description: `Appointment scheduled for ${apt.patients?.first_name} ${apt.patients?.last_name}`,
+          timestamp: apt.created_at,
+          timeAgo: formatDistanceToNow(new Date(apt.created_at), { addSuffix: true }),
+          icon: '📅',
+        })));
+      }
+
+      // Recent lab orders
+      const { data: labOrders } = await supabase
+        .from('lab_orders')
+        .select(`
+          id,
+          order_number,
+          created_at,
+          patients (
+            first_name,
+            last_name
+          )
+        `)
+        .order('created_at', { ascending: false })
+        .limit(3);
+
+      if (labOrders) {
+        activities.push(...labOrders.map((order: any) => ({
+          id: `lab-${order.id}`,
+          type: 'lab_order' as const,
+          description: `Lab order #${order.order_number} created for ${order.patients?.first_name} ${order.patients?.last_name}`,
+          timestamp: order.created_at,
+          timeAgo: formatDistanceToNow(new Date(order.created_at), { addSuffix: true }),
+          icon: '🧪',
+        })));
+      }
+
+      // Sort by timestamp and return top 8
+      return activities
+        .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+        .slice(0, 8);
+    },
+    refetchInterval: 30000, // Refetch every 30 seconds for live updates
+  });
+};
+
+// Helper function
+export const formatDistanceToNow = (date: Date, options?: { addSuffix?: boolean }) => {
+  const seconds = Math.floor((new Date().getTime() - date.getTime()) / 1000);
+  
+  if (seconds < 60) return 'just now';
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+  if (seconds < 604800) return `${Math.floor(seconds / 86400)}d ago`;
+  
+  return 'a week ago';
 };

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
-import { useAuth } from '@/contexts/AuthContext';
+import { useAuth } from '@/hooks/useAuth';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -129,7 +129,7 @@ const StaffSchedule = () => {
         .eq('shift_date', selectedDate)
         .order('shift_start_time');
       if (error) throw error;
-      return data as DutyRoster[];
+      return (data || []) as unknown as DutyRoster[];
     },
   });
 
@@ -143,7 +143,7 @@ const StaffSchedule = () => {
         .eq('availability_date', selectedDate)
         .order('updated_at', { ascending: false });
       if (error) throw error;
-      return data as StaffAvailability[];
+      return (data || []) as unknown as StaffAvailability[];
     },
   });
 

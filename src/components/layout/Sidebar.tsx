@@ -22,7 +22,7 @@ import {
   Clock
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { useAuth } from '@/contexts/AuthContext';
+import { useAuth } from '@/hooks/useAuth';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
@@ -43,7 +43,7 @@ const roleDashboardMap: Record<AppRole, string> = {
   lab_technician: "/laboratory-dashboard",
   nurse: "/nursing-dashboard",
   pharmacist: "/pharmacy-dashboard",
-  admin: "/dashboard",
+  admin: "/admin-dashboard",
 };
 
 const navItems: NavItem[] = [
@@ -145,6 +145,7 @@ const Sidebar = () => {
                  location.pathname === '/laboratory-dashboard' ||
                  location.pathname === '/nursing-dashboard' ||
                  location.pathname === '/pharmacy-dashboard' ||
+                 location.pathname === '/admin-dashboard' ||
                  location.pathname === '/dashboard')
                   ? 'bg-white text-primary font-medium' 
                   : 'hover:bg-white/10 text-primary-foreground'

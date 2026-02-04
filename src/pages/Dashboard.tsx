@@ -1,4 +1,4 @@
-import { Users, Calendar, DollarSign, FlaskConical, PackageX, Clock } from 'lucide-react';
+import { Users, Calendar, DollarSign, FlaskConical, PackageX, Clock, TrendingUp, Activity, CheckCircle2, AlertCircle } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -23,6 +23,8 @@ import {
   useDepartmentDistribution,
   useRecentAppointments,
   usePendingLabOrders,
+  useWeeklyAppointments,
+  useActivityLog,
 } from '@/hooks/useDashboard';
 
 const formatCurrency = (value: number) => {
@@ -41,6 +43,8 @@ const Dashboard = () => {
   const { data: departmentData, isLoading: deptLoading } = useDepartmentDistribution();
   const { data: recentAppointments, isLoading: apptLoading } = useRecentAppointments();
   const { data: pendingLabOrders, isLoading: labLoading } = usePendingLabOrders();
+  const { data: weeklyAppointments, isLoading: weeklyLoading } = useWeeklyAppointments();
+  const { data: activityLog, isLoading: activityLoading } = useActivityLog();
 
   const getChangeString = (change: number, prefix = '') => {
     if (change === 0) return 'No change from last month';
@@ -94,6 +98,7 @@ const Dashboard = () => {
           change={getChangeString(stats?.patientChange || 0)}
           changeType={stats?.patientChange && stats.patientChange > 0 ? 'positive' : stats?.patientChange && stats.patientChange < 0 ? 'negative' : 'neutral'}
           icon={Users}
+          gradient="bg-gradient-to-br from-blue-600 via-blue-500 to-cyan-500"
           isLoading={statsLoading}
         />
         <StatsCard
@@ -102,6 +107,7 @@ const Dashboard = () => {
           change={getChangeString(stats?.appointmentChange || 0)}
           changeType={stats?.appointmentChange && stats.appointmentChange > 0 ? 'positive' : stats?.appointmentChange && stats.appointmentChange < 0 ? 'negative' : 'neutral'}
           icon={Calendar}
+          gradient="bg-gradient-to-br from-purple-600 via-purple-500 to-pink-500"
           isLoading={statsLoading}
         />
         <StatsCard
@@ -110,6 +116,7 @@ const Dashboard = () => {
           change={getChangeString(stats?.revenueChange || 0)}
           changeType={stats?.revenueChange && stats.revenueChange > 0 ? 'positive' : stats?.revenueChange && stats.revenueChange < 0 ? 'negative' : 'neutral'}
           icon={DollarSign}
+          gradient="bg-gradient-to-br from-green-600 via-emerald-500 to-teal-500"
           isLoading={statsLoading}
         />
         <StatsCard
@@ -118,6 +125,7 @@ const Dashboard = () => {
           change="Awaiting results"
           changeType="neutral"
           icon={FlaskConical}
+          gradient="bg-gradient-to-br from-orange-600 via-orange-500 to-red-500"
           isLoading={statsLoading}
         />
         <StatsCard
@@ -126,6 +134,7 @@ const Dashboard = () => {
           change="Need reorder"
           changeType={stats?.lowStockMedications && stats.lowStockMedications > 0 ? 'negative' : 'neutral'}
           icon={PackageX}
+          gradient="bg-gradient-to-br from-red-600 via-pink-500 to-rose-500"
           isLoading={statsLoading}
         />
         <StatsCard
@@ -134,6 +143,7 @@ const Dashboard = () => {
           change="In progress"
           changeType="neutral"
           icon={Clock}
+          gradient="bg-gradient-to-br from-indigo-600 via-indigo-500 to-purple-500"
           isLoading={statsLoading}
         />
       </div>
@@ -479,6 +489,146 @@ const Dashboard = () => {
           </CardContent>
         </Card>
       </div>
+
+      {/* Weekly Appointments Section */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-2">
+          <Card className="overflow-hidden shadow-lg">
+            <CardHeader className="bg-gradient-to-r from-blue-600 via-blue-500 to-cyan-500 text-white pb-4">
+              <CardTitle className="flex items-center gap-2">
+                <Calendar className="h-5 w-5" />
+                Weekly Appointments
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="pt-6">
+              {weeklyLoading ? (
+                <div className="space-y-3">
+                  {[1, 2, 3].map((i) => (
+                    <Skeleton key={i} className="h-16" />
+                  ))}
+                </div>
+              ) : weeklyAppointments && weeklyAppointments.length > 0 ? (
+                <div className="space-y-3">
+                  {weeklyAppointments.slice(0, 6).map((apt, index) => (
+                    <div
+                      key={apt.id}
+                      className="flex items-center justify-between p-3 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-muted/50 transition-colors"
+                    >
+                      <div className="flex items-center gap-3 flex-1">
+                        <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm ${
+                          apt.daysFromNow === 0 ? 'bg-gradient-to-br from-red-500 to-pink-500' :
+                          apt.daysFromNow === 1 ? 'bg-gradient-to-br from-orange-500 to-red-500' :
+                          apt.daysFromNow <= 3 ? 'bg-gradient-to-br from-yellow-500 to-orange-500' :
+                          'bg-gradient-to-br from-green-500 to-blue-500'
+                        }`}>
+                          {apt.daysFromNow}d
+                        </div>
+                        <div className="flex-1">
+                          <p className="font-semibold text-foreground">{apt.patient_name}</p>
+                          <p className="text-sm text-muted-foreground">{apt.displayDay} at {apt.appointment_time}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {apt.department && (
+                          <span className="text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 px-2 py-1 rounded">
+                            {apt.department}
+                          </span>
+                        )}
+                        <Badge className={getStatusColor(apt.status)}>
+                          {apt.status}
+                        </Badge>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-8 text-muted-foreground">
+                  <Calendar className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                  <p>No appointments this week</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Department Distribution */}
+        <Card className="overflow-hidden shadow-lg">
+          <CardHeader className="bg-gradient-to-r from-purple-600 via-pink-500 to-red-500 text-white pb-4">
+            <CardTitle className="text-base">Department Distribution</CardTitle>
+          </CardHeader>
+          <CardContent className="pt-6">
+            {deptLoading ? (
+              <Skeleton className="h-64" />
+            ) : departmentData && departmentData.length > 0 ? (
+              <ResponsiveContainer width="100%" height={300}>
+                <PieChart>
+                  <Pie
+                    data={departmentData}
+                    cx="50%"
+                    cy="50%"
+                    labelLine={false}
+                    label={({ name, value }) => `${name}: ${value}`}
+                    outerRadius={80}
+                    fill="#8884d8"
+                    dataKey="value"
+                  >
+                    {departmentData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={entry.color} />
+                    ))}
+                  </Pie>
+                  <Tooltip />
+                </PieChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="text-center py-12 text-muted-foreground">
+                <p>No department data</p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Recent Activity Section */}
+      <Card className="overflow-hidden shadow-lg">
+        <CardHeader className="bg-gradient-to-r from-green-600 via-emerald-500 to-teal-500 text-white pb-4">
+          <CardTitle className="flex items-center gap-2">
+            <Activity className="h-5 w-5" />
+            Recent Activity
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="pt-6">
+          {activityLoading ? (
+            <div className="space-y-3">
+              {[1, 2, 3].map((i) => (
+                <Skeleton key={i} className="h-12" />
+              ))}
+            </div>
+          ) : activityLog && activityLog.length > 0 ? (
+            <div className="space-y-3">
+              {activityLog.map((activity) => (
+                <div
+                  key={activity.id}
+                  className="flex items-start gap-3 p-3 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-muted/50 transition-colors"
+                >
+                  <div className="text-2xl mt-1">{activity.icon}</div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-foreground text-sm">{activity.description}</p>
+                    <p className="text-xs text-muted-foreground">{activity.timeAgo}</p>
+                  </div>
+                  <Badge variant="outline" className="flex-shrink-0 capitalize">
+                    {activity.type.replace('_', ' ')}
+                  </Badge>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-center py-8 text-muted-foreground">
+              <Activity className="h-12 w-12 mx-auto mb-2 opacity-50" />
+              <p>No recent activity</p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 };

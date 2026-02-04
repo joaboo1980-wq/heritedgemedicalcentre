@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useEffect, useState } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
 
@@ -29,6 +29,8 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+export { AuthContext };
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
@@ -36,22 +38,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [roles, setRoles] = useState<AppRole[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const fetchUserData = async (userId: string) => {
+  const fetchUserData = async (userId: string): Promise<void> => {
     try {
       console.log('Fetching user data for:', userId);
       
-      // Set a timeout of 5 seconds for data fetching
-      const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('User data fetch timeout')), 5000)
-      );
-
       // Fetch profile
-      const profilePromise = supabase
+      const { data: profileDataArray, error: profileError } = await supabase
         .from('profiles')
         .select('*')
         .eq('user_id', userId);
-      
-      const { data: profileDataArray, error: profileError } = await Promise.race([profilePromise, timeoutPromise]) as any;
       
       if (profileError) {
         console.error('Profile fetch error:', profileError);
@@ -61,14 +56,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setProfile(profileDataArray[0] as Profile);
       }
 
-      // Fetch roles directly from user_roles table instead of RPC
+      // Fetch roles directly from user_roles table
       console.log('Fetching roles...');
-      const rolesPromise = supabase
+      const { data: rolesData, error: rolesError } = await supabase
         .from('user_roles')
         .select('role')
         .eq('user_id', userId);
-
-      const { data: rolesData, error: rolesError } = await Promise.race([rolesPromise, timeoutPromise]) as any;
       
       if (rolesError) {
         console.error('Roles fetch error:', rolesError);
@@ -85,6 +78,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } catch (error) {
       console.error('Error in fetchUserData:', error);
       setRoles([]);
+    } finally {
+      // Ensure loading is set to false after all state updates
+      setLoading(false);
     }
   };
 
@@ -97,13 +93,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setUser(session?.user ?? null);
           
           if (session?.user) {
-            // Fetch user data without waiting in the callback
-            fetchUserData(session.user.id).catch(error => {
-              console.error('Error fetching user data:', error);
-              setLoading(false);
-            }).then(() => {
-              setLoading(false);
-            });
+            // Fetch user data - loading will be set to false inside fetchUserData
+            fetchUserData(session.user.id)
+              .catch(error => {
+                console.error('Error fetching user data:', error);
+                setLoading(false);
+              });
           } else {
             setProfile(null);
             setRoles([]);
@@ -123,13 +118,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setUser(session?.user ?? null);
         
         if (session?.user) {
-          // Fetch user data
-          fetchUserData(session.user.id).catch(error => {
-            console.error('Error fetching user session data:', error);
-            setLoading(false);
-          }).then(() => {
-            setLoading(false);
-          });
+          // Fetch user data - loading will be set to false inside fetchUserData
+          fetchUserData(session.user.id)
+            .catch(error => {
+              console.error('Error fetching user session data:', error);
+              setLoading(false);
+            });
         } else {
           setLoading(false);
         }
@@ -173,12 +167,4 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       {children}
     </AuthContext.Provider>
   );
-};
-
-export const useAuth = () => {
-  const context = useContext(AuthContext);
-  if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
-  return context;
 };

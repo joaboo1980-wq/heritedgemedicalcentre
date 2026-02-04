@@ -9,7 +9,7 @@ import {
 } from '@heroicons/react/24/solid';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
-import { useAuth } from '@/contexts/AuthContext';
+import { useAuth } from '@/hooks/useAuth';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
@@ -731,25 +731,56 @@ const createPrescriptionMutation = useMutation({
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-blue-500 text-white rounded-lg p-4 shadow">
-          <div className="text-lg font-semibold">Today's Appointments</div>
-          <div className="text-3xl font-bold">{stats.todayAppointments}</div>
-          <div className="text-sm">{stats.pendingConfirmation} pending confirmation</div>
+        <div className="overflow-hidden shadow-lg border-0 bg-gradient-to-br from-blue-600 via-blue-500 to-indigo-500 text-white rounded-lg p-6">
+          <div className="flex items-start justify-between">
+            <div>
+              <p className="text-sm text-white/80">Today's Appointments</p>
+              <p className="text-4xl font-bold mt-2">{stats.todayAppointments}</p>
+              <p className="text-xs text-white/70 mt-2">{stats.pendingConfirmation} pending</p>
+            </div>
+            <div className="p-3 rounded-lg bg-white/20 backdrop-blur-sm text-white">
+              <CalendarDaysIcon className="h-6 w-6" />
+            </div>
+          </div>
         </div>
-        <div className="bg-purple-500 text-white rounded-lg p-4 shadow">
-          <div className="text-lg font-semibold">Active Patients</div>
-          <div className="text-3xl font-bold">{stats.activePatients}</div>
-          <div className="text-sm">Under your care</div>
+
+        <div className="overflow-hidden shadow-lg border-0 bg-gradient-to-br from-purple-600 via-purple-500 to-pink-500 text-white rounded-lg p-6">
+          <div className="flex items-start justify-between">
+            <div>
+              <p className="text-sm text-white/80">Active Patients</p>
+              <p className="text-4xl font-bold mt-2">{stats.activePatients}</p>
+              <p className="text-xs text-white/70 mt-2">Under your care</p>
+            </div>
+            <div className="p-3 rounded-lg bg-white/20 backdrop-blur-sm text-white">
+              <UserGroupIcon className="h-6 w-6" />
+            </div>
+          </div>
         </div>
-        <div className="bg-green-500 text-white rounded-lg p-4 shadow">
-          <div className="text-lg font-semibold">Active Prescriptions</div>
-          <div className="text-3xl font-bold">{stats.activePrescriptions}</div>
-          <div className="text-sm">Currently active</div>
+
+        <div className="overflow-hidden shadow-lg border-0 bg-gradient-to-br from-green-600 via-green-500 to-emerald-500 text-white rounded-lg p-6">
+          <div className="flex items-start justify-between">
+            <div>
+              <p className="text-sm text-white/80">Active Prescriptions</p>
+              <p className="text-4xl font-bold mt-2">{stats.activePrescriptions}</p>
+              <p className="text-xs text-white/70 mt-2">Currently active</p>
+            </div>
+            <div className="p-3 rounded-lg bg-white/20 backdrop-blur-sm text-white">
+              <ClipboardDocumentListIcon className="h-6 w-6" />
+            </div>
+          </div>
         </div>
-        <div className="bg-orange-500 text-white rounded-lg p-4 shadow">
-          <div className="text-lg font-semibold">Lab Results</div>
-          <div className="text-3xl font-bold">{stats.labResults}</div>
-          <div className="text-sm">{stats.criticalLabResults} critical</div>
+
+        <div className="overflow-hidden shadow-lg border-0 bg-gradient-to-br from-orange-600 via-orange-500 to-red-500 text-white rounded-lg p-6">
+          <div className="flex items-start justify-between">
+            <div>
+              <p className="text-sm text-white/80">Lab Results</p>
+              <p className="text-4xl font-bold mt-2">{stats.labResults}</p>
+              <p className="text-xs text-white/70 mt-2">{stats.criticalLabResults} critical</p>
+            </div>
+            <div className="p-3 rounded-lg bg-white/20 backdrop-blur-sm text-white">
+              <BeakerIcon className="h-6 w-6" />
+            </div>
+          </div>
         </div>
       </div>
 

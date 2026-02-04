@@ -10,6 +10,7 @@ interface StatsCardProps {
   changeType?: 'positive' | 'negative' | 'neutral';
   icon: LucideIcon;
   iconColor?: string;
+  gradient?: string;
   isLoading?: boolean;
 }
 
@@ -19,7 +20,8 @@ const StatsCard = ({
   change, 
   changeType = 'positive', 
   icon: Icon,
-  iconColor = 'text-primary',
+  iconColor = 'text-white',
+  gradient = 'bg-gradient-to-br from-blue-500 to-cyan-500',
   isLoading = false
 }: StatsCardProps) => {
   if (isLoading) {
@@ -40,23 +42,23 @@ const StatsCard = ({
   }
 
   return (
-    <Card className="bg-card">
+    <Card className={cn("overflow-hidden shadow-lg border-0", gradient)}>
       <CardContent className="p-6">
         <div className="flex items-start justify-between">
           <div>
-            <p className="text-sm text-muted-foreground">{title}</p>
-            <p className="text-3xl font-bold text-foreground mt-1">{value}</p>
+            <p className="text-sm text-white/80">{title}</p>
+            <p className="text-3xl font-bold text-white mt-1">{value}</p>
             {change && (
               <p className={cn(
                 "text-sm mt-2 font-medium",
-                changeType === 'positive' ? 'text-green-500' : 
-                changeType === 'negative' ? 'text-red-500' : 'text-muted-foreground'
+                changeType === 'positive' ? 'text-green-100' : 
+                changeType === 'negative' ? 'text-red-100' : 'text-white/70'
               )}>
                 {change}
               </p>
             )}
           </div>
-          <div className={cn("p-3 rounded-lg bg-muted", iconColor)}>
+          <div className={cn("p-3 rounded-lg bg-white/20 backdrop-blur-sm", iconColor)}>
             <Icon className="h-6 w-6" />
           </div>
         </div>

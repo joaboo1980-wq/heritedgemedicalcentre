@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ThemeProvider } from "@/contexts/ThemeContext";
-import { useAuth } from "@/contexts/AuthContext";
+import { useAuth } from "@/hooks/useAuth";
 import ProtectedRoute from "@/components/layout/ProtectedRoute";
 
 import Auth from "./pages/Auth";
@@ -39,13 +39,14 @@ const roleDashboardMap: Record<string, string> = {
   lab_technician: "/laboratory-dashboard",
   nurse: "/nursing-dashboard",
   pharmacist: "/pharmacy-dashboard",
-  admin: "/dashboard", // fallback for admin
+  admin: "/admin-dashboard",
 };
 
 const RootRedirect = () => {
   const { user, loading, roles } = useAuth();
 
-  if (loading) {
+  // Wait for both auth loading AND roles to be populated
+  if (loading || !roles || roles.length === 0) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="flex flex-col items-center gap-4">
@@ -59,7 +60,7 @@ const RootRedirect = () => {
   if (!user) return <Navigate to="/auth" replace />;
 
   // Redirect to the dashboard for the user's primary role
-  const primaryRole = roles && roles.length > 0 ? roles[0] : "admin";
+  const primaryRole = roles[0];
   const dashboardPath = roleDashboardMap[primaryRole] || "/dashboard";
   return <Navigate to={dashboardPath} replace />;
 };
@@ -67,7 +68,8 @@ const RootRedirect = () => {
 const DashboardRedirect = () => {
   const { loading, roles } = useAuth();
 
-  if (loading) {
+  // Wait for both auth loading AND roles to be populated
+  if (loading || !roles || roles.length === 0) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="flex flex-col items-center gap-4">
@@ -79,7 +81,7 @@ const DashboardRedirect = () => {
   }
 
   // Redirect /dashboard to the user's role-specific dashboard
-  const primaryRole = roles && roles.length > 0 ? roles[0] : "admin";
+  const primaryRole = roles[0];
   const dashboardPath = roleDashboardMap[primaryRole] || "/dashboard";
   return <Navigate to={dashboardPath} replace />;
 };
@@ -96,7 +98,8 @@ const App = () => (
             <Route path="/" element={<RootRedirect />} />
             <Route path="/auth" element={<Auth />} />
             <Route element={<DashboardLayout />}>
-              <Route path="/dashboard" element={
+              <Route path="/dashboard" element={<DashboardRedirect />} />
+              <Route path="/admin-dashboard" element={
                 <ProtectedRoute module="dashboard" requiredRole="admin">
                   <Dashboard />
                 </ProtectedRoute>
@@ -107,8 +110,8 @@ const App = () => (
                   <ReceptionDashboard />
                 </ProtectedRoute>
               } />
-                <Route path="/doctor-dashboard" element={
-                <ProtectedRoute module="dashboard">
+              <Route path="/doctor-dashboard" element={
+                <ProtectedRoute module="dashboard" requiredRole="doctor">
                   <DoctorDashboard />
                 </ProtectedRoute>
               } />
