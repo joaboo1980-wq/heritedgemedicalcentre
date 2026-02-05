@@ -45,8 +45,8 @@ const roleDashboardMap: Record<string, string> = {
 const RootRedirect = () => {
   const { user, loading, roles } = useAuth();
 
-  // Wait for both auth loading AND roles to be populated
-  if (loading || !roles || roles.length === 0) {
+  // Wait for auth loading to complete
+  if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="flex flex-col items-center gap-4">
@@ -60,16 +60,16 @@ const RootRedirect = () => {
   if (!user) return <Navigate to="/auth" replace />;
 
   // Redirect to the dashboard for the user's primary role
-  const primaryRole = roles[0];
-  const dashboardPath = roleDashboardMap[primaryRole] || "/dashboard";
+  const primaryRole = roles && roles.length > 0 ? roles[0] : null;
+  const dashboardPath = primaryRole && roleDashboardMap[primaryRole] ? roleDashboardMap[primaryRole] : "/dashboard";
   return <Navigate to={dashboardPath} replace />;
 };
 
 const DashboardRedirect = () => {
   const { loading, roles } = useAuth();
 
-  // Wait for both auth loading AND roles to be populated
-  if (loading || !roles || roles.length === 0) {
+  // Wait for auth loading to complete
+  if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="flex flex-col items-center gap-4">
@@ -81,8 +81,8 @@ const DashboardRedirect = () => {
   }
 
   // Redirect /dashboard to the user's role-specific dashboard
-  const primaryRole = roles[0];
-  const dashboardPath = roleDashboardMap[primaryRole] || "/dashboard";
+  const primaryRole = roles && roles.length > 0 ? roles[0] : null;
+  const dashboardPath = primaryRole && roleDashboardMap[primaryRole] ? roleDashboardMap[primaryRole] : "/dashboard";
   return <Navigate to={dashboardPath} replace />;
 };
 

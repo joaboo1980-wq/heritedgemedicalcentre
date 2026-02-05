@@ -482,41 +482,36 @@ const { data: availableMedications, isLoading: loadingMedications } = useQuery({
 
 const createPrescriptionMutation = useMutation({
   mutationFn: async (prescriptionData: any) => {
-    // Generate prescription_number in the format: RXYYYYMMdd-####
-    const now = new Date();
-    const dateStr = now.toISOString().slice(0, 10).replace(/-/g, '');
-    const randomNum = String(Math.floor(Math.random() * 10000)).padStart(4, '0');
-    const prescriptionNumber = `RX${dateStr}-${randomNum}`;
+    // First, get the staff ID for the current doctor from their email
+    const { data: staffData, error: staffError } = await (supabase as any)
+      .from('staff')
+      .select('id')
+      .eq('email', prescriptionData.doctor_email)
+      .single();
 
-    // Create the prescription record with generated prescription_number
+    if (staffError || !staffData?.id) {
+      throw new Error('Doctor staff record not found');
+    }
+
+    const doctor_id = staffData.id;
+
+    // Create the prescription record with all required fields
     const { data: prescriptionResponse, error: prescriptionError } = await (supabase as any)
       .from('prescriptions')
       .insert({
         patient_id: prescriptionData.patient_id,
-        prescription_number: prescriptionNumber,
-        status: 'pending',
+        doctor_id: doctor_id,
+        medicine_id: prescriptionData.medicine_id,
+        dosage: prescriptionData.dosage,
+        frequency: prescriptionData.frequency,
+        duration: prescriptionData.duration || null,
+        status: 'active',
+        prescribed_date: new Date().toISOString().split('T')[0],
       })
       .select()
       .single();
 
     if (prescriptionError) throw prescriptionError;
-    
-    const prescriptionId = prescriptionResponse?.id;
-    if (!prescriptionId) throw new Error('Failed to create prescription');
-
-    // Step 2: Create the prescription item with medication details
-    const { error: itemError } = await (supabase as any)
-      .from('prescription_items')
-      .insert({
-        prescription_id: prescriptionId,
-        medication_id: prescriptionData.medicine_id,
-        quantity: 1,
-        dosage: prescriptionData.dosage,
-        frequency: prescriptionData.frequency,
-        duration: prescriptionData.duration || null,
-      });
-
-    if (itemError) throw itemError;
   },
   onSuccess: () => {
     queryClient.invalidateQueries({ queryKey: ['doctor-active-prescriptions'] });
@@ -702,7 +697,15 @@ const createPrescriptionMutation = useMutation({
       toast.error('Please fill in all required fields');
       return;
     }
-    createPrescriptionMutation.mutate(prescriptionForm);
+    if (!user?.email) {
+      toast.error('Doctor information not available');
+      return;
+    }
+    // We'll fetch the staff ID in the mutation
+    createPrescriptionMutation.mutate({
+      ...prescriptionForm,
+      doctor_email: user.email,
+    });
   };
 
   const handleDiagnosisFormChange = (field: string, value: string) => {
