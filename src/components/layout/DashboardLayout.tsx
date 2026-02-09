@@ -1,11 +1,13 @@
 import { useEffect } from 'react';
 import { Outlet, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
+import { useSidebar } from '@/contexts/SidebarContext';
 import Sidebar from './Sidebar';
 import Header from './Header';
 
 const DashboardLayout = () => {
   const { user, loading } = useAuth();
+  const { isCollapsed } = useSidebar();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -32,9 +34,9 @@ const DashboardLayout = () => {
   return (
     <div className="min-h-screen bg-muted/30">
       <Sidebar />
-      <div className="ml-20 lg:ml-64 transition-all duration-300 ease-in-out">
+      <div className={`${isCollapsed ? 'ml-20' : 'ml-64'} transition-all duration-300 ease-in-out flex flex-col`}>
         <Header />
-        <main className="p-6">
+        <main className="flex-1 p-6 w-full">
           <Outlet />
         </main>
       </div>

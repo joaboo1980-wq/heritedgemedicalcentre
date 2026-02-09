@@ -150,19 +150,46 @@ const StaffSchedule = () => {
   // Create roster mutation
   const createRosterMutation = useMutation({
     mutationFn: async (data: typeof newRoster) => {
-      const { error } = await supabase
-        .from('duty_rosters' as any)
-        .insert({
-          staff_id: data.staff_id,
-          shift_date: data.shift_date,
-          shift_start_time: data.shift_start_time,
-          shift_end_time: data.shift_end_time,
-          shift_type: data.shift_type,
-          location: data.location || null,
-          notes: data.notes || null,
-          created_by: user?.id,
-        });
-      if (error) throw error;
+      // Validate required fields
+      if (!data.staff_id?.trim()) {
+        console.warn('[StaffSchedule] Staff member is required');
+        throw new Error('Staff member is required');
+      }
+      if (!data.shift_date?.trim()) {
+        console.warn('[StaffSchedule] Shift date is required');
+        throw new Error('Shift date is required');
+      }
+      if (!data.shift_start_time?.trim()) {
+        console.warn('[StaffSchedule] Start time is required');
+        throw new Error('Start time is required');
+      }
+      if (!data.shift_end_time?.trim()) {
+        console.warn('[StaffSchedule] End time is required');
+        throw new Error('End time is required');
+      }
+
+      try {
+        const { error } = await supabase
+          .from('duty_rosters' as any)
+          .insert({
+            staff_id: data.staff_id,
+            shift_date: data.shift_date,
+            shift_start_time: data.shift_start_time,
+            shift_end_time: data.shift_end_time,
+            shift_type: data.shift_type,
+            location: data.location || null,
+            notes: data.notes || null,
+            created_by: user?.id,
+          });
+        if (error) {
+          console.error('[StaffSchedule] Error creating roster:', error);
+          throw error;
+        }
+        console.log('[StaffSchedule] Duty roster created successfully');
+      } catch (err) {
+        console.error('[StaffSchedule] Roster creation failed:', err);
+        throw err;
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['duty-rosters'] });
@@ -179,25 +206,45 @@ const StaffSchedule = () => {
       toast.success('Duty roster created successfully');
     },
     onError: (error: Error) => {
-      toast.error(error.message);
+      console.error('[StaffSchedule] Mutation error:', error.message);
+      toast.error(`Failed to create roster: ${error.message}`);
     },
   });
 
   // Update availability mutation
   const updateAvailabilityMutation = useMutation({
     mutationFn: async (data: typeof availabilityUpdate) => {
-      const { error } = await supabase
-        .from('staff_availability' as any)
-        .upsert({
-          staff_id: data.staff_id,
-          availability_date: data.availability_date,
-          status: data.status,
-          start_time: data.start_time || null,
-          end_time: data.end_time || null,
-          reason: data.reason || null,
-          updated_by: user?.id,
-        });
-      if (error) throw error;
+      // Validate required fields
+      if (!data.staff_id?.trim()) {
+        console.warn('[StaffSchedule] Staff member is required');
+        throw new Error('Staff member is required');
+      }
+      if (!data.availability_date?.trim()) {
+        console.warn('[StaffSchedule] Availability date is required');
+        throw new Error('Availability date is required');
+      }
+
+      try {
+        const { error } = await supabase
+          .from('staff_availability' as any)
+          .upsert({
+            staff_id: data.staff_id,
+            availability_date: data.availability_date,
+            status: data.status,
+            start_time: data.start_time || null,
+            end_time: data.end_time || null,
+            reason: data.reason || null,
+            updated_by: user?.id,
+          });
+        if (error) {
+          console.error('[StaffSchedule] Error updating availability:', error);
+          throw error;
+        }
+        console.log('[StaffSchedule] Availability updated successfully');
+      } catch (err) {
+        console.error('[StaffSchedule] Availability update failed:', err);
+        throw err;
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['staff-availability'] });
@@ -213,7 +260,8 @@ const StaffSchedule = () => {
       toast.success('Availability updated successfully');
     },
     onError: (error: Error) => {
-      toast.error(error.message);
+      console.error('[StaffSchedule] Mutation error:', error.message);
+      toast.error(`Failed to update availability: ${error.message}`);
     },
   });
 

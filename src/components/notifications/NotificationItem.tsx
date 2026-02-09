@@ -6,7 +6,14 @@ import {
   Receipt, 
   Bell,
   X,
-  Check
+  Check,
+  Pill,
+  AlertCircle,
+  CheckCircle,
+  Clock,
+  User,
+  FileText,
+  AlertTriangle,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -19,36 +26,86 @@ interface NotificationItemProps {
 }
 
 const getNotificationIcon = (type: Notification['type']) => {
-  switch (type) {
-    case 'lab_result':
-      return <FlaskConical className="h-4 w-4" />;
-    case 'appointment':
-      return <Calendar className="h-4 w-4" />;
-    case 'low_stock':
-      return <PackageX className="h-4 w-4" />;
-    case 'billing':
-      return <Receipt className="h-4 w-4" />;
-    default:
-      return <Bell className="h-4 w-4" />;
+  // Appointment notifications
+  if (type.includes('appointment')) {
+    if (type === 'appointment_reminder') return <Clock className="h-4 w-4" />;
+    if (type === 'appointment_cancelled' || type === 'appointment_no_show') return <AlertCircle className="h-4 w-4" />;
+    if (type === 'appointment_completed') return <CheckCircle className="h-4 w-4" />;
+    return <Calendar className="h-4 w-4" />;
   }
+  
+  // Lab notifications
+  if (type.includes('lab')) {
+    if (type === 'lab_results_abnormal') return <AlertTriangle className="h-4 w-4" />;
+    if (type === 'lab_results_ready') return <CheckCircle className="h-4 w-4" />;
+    return <FlaskConical className="h-4 w-4" />;
+  }
+  
+  // Prescription/Pharmacy notifications
+  if (type.includes('prescription') || type.includes('stock')) {
+    if (type === 'prescription_ready') return <CheckCircle className="h-4 w-4" />;
+    if (type === 'inventory_critical' || type === 'low_stock_alert') return <AlertTriangle className="h-4 w-4" />;
+    return <Pill className="h-4 w-4" />;
+  }
+  
+  // Invoice/Billing notifications
+  if (type.includes('invoice') || type === 'billing') {
+    if (type === 'invoice_payment_overdue') return <AlertTriangle className="h-4 w-4" />;
+    if (type === 'invoice_payment_received') return <CheckCircle className="h-4 w-4" />;
+    return <Receipt className="h-4 w-4" />;
+  }
+  
+  // Staff schedule notifications
+  if (type.includes('schedule')) {
+    if (type === 'staff_schedule_changed') return <AlertCircle className="h-4 w-4" />;
+    return <Calendar className="h-4 w-4" />;
+  }
+  
+  // Medical/Examination notifications
+  if (type === 'medical_record_updated' || type === 'examination_result_ready') {
+    return <FileText className="h-4 w-4" />;
+  }
+  
+  // Patient notifications
+  if (type === 'patient_check_in' || type === 'patient_follow_up_needed') {
+    return <User className="h-4 w-4" />;
+  }
+  
+  // Fallback
+  return <Bell className="h-4 w-4" />;
 };
 
 const getNotificationColor = (type: Notification['type'], priority: Notification['priority']) => {
-  if (priority === 'urgent') return 'bg-destructive/10 text-destructive';
-  if (priority === 'high') return 'bg-warning/10 text-warning';
+  // Priority-based coloring (overrides type-based coloring)
+  if (priority === 'urgent') return 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400';
+  if (priority === 'high') return 'bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400';
   
-  switch (type) {
-    case 'lab_result':
-      return 'bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400';
-    case 'appointment':
-      return 'bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400';
-    case 'low_stock':
-      return 'bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400';
-    case 'billing':
-      return 'bg-purple-100 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400';
-    default:
-      return 'bg-muted text-muted-foreground';
+  // Type-based coloring for normal/low priority
+  if (type.includes('appointment')) {
+    return 'bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400';
   }
+  
+  if (type.includes('lab')) {
+    return 'bg-purple-100 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400';
+  }
+  
+  if (type.includes('prescription') || type.includes('stock')) {
+    return 'bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400';
+  }
+  
+  if (type.includes('invoice') || type === 'billing') {
+    return 'bg-indigo-100 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-400';
+  }
+  
+  if (type.includes('schedule')) {
+    return 'bg-yellow-100 text-yellow-600 dark:bg-yellow-900/30 dark:text-yellow-400';
+  }
+  
+  if (type === 'medical_record_updated' || type === 'examination_result_ready') {
+    return 'bg-cyan-100 text-cyan-600 dark:bg-cyan-900/30 dark:text-cyan-400';
+  }
+  
+  return 'bg-muted text-muted-foreground';
 };
 
 const NotificationItem = ({ notification, onMarkAsRead, onDelete }: NotificationItemProps) => {

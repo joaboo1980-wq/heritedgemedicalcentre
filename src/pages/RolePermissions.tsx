@@ -39,6 +39,7 @@ const modules = [
   'reports',
   'accounts',
   'staff',
+  'staff_schedule',
   'user_management',
 ];
 
@@ -73,19 +74,38 @@ const RolePermissions = () => {
   // Update permission mutation
   const updatePermissionMutation = useMutation({
     mutationFn: async (updatedPermissions: PermissionChange[]) => {
-      // Update each permission that changed
-      for (const perm of updatedPermissions) {
-        const { error } = await supabase
-          .from('role_permissions')
-          .update({
-            can_view: perm.can_view,
-            can_create: perm.can_create,
-            can_edit: perm.can_edit,
-            can_delete: perm.can_delete,
-          })
-          .eq('id', perm.id);
+      if (!updatedPermissions || updatedPermissions.length === 0) {
+        console.warn('[RolePermissions] No permissions to update');
+        throw new Error('No permissions to update');
+      }
 
-        if (error) throw error;
+      try {
+        // Update each permission that changed
+        for (const perm of updatedPermissions) {
+          if (!perm.id?.trim()) {
+            console.warn('[RolePermissions] Permission ID is missing');
+            throw new Error('Permission ID is missing');
+          }
+
+          const { error } = await supabase
+            .from('role_permissions')
+            .update({
+              can_view: perm.can_view,
+              can_create: perm.can_create,
+              can_edit: perm.can_edit,
+              can_delete: perm.can_delete,
+            })
+            .eq('id', perm.id);
+
+          if (error) {
+            console.error('[RolePermissions] Error updating permission:', perm.id, error);
+            throw error;
+          }
+        }
+        console.log('[RolePermissions] Permissions updated successfully');
+      } catch (err) {
+        console.error('[RolePermissions] Permission update failed:', err);
+        throw err;
       }
     },
     onSuccess: () => {
@@ -94,6 +114,7 @@ const RolePermissions = () => {
       toast.success('Permissions updated successfully');
     },
     onError: (error: Error) => {
+      console.error('[RolePermissions] Mutation error:', error.message);
       toast.error(`Failed to update permissions: ${error.message}`);
     },
   });

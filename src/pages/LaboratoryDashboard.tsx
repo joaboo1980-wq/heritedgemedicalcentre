@@ -5,6 +5,7 @@ import {
 } from '@/hooks/useDashboard';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
+import { useQuery } from '@tanstack/react-query';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -17,42 +18,170 @@ const LaboratoryDashboard = () => {
   // Modal state for View Details
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [showDetails, setShowDetails] = useState(false);
+  const [showSampleModal, setShowSampleModal] = useState(false);
+  const [sampleCollectionStatus, setSampleCollectionStatus] = useState('pending_collection');
   const [processing, setProcessing] = useState(false);
+  const [activeFilter, setActiveFilter] = useState<'pending' | 'in_progress' | 'completed' | 'rejected'>('pending');
+
+  // Fetch all lab orders for filtering by status
+  const { data: allLabOrders = [], isLoading: allOrdersLoading, refetch: refetchAllOrders } = useQuery({
+    queryKey: ['all-lab-orders'],
+    queryFn: async () => {
+      try {
+        const { data, error } = await supabase
+          .from('lab_orders')
+          .select(`
+            id,
+            order_number,
+            status,
+            priority,
+            created_at,
+            patients (
+              first_name,
+              last_name
+            ),
+            lab_tests (
+              test_name
+            )
+          `)
+          .order('priority', { ascending: false })
+          .order('created_at', { ascending: true });
+
+        if (error) {
+          console.error('[LaboratoryDashboard] Error fetching all lab orders:', error);
+          return [];
+        }
+
+        return (data || []).map((order: any) => ({
+          id: order.id,
+          order_number: order.order_number,
+          patient_name: order.patients ? `${order.patients.first_name} ${order.patients.last_name}` : 'Unknown',
+          test_name: order.lab_tests?.test_name || 'Unknown',
+          status: order.status,
+          priority: order.priority,
+          created_at: order.created_at,
+        }));
+      } catch (err) {
+        console.error('[LaboratoryDashboard] Failed to fetch all lab orders:', err);
+        return [];
+      }
+    },
+    refetchInterval: 15000,
+  });
+
+  // Fetch completed tests today
+  const { data: completedTodayCount = 0 } = useQuery({
+    queryKey: ['completed-lab-tests-today'],
+    queryFn: async () => {
+      try {
+        const today = new Date().toISOString().split('T')[0];
+        const startOfDay = `${today}T00:00:00`;
+        const endOfDay = `${today}T23:59:59`;
+        
+        const { count, error } = await supabase
+          .from('lab_orders')
+          .select('*', { count: 'exact', head: true })
+          .eq('status', 'completed')
+          .gte('updated_at', startOfDay)
+          .lte('updated_at', endOfDay);
+        
+        if (error) {
+          console.error('[LaboratoryDashboard] Error fetching completed tests:', error);
+          return 0;
+        }
+        return count || 0;
+      } catch (err) {
+        console.error('[LaboratoryDashboard] Completed tests query failed:', err);
+        return 0;
+      }
+    },
+    refetchInterval: 60000,
+  });
+
+  // Fetch abnormal results count
+  const { data: abnormalResultsCount = 0 } = useQuery({
+    queryKey: ['abnormal-lab-results'],
+    queryFn: async () => {
+      try {
+        const { count, error } = await supabase
+          .from('lab_orders')
+          .select('*', { count: 'exact', head: true })
+          .eq('is_abnormal', true)
+          .eq('status', 'completed');
+        
+        if (error) {
+          console.error('[LaboratoryDashboard] Error fetching abnormal results:', error);
+          return 0;
+        }
+        return count || 0;
+      } catch (err) {
+        console.error('[LaboratoryDashboard] Abnormal results query failed:', err);
+        return 0;
+      }
+    },
+    refetchInterval: 60000,
+  });
 
   // Filter urgent tests from pendingLabOrders
   const urgentTests = (pendingLabOrders || []).filter(order => order.priority === 'urgent');
   const inProgressTests = (pendingLabOrders || []).filter(order => order.status === 'in_progress');
-  const completedToday = 1; // TODO: Wire up completed tests count
-  const equipmentStatus = 75; // TODO: Wire up equipment status
 
   // Action handlers
-  const handleProcess = async (orderId: string) => {
+  const handleProcess = (order: any) => {
+    setSelectedOrder(order);
+    setSampleCollectionStatus('pending_collection');
+    setShowSampleModal(true);
+  };
+
+  const handleSampleCollection = async () => {
+    if (!selectedOrder) return;
+    
     setProcessing(true);
-    const { error } = await supabase
-      .from('lab_orders')
-      .update({ status: 'in_progress' })
-      .eq('id', orderId);
-    setProcessing(false);
-    if (error) {
-      toast({ title: 'Error', description: 'Failed to process lab order.', variant: 'destructive' });
-    } else {
-      toast({ title: 'Lab order processing started.' });
-      refetch();
+    try {
+      const { error } = await supabase
+        .from('lab_orders')
+        .update({ status: 'sample_collected' })
+        .eq('id', selectedOrder.id);
+      
+      if (error) {
+        console.error('[LaboratoryDashboard] Sample collection error:', error);
+        toast({ title: 'Error', description: 'Failed to mark sample as collected.', variant: 'destructive' });
+      } else {
+        toast({ title: 'Sample marked as collected.' });
+        setShowSampleModal(false);
+        setSampleCollectionStatus('pending_collection');
+        refetch();
+        refetchAllOrders();
+      }
+    } catch (err) {
+      console.error('[LaboratoryDashboard] Sample collection failed:', err);
+      toast({ title: 'Error', description: 'Failed to mark sample as collected.', variant: 'destructive' });
+    } finally {
+      setProcessing(false);
     }
   };
 
   const handleReject = async (orderId: string) => {
     setProcessing(true);
-    const { error } = await supabase
-      .from('lab_orders')
-      .update({ status: 'rejected' })
-      .eq('id', orderId);
-    setProcessing(false);
-    if (error) {
+    try {
+      const { error } = await supabase
+        .from('lab_orders')
+        .update({ status: 'rejected' })
+        .eq('id', orderId);
+      
+      if (error) {
+        console.error('[LaboratoryDashboard] Reject error:', error);
+        toast({ title: 'Error', description: 'Failed to reject sample.', variant: 'destructive' });
+      } else {
+        toast({ title: 'Sample rejected.' });
+        refetch();
+        refetchAllOrders();
+      }
+    } catch (err) {
+      console.error('[LaboratoryDashboard] Reject failed:', err);
       toast({ title: 'Error', description: 'Failed to reject sample.', variant: 'destructive' });
-    } else {
-      toast({ title: 'Sample rejected.' });
-      refetch();
+    } finally {
+      setProcessing(false);
     }
   };
 
@@ -68,6 +197,7 @@ const LaboratoryDashboard = () => {
     } else {
       toast({ title: 'Lab order cancelled.' });
       refetch();
+      refetchAllOrders();
     }
   };
 
@@ -105,13 +235,13 @@ const LaboratoryDashboard = () => {
         </div>
         <div className="bg-green-500 text-white rounded-lg p-4 shadow">
           <div className="text-lg font-semibold">Completed Today</div>
-          <div className="text-3xl font-bold">{statsLoading ? '...' : completedToday}</div>
+          <div className="text-3xl font-bold">{completedTodayCount}</div>
           <div className="text-sm">Tests finished</div>
         </div>
-        <div className="bg-pink-500 text-white rounded-lg p-4 shadow">
-          <div className="text-lg font-semibold">Equipment Status</div>
-          <div className="text-3xl font-bold">{equipmentStatus}%</div>
-          <div className="text-sm">Operational</div>
+        <div className="bg-red-500 text-white rounded-lg p-4 shadow">
+          <div className="text-lg font-semibold">Abnormal Results</div>
+          <div className="text-3xl font-bold">{abnormalResultsCount}</div>
+          <div className="text-sm">Requiring review</div>
         </div>
       </div>
 
@@ -132,7 +262,7 @@ const LaboratoryDashboard = () => {
                 <button
                   className="bg-red-500 text-white px-3 py-1 rounded"
                   disabled={processing}
-                  onClick={() => handleProcess(test.id)}
+                  onClick={() => handleProcess(test)}
                 >Process Now</button>
               </div>
             ))}
@@ -142,16 +272,30 @@ const LaboratoryDashboard = () => {
 
       {/* Tabs */}
       <div className="flex gap-2 mt-4">
-        <button className="px-4 py-2 rounded bg-purple-200 text-purple-800 font-semibold">Pending Tests</button>
-        <button className="px-4 py-2 rounded bg-blue-100 text-blue-800 font-semibold">In Progress</button>
-        <button className="px-4 py-2 rounded bg-green-100 text-green-800 font-semibold">Completed</button>
-        <button className="px-4 py-2 rounded bg-pink-100 text-pink-800 font-semibold">Equipment</button>
+        <button 
+          onClick={() => setActiveFilter('pending')}
+          className={`px-4 py-2 rounded font-semibold ${activeFilter === 'pending' ? 'bg-purple-500 text-white' : 'bg-purple-200 text-purple-800'}`}
+        >Pending Tests</button>
+        <button 
+          onClick={() => setActiveFilter('in_progress')}
+          className={`px-4 py-2 rounded font-semibold ${activeFilter === 'in_progress' ? 'bg-blue-500 text-white' : 'bg-blue-100 text-blue-800'}`}
+        >In Progress</button>
+        <button 
+          onClick={() => setActiveFilter('completed')}
+          className={`px-4 py-2 rounded font-semibold ${activeFilter === 'completed' ? 'bg-green-500 text-white' : 'bg-green-100 text-green-800'}`}
+        >Completed</button>
+        <button 
+          onClick={() => setActiveFilter('rejected')}
+          className={`px-4 py-2 rounded font-semibold ${activeFilter === 'rejected' ? 'bg-red-500 text-white' : 'bg-red-100 text-red-800'}`}
+        >Rejected</button>
       </div>
 
-      {/* Pending Lab Tests Table */}
+      {/* Lab Tests Table - Filtered by Status */}
       <div className="bg-white rounded-lg shadow p-4 mt-4">
-        <h2 className="text-xl font-semibold mb-2">Pending Lab Tests</h2>
-        {labLoading ? (
+        <h2 className="text-xl font-semibold mb-2">
+          {activeFilter === 'pending' ? 'Pending Lab Tests' : activeFilter === 'in_progress' ? 'Tests In Progress' : activeFilter === 'completed' ? 'Completed Tests' : 'Rejected Tests'}
+        </h2>
+        {allOrdersLoading ? (
           <div>Loading...</div>
         ) : labError ? (
           <div className="text-red-500">Error loading lab tests.</div>
@@ -168,40 +312,77 @@ const LaboratoryDashboard = () => {
               </tr>
             </thead>
             <tbody>
-              {pendingLabOrders && pendingLabOrders.length > 0 ? (
-                pendingLabOrders.map(order => (
-                  <tr key={order.id}>
-                    <td className="py-2">{order.order_number}</td>
-                    <td className="py-2">{order.patient_name}</td>
-                    <td className="py-2">{order.test_name}</td>
-                    <td className="py-2"><span className={`px-2 py-1 rounded text-xs ${order.priority === 'urgent' ? 'bg-red-200 text-red-800' : 'bg-purple-200 text-purple-800'}`}>{order.priority}</span></td>
-                    <td className="py-2">{new Date(order.created_at).toLocaleDateString()}</td>
-                    <td className="py-2 flex gap-2">
-                      <button
-                        className="bg-blue-500 text-white px-3 py-1 rounded"
-                        disabled={processing}
-                        onClick={() => handleProcess(order.id)}
-                      >Process</button>
-                      <button
-                        className="bg-gray-200 text-gray-700 px-3 py-1 rounded"
-                        onClick={() => handleViewDetails(order)}
-                      >View Details</button>
-                      <button
-                        className="bg-red-200 text-red-800 px-3 py-1 rounded"
-                        disabled={processing}
-                        onClick={() => handleReject(order.id)}
-                      >Reject Sample</button>
-                      <button
-                        className="bg-gray-200 text-gray-700 px-3 py-1 rounded"
-                        disabled={processing}
-                        onClick={() => handleCancel(order.id)}
-                      >Cancel</button>
-                    </td>
-                  </tr>
-                ))
+              {allLabOrders && allLabOrders.length > 0 ? (
+                allLabOrders
+                  .filter(order => order.status === activeFilter)
+                  .map(order => (
+                    <tr key={order.id}>
+                      <td className="py-2">{order.order_number}</td>
+                      <td className="py-2">{order.patient_name}</td>
+                      <td className="py-2">{order.test_name}</td>
+                      <td className="py-2"><span className={`px-2 py-1 rounded text-xs ${order.priority === 'urgent' ? 'bg-red-200 text-red-800' : 'bg-purple-200 text-purple-800'}`}>{order.priority}</span></td>
+                      <td className="py-2">{new Date(order.created_at).toLocaleDateString()}</td>
+                      <td className="py-2 flex gap-2">
+                        {activeFilter === 'pending' && (
+                          <>
+                            <button
+                              className="bg-blue-500 text-white px-3 py-1 rounded"
+                              disabled={processing}
+                              onClick={() => handleProcess(order)}
+                            >Process</button>
+                            <button
+                              className="bg-gray-200 text-gray-700 px-3 py-1 rounded"
+                              onClick={() => handleViewDetails(order)}
+                            >View Details</button>
+                            <button
+                              className="bg-red-200 text-red-800 px-3 py-1 rounded"
+                              disabled={processing}
+                              onClick={() => handleReject(order.id)}
+                            >Reject Sample</button>
+                            <button
+                              className="bg-gray-200 text-gray-700 px-3 py-1 rounded"
+                              disabled={processing}
+                              onClick={() => handleCancel(order.id)}
+                            >Cancel</button>
+                          </>
+                        )}
+                        {activeFilter === 'in_progress' && (
+                          <>
+                            <button
+                              className="bg-gray-200 text-gray-700 px-3 py-1 rounded"
+                              onClick={() => handleViewDetails(order)}
+                            >View Details</button>
+                            <button
+                              className="bg-gray-200 text-gray-700 px-3 py-1 rounded"
+                              disabled={processing}
+                              onClick={() => handleCancel(order.id)}
+                            >Cancel</button>
+                          </>
+                        )}
+                        {activeFilter === 'completed' && (
+                          <>
+                            <button
+                              className="bg-gray-200 text-gray-700 px-3 py-1 rounded"
+                              onClick={() => handleViewDetails(order)}
+                            >View Details</button>
+                          </>
+                        )}
+                        {activeFilter === 'rejected' && (
+                          <>
+                            <button
+                              className="bg-gray-200 text-gray-700 px-3 py-1 rounded"
+                              onClick={() => handleViewDetails(order)}
+                            >View Details</button>
+                          </>
+                        )}
+                      </td>
+                    </tr>
+                  ))
               ) : (
                 <tr>
-                  <td colSpan={6} className="py-2 text-center text-muted-foreground">No pending lab tests.</td>
+                  <td colSpan={6} className="py-2 text-center text-muted-foreground">
+                    {activeFilter === 'pending' ? 'No pending lab tests.' : activeFilter === 'in_progress' ? 'No tests in progress.' : activeFilter === 'completed' ? 'No completed tests.' : 'No rejected tests.'}
+                  </td>
                 </tr>
               )}
             </tbody>
@@ -223,6 +404,60 @@ const LaboratoryDashboard = () => {
         </div>
       </div>
     )}
+
+      {/* Sample Collection Modal */}
+      {showSampleModal && selectedOrder && (
+        <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-96 shadow-lg">
+            <h3 className="text-lg font-bold mb-4">Sample Collection</h3>
+            
+            {/* Test Details */}
+            <div className="bg-blue-50 p-3 rounded mb-4">
+              <div className="font-semibold text-gray-800">{selectedOrder.test_name}</div>
+              <div className="text-sm text-gray-600">Order: {selectedOrder.order_number}</div>
+              <div className="text-sm text-gray-600">Patient: {selectedOrder.patient_name}</div>
+            </div>
+
+            {/* Status Dropdown */}
+            <div className="mb-4">
+              <label className="block text-sm font-semibold mb-2">Sample Collection Status</label>
+              <select
+                value={sampleCollectionStatus}
+                onChange={(e) => setSampleCollectionStatus(e.target.value)}
+                className="w-full border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="pending_collection">Pending Collection</option>
+                <option value="sample_collected">Sample Collected</option>
+                <option value="processing">Processing</option>
+              </select>
+            </div>
+
+            {/* Information Note */}
+            <div className="bg-orange-50 border-l-4 border-orange-400 p-3 mb-6">
+              <p className="text-sm text-orange-800">
+                <span className="font-semibold">Note:</span> Mark as "Sample Collected" once the patient has provided their sample.
+              </p>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowSampleModal(false)}
+                className="flex-1 border border-gray-300 text-gray-700 px-4 py-2 rounded hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSampleCollection}
+                disabled={processing}
+                className="flex-1 bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 disabled:bg-gray-400"
+              >
+                {processing ? 'Processing...' : 'Confirm'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
   </div>
   );
 };

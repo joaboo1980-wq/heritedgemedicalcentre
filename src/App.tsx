@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ThemeProvider } from "@/contexts/ThemeContext";
+import { SidebarProvider } from "@/contexts/SidebarContext";
 import { useAuth } from "@/hooks/useAuth";
 import ProtectedRoute from "@/components/layout/ProtectedRoute";
 
@@ -19,6 +20,7 @@ import PharmacyDashboard from "./pages/PharmacyDashboard";
 import Patients from "./pages/Patients";
 import DoctorExamination from "./pages/DoctorExamination";
 import Appointments from "./pages/Appointments";
+import AdminAppointments from "./pages/AdminAppointments";
 import Staff from "./pages/Staff";
 import StaffSchedule from "./pages/StaffSchedule";
 import Laboratory from "./pages/Laboratory";
@@ -94,7 +96,8 @@ const App = () => (
         <Sonner />
         <BrowserRouter future={{ v7_relativeSplatPath: true, v7_startTransition: true }}>
           <AuthProvider>
-          <Routes>
+            <SidebarProvider>
+              <Routes>
             <Route path="/" element={<RootRedirect />} />
             <Route path="/auth" element={<Auth />} />
             <Route element={<DashboardLayout />}>
@@ -146,6 +149,11 @@ const App = () => (
                   <Appointments />
                 </ProtectedRoute>
               } />
+              <Route path="/admin/appointments" element={
+                <ProtectedRoute module="appointments" requiredRole="admin">
+                  <AdminAppointments />
+                </ProtectedRoute>
+              } />
               <Route path="/staff" element={
                 <ProtectedRoute module="staff">
                   <Staff />
@@ -194,8 +202,9 @@ const App = () => (
             </Route>
             <Route path="*" element={<NotFound />} />
           </Routes>
-        </AuthProvider>
-      </BrowserRouter>
+            </SidebarProvider>
+          </AuthProvider>
+        </BrowserRouter>
       </TooltipProvider>
     </ThemeProvider>
   </QueryClientProvider>

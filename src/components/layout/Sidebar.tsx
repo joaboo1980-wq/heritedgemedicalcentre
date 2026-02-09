@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/hooks/useAuth';
+import { useSidebar } from '@/contexts/SidebarContext';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
@@ -61,6 +62,7 @@ const navItems: NavItem[] = [
 ];
 
 const adminItems = [
+  { icon: Calendar, label: 'All Appointments', href: '/admin/appointments' },
   { icon: Settings, label: 'User Management', href: '/admin/users' },
 ];
 
@@ -68,7 +70,7 @@ const Sidebar = () => {
   const location = useLocation();
   const { profile, roles, isAdmin } = useAuth();
   const { canAccessModule } = usePermissions();
-  const [isCollapsed, setIsCollapsed] = useState(false);
+  const { isCollapsed, setIsCollapsed } = useSidebar();
 
   const getInitials = (name: string) => {
     return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);

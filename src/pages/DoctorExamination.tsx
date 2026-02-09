@@ -178,54 +178,77 @@ const DoctorExamination = () => {
   // Create examination mutation
   const createExaminationMutation = useMutation({
     mutationFn: async (data: typeof newExamination) => {
-      // Calculate BMI if weight and height are provided
-      let bmi = null;
-      if (data.triage_weight && data.triage_height) {
-        const heightInMeters = parseFloat(data.triage_height) / 100;
-        bmi = parseFloat(data.triage_weight) / (heightInMeters * heightInMeters);
+      // Validate required fields
+      if (!data.patient_id?.trim()) {
+        console.warn('[DoctorExamination] Patient is required');
+        throw new Error('Patient is required');
+      }
+      if (!data.chief_complaint?.trim()) {
+        console.warn('[DoctorExamination] Chief complaint is required');
+        throw new Error('Chief complaint is required');
+      }
+      if (!data.assessment_diagnosis?.trim()) {
+        console.warn('[DoctorExamination] Assessment/diagnosis is required');
+        throw new Error('Assessment/diagnosis is required');
       }
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { data: result, error } = await (supabase as any)
-        .from('medical_examinations')
-        .insert({
-          patient_id: data.patient_id,
-          examined_by: user?.id,
-          chief_complaint: data.chief_complaint,
-          triage_temperature: data.triage_temperature ? parseFloat(data.triage_temperature) : null,
-          triage_blood_pressure: data.triage_blood_pressure || null,
-          triage_pulse_rate: data.triage_pulse_rate ? parseInt(data.triage_pulse_rate) : null,
-          triage_respiratory_rate: data.triage_respiratory_rate ? parseInt(data.triage_respiratory_rate) : null,
-          triage_oxygen_saturation: data.triage_oxygen_saturation ? parseFloat(data.triage_oxygen_saturation) : null,
-          triage_weight: data.triage_weight ? parseFloat(data.triage_weight) : null,
-          triage_height: data.triage_height ? parseFloat(data.triage_height) : null,
-          triage_bmi: bmi,
-          history_of_present_illness: data.history_of_present_illness || null,
-          past_medical_history: data.past_medical_history || null,
-          past_surgical_history: data.past_surgical_history || null,
-          medication_list: data.medication_list || null,
-          allergies: data.allergies || null,
-          family_history: data.family_history || null,
-          social_history: data.social_history || null,
-          general_appearance: data.general_appearance || null,
-          heent_examination: data.heent_examination || null,
-          cardiovascular_examination: data.cardiovascular_examination || null,
-          respiratory_examination: data.respiratory_examination || null,
-          abdominal_examination: data.abdominal_examination || null,
-          neurological_examination: data.neurological_examination || null,
-          musculoskeletal_examination: data.musculoskeletal_examination || null,
-          skin_examination: data.skin_examination || null,
-          other_systems: data.other_systems || null,
-          assessment_diagnosis: data.assessment_diagnosis,
-          plan_treatment: data.plan_treatment || null,
-          medications_prescribed: data.medications_prescribed || null,
-          follow_up_date: data.follow_up_date || null,
-          referrals: data.referrals || null,
-        })
-        .select();
+      try {
+        // Calculate BMI if weight and height are provided
+        let bmi = null;
+        if (data.triage_weight && data.triage_height) {
+          const heightInMeters = parseFloat(data.triage_height) / 100;
+          bmi = parseFloat(data.triage_weight) / (heightInMeters * heightInMeters);
+        }
 
-      if (error) throw error;
-      return result;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { data: result, error } = await (supabase as any)
+          .from('medical_examinations')
+          .insert({
+            patient_id: data.patient_id,
+            examined_by: user?.id,
+            chief_complaint: data.chief_complaint,
+            triage_temperature: data.triage_temperature ? parseFloat(data.triage_temperature) : null,
+            triage_blood_pressure: data.triage_blood_pressure || null,
+            triage_pulse_rate: data.triage_pulse_rate ? parseInt(data.triage_pulse_rate) : null,
+            triage_respiratory_rate: data.triage_respiratory_rate ? parseInt(data.triage_respiratory_rate) : null,
+            triage_oxygen_saturation: data.triage_oxygen_saturation ? parseFloat(data.triage_oxygen_saturation) : null,
+            triage_weight: data.triage_weight ? parseFloat(data.triage_weight) : null,
+            triage_height: data.triage_height ? parseFloat(data.triage_height) : null,
+            triage_bmi: bmi,
+            history_of_present_illness: data.history_of_present_illness || null,
+            past_medical_history: data.past_medical_history || null,
+            past_surgical_history: data.past_surgical_history || null,
+            medication_list: data.medication_list || null,
+            allergies: data.allergies || null,
+            family_history: data.family_history || null,
+            social_history: data.social_history || null,
+            general_appearance: data.general_appearance || null,
+            heent_examination: data.heent_examination || null,
+            cardiovascular_examination: data.cardiovascular_examination || null,
+            respiratory_examination: data.respiratory_examination || null,
+            abdominal_examination: data.abdominal_examination || null,
+            neurological_examination: data.neurological_examination || null,
+            musculoskeletal_examination: data.musculoskeletal_examination || null,
+            skin_examination: data.skin_examination || null,
+            other_systems: data.other_systems || null,
+            assessment_diagnosis: data.assessment_diagnosis,
+            plan_treatment: data.plan_treatment || null,
+            medications_prescribed: data.medications_prescribed || null,
+            follow_up_date: data.follow_up_date || null,
+            referrals: data.referrals || null,
+          })
+          .select();
+
+        if (error) {
+          console.error('[DoctorExamination] Error creating examination:', error);
+          throw error;
+        }
+        console.log('[DoctorExamination] Examination created successfully');
+        return result;
+      } catch (err) {
+        console.error('[DoctorExamination] Examination creation failed:', err);
+        throw err;
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['medical-examinations'] });
@@ -267,8 +290,8 @@ const DoctorExamination = () => {
       toast.success('Medical examination recorded successfully');
     },
     onError: (error: Error) => {
-      console.error('[EXAMINATION ERROR]', error.message);
-      toast.error(error.message);
+      console.error('[DoctorExamination] Mutation error:', error.message);
+      toast.error(`Failed to record examination: ${error.message}`);
     },
   });
 
@@ -338,7 +361,6 @@ const DoctorExamination = () => {
               <TableHeader>
                 <TableRow>
                   <TableHead>Patient</TableHead>
-                  <TableHead>Chief Complaint</TableHead>
                   <TableHead>Date</TableHead>
                   <TableHead>Temperature</TableHead>
                   <TableHead>BP</TableHead>
@@ -354,7 +376,6 @@ const DoctorExamination = () => {
                       <br />
                       <span className="text-xs text-muted-foreground">{exam.patients?.patient_number}</span>
                     </TableCell>
-                    <TableCell>{exam.chief_complaint}</TableCell>
                     <TableCell>
                       {format(new Date(exam.examination_date), 'MMM d, yyyy')}
                     </TableCell>
@@ -381,7 +402,7 @@ const DoctorExamination = () => {
                 ))}
                 {filteredExaminations?.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
                       No examinations found
                     </TableCell>
                   </TableRow>
@@ -920,12 +941,12 @@ const DoctorExamination = () => {
 
       {/* View Examination Dialog */}
       <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
-        <DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto overflow-x-hidden w-full px-4">
           <DialogHeader>
             <DialogTitle>Medical Examination Report</DialogTitle>
           </DialogHeader>
           {selectedExamination && (
-            <div className="space-y-6">
+            <div className="space-y-6 break-words overflow-hidden">
               {/* Patient Info */}
               <div className="grid grid-cols-2 gap-4 pb-4 border-b">
                 <div>
@@ -949,7 +970,7 @@ const DoctorExamination = () => {
               {/* Chief Complaint */}
               <div>
                 <h3 className="font-semibold mb-2">Chief Complaint</h3>
-                <p>{selectedExamination.chief_complaint}</p>
+                <p className="text-sm break-words whitespace-normal">{selectedExamination.chief_complaint}</p>
               </div>
 
               {/* Vital Signs */}
@@ -1006,29 +1027,29 @@ const DoctorExamination = () => {
               )}
 
               {/* Medical History */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4">
                 {selectedExamination.history_of_present_illness && (
                   <div>
                     <h4 className="font-semibold mb-2">History of Present Illness</h4>
-                    <p className="text-sm">{selectedExamination.history_of_present_illness}</p>
+                    <p className="text-sm break-words whitespace-normal">{selectedExamination.history_of_present_illness}</p>
                   </div>
                 )}
                 {selectedExamination.past_medical_history && (
                   <div>
                     <h4 className="font-semibold mb-2">Past Medical History</h4>
-                    <p className="text-sm">{selectedExamination.past_medical_history}</p>
+                    <p className="text-sm break-words whitespace-normal">{selectedExamination.past_medical_history}</p>
                   </div>
                 )}
                 {selectedExamination.allergies && (
                   <div>
                     <h4 className="font-semibold mb-2">Allergies</h4>
-                    <p className="text-sm">{selectedExamination.allergies}</p>
+                    <p className="text-sm break-words whitespace-normal">{selectedExamination.allergies}</p>
                   </div>
                 )}
                 {selectedExamination.medication_list && (
                   <div>
                     <h4 className="font-semibold mb-2">Current Medications</h4>
-                    <p className="text-sm">{selectedExamination.medication_list}</p>
+                    <p className="text-sm break-words whitespace-normal">{selectedExamination.medication_list}</p>
                   </div>
                 )}
               </div>
@@ -1040,7 +1061,7 @@ const DoctorExamination = () => {
                   {selectedExamination.general_appearance && (
                     <div>
                       <h4 className="font-medium">General Appearance</h4>
-                      <p className="text-sm text-muted-foreground">
+                      <p className="text-sm text-muted-foreground break-words whitespace-normal">
                         {selectedExamination.general_appearance}
                       </p>
                     </div>
@@ -1051,7 +1072,7 @@ const DoctorExamination = () => {
                         <Heart className="h-4 w-4" />
                         Cardiovascular
                       </h4>
-                      <p className="text-sm text-muted-foreground">
+                      <p className="text-sm text-muted-foreground break-words whitespace-normal">
                         {selectedExamination.cardiovascular_examination}
                       </p>
                     </div>
@@ -1062,7 +1083,7 @@ const DoctorExamination = () => {
                         <Wind className="h-4 w-4" />
                         Respiratory
                       </h4>
-                      <p className="text-sm text-muted-foreground">
+                      <p className="text-sm text-muted-foreground break-words whitespace-normal">
                         {selectedExamination.respiratory_examination}
                       </p>
                     </div>
@@ -1070,7 +1091,7 @@ const DoctorExamination = () => {
                   {selectedExamination.abdominal_examination && (
                     <div>
                       <h4 className="font-medium">Abdominal</h4>
-                      <p className="text-sm text-muted-foreground">
+                      <p className="text-sm text-muted-foreground break-words whitespace-normal">
                         {selectedExamination.abdominal_examination}
                       </p>
                     </div>
@@ -1078,7 +1099,7 @@ const DoctorExamination = () => {
                   {selectedExamination.neurological_examination && (
                     <div>
                       <h4 className="font-medium">Neurological</h4>
-                      <p className="text-sm text-muted-foreground">
+                      <p className="text-sm text-muted-foreground break-words whitespace-normal">
                         {selectedExamination.neurological_examination}
                       </p>
                     </div>
@@ -1092,12 +1113,12 @@ const DoctorExamination = () => {
                 <div className="space-y-3">
                   <div>
                     <h4 className="font-medium">Diagnosis</h4>
-                    <p className="text-sm">{selectedExamination.assessment_diagnosis}</p>
+                    <p className="text-sm break-words whitespace-normal">{selectedExamination.assessment_diagnosis}</p>
                   </div>
                   {selectedExamination.plan_treatment && (
                     <div>
                       <h4 className="font-medium">Treatment Plan</h4>
-                      <p className="text-sm">{selectedExamination.plan_treatment}</p>
+                      <p className="text-sm break-words whitespace-normal">{selectedExamination.plan_treatment}</p>
                     </div>
                   )}
                   {selectedExamination.medications_prescribed && (

@@ -68,7 +68,7 @@ const usePharmacyStats = () => {
       const { count: lowStockCount } = await supabase
         .from('medications')
         .select('*', { count: 'exact', head: true })
-        .lt('stock_quantity', 'reorder_level');
+        .lt('stock_quantity', 50); // Use a fixed threshold instead of comparing to column
 
       // Total patients served (count of unique patients with dispensed prescriptions today)
       const { data: patientsData } = await supabase
@@ -97,19 +97,30 @@ const useLowStockMedications = () => {
   return useQuery({
     queryKey: ['low-stock-medications'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('medications')
-        .select('id, name, stock_quantity, reorder_level')
-        .lt('stock_quantity', 'reorder_level')
-        .order('stock_quantity', { ascending: true })
-        .limit(10);
+      try {
+        // Fetch medications with stock quantities
+        const { data, error } = await supabase
+          .from('medications')
+          .select('id, name, stock_quantity, reorder_level')
+          .order('stock_quantity', { ascending: true })
+          .limit(10);
 
-      if (error) throw error;
-      return (data || []) as LowStockMedication[];
+        if (error) throw error;
+
+        // Filter client-side: medications where stock < reorder level
+        const lowStock = (data || []).filter(m => m.stock_quantity < m.reorder_level);
+        
+        return lowStock as LowStockMedication[];
+      } catch (error) {
+        console.error('[Pharmacy] Low stock medications error:', error);
+        return [];
+      }
     },
     refetchInterval: 60000,
   });
 };
+
+// OLD BROKEN CODE REMOVED - was using .lt('stock_quantity', 'reorder_level') which doesn't work
 
 const useExpiredMedications = () => {
   return useQuery({

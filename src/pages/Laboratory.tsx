@@ -179,63 +179,127 @@ const Laboratory = () => {
   // Create lab order
   const createOrderMutation = useMutation({
     mutationFn: async (data: typeof newOrder) => {
-      const { error } = await supabase.from('lab_orders').insert({
-        patient_id: data.patient_id,
-        test_id: data.test_id,
-        priority: data.priority,
-        ordered_by: user?.id,
-        order_number: '',
-      });
-      if (error) throw error;
+      // Validate required fields
+      if (!data.patient_id?.trim()) {
+        console.warn('[Laboratory] Patient is required');
+        throw new Error('Patient is required');
+      }
+      if (!data.test_id?.trim()) {
+        console.warn('[Laboratory] Test is required');
+        throw new Error('Test is required');
+      }
+
+      try {
+        const { error } = await supabase.from('lab_orders').insert({
+          patient_id: data.patient_id,
+          test_id: data.test_id,
+          priority: data.priority,
+          ordered_by: user?.id,
+          order_number: '',
+        });
+        if (error) {
+          console.error('[Laboratory] Error creating lab order:', error);
+          throw error;
+        }
+        console.log('[Laboratory] Lab order created successfully');
+      } catch (err) {
+        console.error('[Laboratory] Lab order creation failed:', err);
+        throw err;
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['lab-orders'] });
+      queryClient.invalidateQueries({ queryKey: ['activity-log'] });
       setIsAddDialogOpen(false);
       setNewOrder({ patient_id: '', test_id: '', priority: 'normal' });
       setTestSearch('');
       setShowTestList(false);
       toast.success('Lab order created successfully');
     },
-    onError: (error: Error) => toast.error(error.message),
+    onError: (error: Error) => {
+      console.error('[Laboratory] Mutation error:', error.message);
+      toast.error(`Failed to create lab order: ${error.message}`);
+    },
   });
 
   // Update order status
   const updateStatusMutation = useMutation({
     mutationFn: async ({ id, status }: { id: string; status: string }) => {
-      const updateData: Record<string, unknown> = { status };
-      if (status === 'sample_collected') {
-        updateData.sample_collected_at = new Date().toISOString();
+      if (!id?.trim()) {
+        console.warn('[Laboratory] Order ID is required');
+        throw new Error('Order ID is required');
       }
-      const { error } = await supabase.from('lab_orders').update(updateData).eq('id', id);
-      if (error) throw error;
+
+      try {
+        const updateData: Record<string, unknown> = { status };
+        if (status === 'sample_collected') {
+          updateData.sample_collected_at = new Date().toISOString();
+        }
+        const { error } = await supabase.from('lab_orders').update(updateData).eq('id', id);
+        if (error) {
+          console.error('[Laboratory] Error updating order status:', error);
+          throw error;
+        }
+        console.log('[Laboratory] Order status updated successfully');
+      } catch (err) {
+        console.error('[Laboratory] Order status update failed:', err);
+        throw err;
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['lab-orders'] });
+      queryClient.invalidateQueries({ queryKey: ['activity-log'] });
       toast.success('Status updated');
+    },
+    onError: (error: Error) => {
+      console.error('[Laboratory] Status update error:', error.message);
+      toast.error(`Failed to update status: ${error.message}`);
     },
   });
 
   // Submit results
   const submitResultMutation = useMutation({
     mutationFn: async ({ id, data }: { id: string; data: typeof resultData }) => {
-      const { error } = await supabase.from('lab_orders').update({
-        result_value: data.result_value,
-        result_notes: data.result_notes,
-        is_abnormal: data.is_abnormal,
-        status: 'completed',
-        completed_at: new Date().toISOString(),
-        completed_by: user?.id,
-      }).eq('id', id);
-      if (error) throw error;
+      if (!id?.trim()) {
+        console.warn('[Laboratory] Order ID is required for results');
+        throw new Error('Order ID is required');
+      }
+      if (!data.result_value?.trim()) {
+        console.warn('[Laboratory] Result value is required');
+        throw new Error('Result value is required');
+      }
+
+      try {
+        const { error } = await supabase.from('lab_orders').update({
+          result_value: data.result_value,
+          result_notes: data.result_notes,
+          is_abnormal: data.is_abnormal,
+          status: 'completed',
+          completed_at: new Date().toISOString(),
+          completed_by: user?.id,
+        }).eq('id', id);
+        if (error) {
+          console.error('[Laboratory] Error submitting results:', error);
+          throw error;
+        }
+        console.log('[Laboratory] Results submitted successfully');
+      } catch (err) {
+        console.error('[Laboratory] Results submission failed:', err);
+        throw err;
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['lab-orders'] });
+      queryClient.invalidateQueries({ queryKey: ['activity-log'] });
       setIsResultDialogOpen(false);
       setSelectedOrder(null);
       setResultData({ result_value: '', result_notes: '', is_abnormal: false });
       toast.success('Results submitted');
     },
-    onError: (error: Error) => toast.error(error.message),
+    onError: (error: Error) => {
+      console.error('[Laboratory] Results submission error:', error.message);
+      toast.error(`Failed to submit results: ${error.message}`);
+    },
   });
 
   const filteredOrders = labOrders?.filter((o) => {
@@ -366,7 +430,19 @@ const Laboratory = () => {
                 <DialogHeader>
                   <DialogTitle>Create Lab Order</DialogTitle>
                 </DialogHeader>
-                <form onSubmit={(e) => { e.preventDefault(); createOrderMutation.mutate(newOrder); }} className="space-y-4">
+                <form onSubmit={(e) => { 
+                  e.preventDefault(); 
+                  // Add validation before mutation
+                  if (!newOrder.patient_id?.trim()) {
+                    toast.error('Patient is required');
+                    return;
+                  }
+                  if (!newOrder.test_id?.trim()) {
+                    toast.error('Test is required');
+                    return;
+                  }
+                  createOrderMutation.mutate(newOrder); 
+                }} className="space-y-4">
                   <div className="space-y-2">
                     <Label>Patient *</Label>
                     <Select value={newOrder.patient_id} onValueChange={(v) => setNewOrder({ ...newOrder, patient_id: v })}>

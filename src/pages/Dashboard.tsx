@@ -1,7 +1,9 @@
-import { Users, Calendar, DollarSign, FlaskConical, PackageX, Clock, TrendingUp, Activity, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Users, Calendar, DollarSign, FlaskConical, PackageX, Clock, TrendingUp, Activity, CheckCircle2, AlertCircle, X } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Button } from '@/components/ui/button';
+import { useState, useEffect } from 'react';
 import StatsCard from '@/components/dashboard/StatsCard';
 import { 
   LineChart, 
@@ -37,6 +39,18 @@ const formatCurrency = (value: number) => {
   return `UGX ${value.toLocaleString()}`;
 };
 
+interface ActivityItem {
+  id: string;
+  description: string;
+  timeAgo: string;
+  icon: string;
+  type: string;
+  created_at?: string;
+  user_role?: string;
+  user_id?: string;
+  [key: string]: any;
+}
+
 const Dashboard = () => {
   const { data: stats, isLoading: statsLoading } = useDashboardStats();
   const { data: patientTrend, isLoading: trendLoading } = usePatientTrend();
@@ -45,6 +59,29 @@ const Dashboard = () => {
   const { data: pendingLabOrders, isLoading: labLoading } = usePendingLabOrders();
   const { data: weeklyAppointments, isLoading: weeklyLoading } = useWeeklyAppointments();
   const { data: activityLog, isLoading: activityLoading } = useActivityLog();
+  
+  const [selectedActivity, setSelectedActivity] = useState<ActivityItem | null>(null);
+  const [visibleActivities, setVisibleActivities] = useState<Set<string>>(new Set());
+  const [selectedDepartment, setSelectedDepartment] = useState<any>(null);
+
+  // Hide activity if older than 24 hours
+  useEffect(() => {
+    if (!activityLog) return;
+    
+    const activeActivities = new Set<string>();
+    const now = new Date().getTime();
+    
+    activityLog.forEach((activity: ActivityItem) => {
+      const activityTime = activity.created_at ? new Date(activity.created_at).getTime() : now;
+      const hoursDiff = (now - activityTime) / (1000 * 60 * 60);
+      
+      if (hoursDiff < 24) {
+        activeActivities.add(activity.id);
+      }
+    });
+    
+    setVisibleActivities(activeActivities);
+  }, [activityLog]);
 
   const getChangeString = (change: number, prefix = '') => {
     if (change === 0) return 'No change from last month';
@@ -149,9 +186,9 @@ const Dashboard = () => {
       </div>
 
       {/* Charts Section */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Patient Registration Trend */}
-        <Card className="lg:col-span-2">
+        <Card>
           <CardHeader>
             <CardTitle className="text-lg font-semibold text-foreground">
               Patient Registration Trend
@@ -201,77 +238,60 @@ const Dashboard = () => {
           </CardContent>
         </Card>
 
-        {/* Department Distribution */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg font-semibold text-foreground">
-              Department Distribution
+        {/* Recent Activity */}
+        <Card className="overflow-hidden shadow-lg">
+          <CardHeader className="bg-gradient-to-r from-green-600 via-emerald-500 to-teal-500 text-white pb-4">
+            <CardTitle className="flex items-center gap-2">
+              <Activity className="h-5 w-5" />
+              Recent Activity
             </CardTitle>
-            <p className="text-sm text-muted-foreground">
-              Appointments by department
-            </p>
           </CardHeader>
-          <CardContent>
-            <div className="h-80">
-              {deptLoading ? (
-                <div className="flex items-center justify-center h-full">
-                  <Skeleton className="w-full h-full rounded-full" />
-                </div>
-              ) : (
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={departmentData || []}
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={60}
-                      outerRadius={100}
-                      paddingAngle={2}
-                      dataKey="value"
+          <CardContent className="pt-6">
+            {activityLoading ? (
+              <div className="space-y-3">
+                {[1, 2, 3].map((i) => (
+                  <Skeleton key={i} className="h-12" />
+                ))}
+              </div>
+            ) : activityLog && activityLog.length > 0 ? (
+              <div className="space-y-3">
+                {activityLog.filter(activity => visibleActivities.has(activity.id)).slice(0, 5).map((activity: ActivityItem) => (
+                  <div
+                    key={activity.id}
+                    className="flex items-start gap-2 p-3 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-muted/50 transition-colors"
+                  >
+                    <div className="text-xl mt-0.5 flex-shrink-0">{activity.icon}</div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-foreground text-sm line-clamp-2">{activity.description}</p>
+                      <div className="flex items-center gap-2 mt-1 flex-wrap">
+                        <p className="text-xs text-muted-foreground">{activity.timeAgo}</p>
+                        {activity.user_role && (
+                          <Badge variant="secondary" className="text-xs py-0 px-1.5 h-5 bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
+                            {activity.user_role}
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
+                    <Button 
+                      variant="ghost" 
+                      size="sm"
+                      onClick={() => setSelectedActivity(activity)}
+                      className="flex-shrink-0 h-8 px-2"
                     >
-                      {(departmentData || []).map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={entry.color} />
-                      ))}
-                    </Pie>
-                    <Legend 
-                      verticalAlign="bottom" 
-                      height={36}
-                      formatter={(value) => (
-                        <span className="text-sm text-muted-foreground">{value}</span>
-                      )}
-                    />
-                    <Tooltip 
-                      contentStyle={{
-                        backgroundColor: 'hsl(var(--card))',
-                        border: '1px solid hsl(var(--border))',
-                        borderRadius: '8px',
-                      }}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
-              )}
-            </div>
+                      View
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-8 text-muted-foreground">
+                <Activity className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                <p>No recent activity</p>
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
-
-      {/* Weekly Appointments */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-lg font-semibold text-foreground">
-            Weekly Appointments
-          </CardTitle>
-          <p className="text-sm text-muted-foreground">
-            Appointment bookings for this week
-          </p>
-        </CardHeader>
-        <CardContent>
-          <div className="text-center py-8 text-muted-foreground">
-            <Calendar className="h-12 w-12 mx-auto mb-2 opacity-50" />
-            <p>No valid data available</p>
-          </div>
-        </CardContent>
-      </Card>
 
       {/* Recent Activity and Alerts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -491,94 +511,108 @@ const Dashboard = () => {
       </div>
 
       {/* Weekly Appointments Section */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2">
-          <Card className="overflow-hidden shadow-lg">
-            <CardHeader className="bg-gradient-to-r from-blue-600 via-blue-500 to-cyan-500 text-white pb-4">
-              <CardTitle className="flex items-center gap-2">
-                <Calendar className="h-5 w-5" />
-                Weekly Appointments
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="pt-6">
-              {weeklyLoading ? (
-                <div className="space-y-3">
-                  {[1, 2, 3].map((i) => (
-                    <Skeleton key={i} className="h-16" />
-                  ))}
-                </div>
-              ) : weeklyAppointments && weeklyAppointments.length > 0 ? (
-                <div className="space-y-3">
-                  {weeklyAppointments.slice(0, 6).map((apt, index) => (
-                    <div
-                      key={apt.id}
-                      className="flex items-center justify-between p-3 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-muted/50 transition-colors"
-                    >
-                      <div className="flex items-center gap-3 flex-1">
-                        <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm ${
-                          apt.daysFromNow === 0 ? 'bg-gradient-to-br from-red-500 to-pink-500' :
-                          apt.daysFromNow === 1 ? 'bg-gradient-to-br from-orange-500 to-red-500' :
-                          apt.daysFromNow <= 3 ? 'bg-gradient-to-br from-yellow-500 to-orange-500' :
-                          'bg-gradient-to-br from-green-500 to-blue-500'
-                        }`}>
-                          {apt.daysFromNow}d
-                        </div>
-                        <div className="flex-1">
-                          <p className="font-semibold text-foreground">{apt.patient_name}</p>
-                          <p className="text-sm text-muted-foreground">{apt.displayDay} at {apt.appointment_time}</p>
-                        </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Weekly Appointments */}
+        <Card className="overflow-hidden shadow-lg">
+          <CardHeader className="bg-gradient-to-r from-blue-600 via-blue-500 to-cyan-500 text-white pb-4">
+            <CardTitle className="flex items-center gap-2">
+              <Calendar className="h-5 w-5" />
+              Weekly Appointments
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="pt-6">
+            {weeklyLoading ? (
+              <div className="space-y-3">
+                {[1, 2, 3].map((i) => (
+                  <Skeleton key={i} className="h-16" />
+                ))}
+              </div>
+            ) : weeklyAppointments && weeklyAppointments.length > 0 ? (
+              <div className="space-y-3">
+                {weeklyAppointments.slice(0, 6).map((apt, index) => (
+                  <div
+                    key={apt.id}
+                    className="flex items-center justify-between p-3 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-muted/50 transition-colors"
+                  >
+                    <div className="flex items-center gap-3 flex-1">
+                      <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm ${
+                        apt.daysFromNow === 0 ? 'bg-gradient-to-br from-red-500 to-pink-500' :
+                        apt.daysFromNow === 1 ? 'bg-gradient-to-br from-orange-500 to-red-500' :
+                        apt.daysFromNow <= 3 ? 'bg-gradient-to-br from-yellow-500 to-orange-500' :
+                        'bg-gradient-to-br from-green-500 to-blue-500'
+                      }`}>
+                        {apt.daysFromNow}d
                       </div>
-                      <div className="flex items-center gap-2">
-                        {apt.department && (
-                          <span className="text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 px-2 py-1 rounded">
-                            {apt.department}
-                          </span>
-                        )}
-                        <Badge className={getStatusColor(apt.status)}>
-                          {apt.status}
-                        </Badge>
+                      <div className="flex-1">
+                        <p className="font-semibold text-foreground">{apt.patient_name}</p>
+                        <p className="text-sm text-muted-foreground">{apt.displayDay} at {apt.appointment_time}</p>
                       </div>
                     </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-center py-8 text-muted-foreground">
-                  <Calendar className="h-12 w-12 mx-auto mb-2 opacity-50" />
-                  <p>No appointments this week</p>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </div>
+                    <div className="flex items-center gap-2">
+                      {apt.department && (
+                        <span className="text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 px-2 py-1 rounded">
+                          {apt.department}
+                        </span>
+                      )}
+                      <Badge className={getStatusColor(apt.status)}>
+                        {apt.status}
+                      </Badge>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-8 text-muted-foreground">
+                <Calendar className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                <p>No appointments this week</p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
 
         {/* Department Distribution */}
         <Card className="overflow-hidden shadow-lg">
           <CardHeader className="bg-gradient-to-r from-purple-600 via-pink-500 to-red-500 text-white pb-4">
-            <CardTitle className="text-base">Department Distribution</CardTitle>
+            <CardTitle className="text-base">Department Distribution (Staff)</CardTitle>
+            {selectedDepartment && (
+              <p className="text-sm text-white/80 mt-2">
+                Showing {selectedDepartment.value} staff member{selectedDepartment.value !== 1 ? 's' : ''} ({selectedDepartment.percentage}%)
+              </p>
+            )}
           </CardHeader>
           <CardContent className="pt-6">
             {deptLoading ? (
               <Skeleton className="h-64" />
             ) : departmentData && departmentData.length > 0 ? (
-              <ResponsiveContainer width="100%" height={300}>
-                <PieChart>
-                  <Pie
-                    data={departmentData}
-                    cx="50%"
-                    cy="50%"
-                    labelLine={false}
-                    label={({ name, value }) => `${name}: ${value}`}
-                    outerRadius={80}
-                    fill="#8884d8"
-                    dataKey="value"
-                  >
-                    {departmentData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip />
-                </PieChart>
-              </ResponsiveContainer>
+              <div className="space-y-4">
+                <ResponsiveContainer width="100%" height={300}>
+                  <PieChart>
+                    <Pie
+                      data={departmentData}
+                      cx="50%"
+                      cy="50%"
+                      labelLine={false}
+                      label={({ name, percentage }) => `${name}: ${percentage}%`}
+                      outerRadius={80}
+                      fill="#8884d8"
+                      dataKey="value"
+                      onClick={(entry) => setSelectedDepartment(entry)}
+                    >
+                      {departmentData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.color} />
+                      ))}
+                    </Pie>
+                    <Tooltip formatter={(value: number, name: string) => {
+                      if (name === 'value') {
+                        const dept = departmentData.find(d => d.value === value);
+                        return `${value} staff (${dept?.percentage}%)`;
+                      }
+                      return value;
+                    }} />
+                  </PieChart>
+                </ResponsiveContainer>
+                <p className="text-xs text-muted-foreground text-center">Click on a sector to view staff details</p>
+              </div>
             ) : (
               <div className="text-center py-12 text-muted-foreground">
                 <p>No department data</p>
@@ -588,47 +622,143 @@ const Dashboard = () => {
         </Card>
       </div>
 
-      {/* Recent Activity Section */}
-      <Card className="overflow-hidden shadow-lg">
-        <CardHeader className="bg-gradient-to-r from-green-600 via-emerald-500 to-teal-500 text-white pb-4">
-          <CardTitle className="flex items-center gap-2">
-            <Activity className="h-5 w-5" />
-            Recent Activity
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="pt-6">
-          {activityLoading ? (
-            <div className="space-y-3">
-              {[1, 2, 3].map((i) => (
-                <Skeleton key={i} className="h-12" />
-              ))}
-            </div>
-          ) : activityLog && activityLog.length > 0 ? (
-            <div className="space-y-3">
-              {activityLog.map((activity) => (
-                <div
-                  key={activity.id}
-                  className="flex items-start gap-3 p-3 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-muted/50 transition-colors"
-                >
-                  <div className="text-2xl mt-1">{activity.icon}</div>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium text-foreground text-sm">{activity.description}</p>
-                    <p className="text-xs text-muted-foreground">{activity.timeAgo}</p>
-                  </div>
-                  <Badge variant="outline" className="flex-shrink-0 capitalize">
-                    {activity.type.replace('_', ' ')}
+      {/* Department Staff Modal */}
+      {selectedDepartment && (
+        <div className="fixed inset-0 bg-black/50 dark:bg-black/70 flex items-center justify-center z-50 p-4">
+          <Card className="w-full max-w-2xl animate-in fade-in duration-200 max-h-[80vh] overflow-y-auto">
+            <CardHeader className="flex flex-row items-center justify-between pb-4 border-b sticky top-0 bg-white dark:bg-slate-950">
+              <div>
+                <CardTitle className="text-lg">{selectedDepartment.name} Department</CardTitle>
+                <p className="text-sm text-muted-foreground mt-1">
+                  {selectedDepartment.value} staff member{selectedDepartment.value !== 1 ? 's' : ''} ({selectedDepartment.percentage}% of total)
+                </p>
+              </div>
+              <button
+                onClick={() => setSelectedDepartment(null)}
+                className="text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </CardHeader>
+            <CardContent className="pt-6">
+              {selectedDepartment.staffMembers && selectedDepartment.staffMembers.length > 0 ? (
+                <div className="space-y-4">
+                  {selectedDepartment.staffMembers.map((staff: any) => (
+                    <div
+                      key={staff.id}
+                      className="p-4 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-muted/50 transition-colors"
+                    >
+                      <div className="flex items-start justify-between mb-2">
+                        <div>
+                          <p className="font-semibold text-foreground">
+                            {staff.first_name} {staff.last_name}
+                          </p>
+                          <p className="text-sm text-muted-foreground capitalize">
+                            {staff.role.replace('_', ' ')}
+                          </p>
+                        </div>
+                        <Badge variant="outline" className="capitalize">
+                          {staff.role.replace('_', ' ')}
+                        </Badge>
+                      </div>
+                      <div className="space-y-1 text-sm text-muted-foreground">
+                        <p>📧 {staff.email}</p>
+                        <p>📱 {staff.phone}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-8 text-muted-foreground">
+                  <Users className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                  <p>No staff members in this department</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Activity Detail Modal */}
+      {selectedActivity && (
+        <div className="fixed inset-0 bg-black/50 dark:bg-black/70 flex items-center justify-center z-50 p-4">
+          <Card className="w-full max-w-md animate-in fade-in duration-200">
+            <CardHeader className="flex flex-row items-center justify-between pb-4 border-b">
+              <CardTitle className="flex items-center gap-2">
+                <span className="text-2xl">{selectedActivity.icon}</span>
+                Activity Details
+              </CardTitle>
+              <button
+                onClick={() => setSelectedActivity(null)}
+                className="text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </CardHeader>
+            <CardContent className="pt-6 space-y-4">
+              <div>
+                <p className="text-sm font-medium text-muted-foreground mb-1">Activity</p>
+                <p className="text-foreground font-medium">{selectedActivity.description}</p>
+              </div>
+              
+              <div>
+                <p className="text-sm font-medium text-muted-foreground mb-1">Time</p>
+                <p className="text-foreground">{selectedActivity.timeAgo}</p>
+                {selectedActivity.created_at && (
+                  <p className="text-xs text-muted-foreground">
+                    {format(new Date(selectedActivity.created_at), 'PPpp')}
+                  </p>
+                )}
+              </div>
+              
+              <div>
+                <p className="text-sm font-medium text-muted-foreground mb-1">Type</p>
+                <Badge variant="outline" className="capitalize">
+                  {selectedActivity.type.replace('_', ' ')}
+                </Badge>
+              </div>
+
+              {selectedActivity.user_role && (
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground mb-1">Performed By</p>
+                  <Badge className="bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
+                    {selectedActivity.user_role}
                   </Badge>
                 </div>
-              ))}
-            </div>
-          ) : (
-            <div className="text-center py-8 text-muted-foreground">
-              <Activity className="h-12 w-12 mx-auto mb-2 opacity-50" />
-              <p>No recent activity</p>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+              )}
+
+              {selectedActivity.patient_name && (
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground mb-1">Patient</p>
+                  <p className="text-foreground">{selectedActivity.patient_name}</p>
+                </div>
+              )}
+
+              {selectedActivity.department && (
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground mb-1">Department</p>
+                  <p className="text-foreground">{selectedActivity.department}</p>
+                </div>
+              )}
+
+              {selectedActivity.status && (
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground mb-1">Status</p>
+                  <Badge className={getStatusColor(selectedActivity.status)}>
+                    {selectedActivity.status}
+                  </Badge>
+                </div>
+              )}
+
+              <div className="pt-4 border-t">
+                <p className="text-xs text-muted-foreground text-center">
+                  This activity will auto-hide after 24 hours
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
     </div>
   );
 };

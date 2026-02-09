@@ -8,7 +8,38 @@ export interface Notification {
   user_id: string;
   title: string;
   message: string;
-  type: 'lab_result' | 'appointment' | 'low_stock' | 'billing' | 'system';
+  type: 
+    | 'appointment_scheduled' 
+    | 'appointment_confirmed' 
+    | 'appointment_reminder'
+    | 'appointment_completed' 
+    | 'appointment_cancelled'
+    | 'appointment_no_show'
+    | 'lab_order_created'
+    | 'lab_results_ready' 
+    | 'lab_results_abnormal'
+    | 'lab_sample_rejected'
+    | 'prescription_submitted'
+    | 'prescription_ready'
+    | 'prescription_dispensed'
+    | 'low_stock_alert'
+    | 'inventory_critical'
+    | 'invoice_created'
+    | 'invoice_payment_pending'
+    | 'invoice_payment_received'
+    | 'invoice_payment_overdue'
+    | 'staff_schedule_published'
+    | 'staff_schedule_changed'
+    | 'medical_record_updated'
+    | 'examination_result_ready'
+    | 'patient_check_in'
+    | 'patient_follow_up_needed'
+    | 'system_alert'
+    | 'lab_result' 
+    | 'appointment' 
+    | 'low_stock' 
+    | 'billing' 
+    | 'system';
   priority: 'low' | 'normal' | 'high' | 'urgent';
   is_read: boolean;
   reference_id: string | null;

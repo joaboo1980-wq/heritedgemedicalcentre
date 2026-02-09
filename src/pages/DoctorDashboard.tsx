@@ -130,8 +130,10 @@ const DoctorDashboard = () => {
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
   const [isDiagnosisModalOpen, setIsDiagnosisModalOpen] = useState(false);
   const [isViewExaminationModalOpen, setIsViewExaminationModalOpen] = useState(false);
+  const [selectedExamination, setSelectedExamination] = useState<MedicalExamination | null>(null);
   const [isPrescriptionModalOpen, setIsPrescriptionModalOpen] = useState(false);
   const [selectedPrescriptionPatient, setSelectedPrescriptionPatient] = useState<Patient | null>(null);
+  const [selectedEditingPrescription, setSelectedEditingPrescription] = useState<Prescription | null>(null);
   const [prescriptionForm, setPrescriptionForm] = useState({
     patient_id: '',
     medicine_id: '',
@@ -183,21 +185,29 @@ const DoctorDashboard = () => {
     queryKey: ['doctor-today-appointments', doctorId, today],
     queryFn: async () => {
       if (!doctorId) return [];
-      const { data, error } = await supabase
-        .from('appointments')
-        .select(
-          `id, appointment_time, appointment_date, doctor_id, status, reason, notes, 
-           duration_minutes, patient_id, patients(first_name, last_name, patient_number)`
-        )
-        .eq('doctor_id', doctorId)
-        .eq('appointment_date', today)
-        .order('appointment_time', { ascending: true });
+      try {
+        const { data, error } = await supabase
+          .from('appointments')
+          .select(
+            `id, appointment_time, appointment_date, doctor_id, status, reason, notes, 
+             duration_minutes, patient_id, patients(first_name, last_name, patient_number)`
+          )
+          .eq('doctor_id', doctorId)
+          .eq('appointment_date', today)
+          .order('appointment_time', { ascending: true });
 
-      if (error) throw error;
-      return (data || []).map((a: any) => ({
-        ...a,
-        patient_name: a.patients ? `${a.patients.first_name} ${a.patients.last_name}` : 'Unknown',
-      }));
+        if (error) {
+          console.error('[DoctorDashboard] Error fetching appointments:', error);
+          throw error;
+        }
+        return (data || []).map((a: any) => ({
+          ...a,
+          patient_name: a.patients ? `${a.patients.first_name} ${a.patients.last_name}` : 'Unknown',
+        }));
+      } catch (err) {
+        console.error('[DoctorDashboard] Appointments query failed:', err);
+        throw err;
+      }
     },
     enabled: !!doctorId,
     refetchInterval: 60000,
@@ -208,50 +218,64 @@ const DoctorDashboard = () => {
     queryKey: ['doctor-active-patients', doctorId],
     queryFn: async () => {
       if (!doctorId) return [];
-      // Get all patients and filter those with appointments from this doctor
-      const { data, error } = await supabase
-        .from('patients')
-        .select('id, patient_number, first_name, last_name, date_of_birth, gender, blood_type');
+      try {
+        // Get all patients and filter those with appointments from this doctor
+        const { data, error } = await supabase
+          .from('patients')
+          .select('id, patient_number, first_name, last_name, date_of_birth, gender, blood_type');
 
-      if (error) throw error;
-      return data || [];
+        if (error) {
+          console.error('[DoctorDashboard] Error fetching patients:', error);
+          throw error;
+        }
+        return data || [];
+      } catch (err) {
+        console.error('[DoctorDashboard] Patients query failed:', err);
+        throw err;
+      }
     },
     enabled: !!doctorId,
     refetchInterval: 60000,
   });
 
   // ===== PRESCRIPTIONS QUERY =====
- const { data: activePrescriptions, isLoading: loadingPrescriptions } = useQuery<Prescription[]>({
+ const { data: activePrescriptions, isLoading: loadingPrescriptions } = useQuery<any[]>({
   queryKey: ['doctor-active-prescriptions', doctorId],
   queryFn: async () => {
     if (!doctorId) return [];
-    const { data, error }: { data: any; error: any } = await supabase
-      .from('prescriptions')
-      .select(
-        `id, patient_id, status, created_at,
-         patients(first_name, last_name),
-         prescription_items(medication_id, dosage, frequency, duration,
-           medications(name))`
-      )
-      .eq('status', 'pending')
-      .order('created_at', { ascending: false });
+    try {
+      const { data, error } = await (supabase as any)
+        .from('prescriptions')
+        .select(
+          'id, patient_id, status, created_at, patients(first_name, last_name), prescription_items(medication_id, dosage, frequency, duration, medications(name))'
+        )
+        .eq('doctor_id', doctorId)
+        .eq('status', 'active')
+        .order('created_at', { ascending: false });
 
-    if (error) throw error;
-    return (data || []).map((p: any) => {
-      const item = p.prescription_items?.[0];
-      return {
-        id: p.id,
-        patient_id: p.patient_id,
-        medicine_id: item?.medication_id,
-        dosage: item?.dosage,
-        frequency: item?.frequency,
-        duration: item?.duration,
-        status: p.status,
-        prescribed_date: p.created_at,
-        patient_name: p.patients ? `${p.patients.first_name} ${p.patients.last_name}` : 'Unknown',
-        medicine_name: item?.medications?.name || 'Unknown',
-      };
-    });
+      if (error) {
+        console.error('[DoctorDashboard] Error fetching prescriptions:', error);
+        throw error;
+      }
+      return (data || []).map((p: any) => {
+        const item = p.prescription_items?.[0];
+        return {
+          id: p.id,
+          patient_id: p.patient_id,
+          medicine_id: item?.medication_id,
+          dosage: item?.dosage,
+          frequency: item?.frequency,
+          duration: item?.duration,
+          status: p.status,
+          prescribed_date: p.created_at,
+          patient_name: p.patients ? `${p.patients.first_name} ${p.patients.last_name}` : 'Unknown',
+          medicine_name: item?.medications?.name || 'Unknown',
+        };
+      });
+    } catch (err) {
+      console.error('[DoctorDashboard] Prescriptions query failed:', err);
+      throw err;
+    }
   },
   enabled: !!doctorId,
   refetchInterval: 60000,
@@ -262,31 +286,39 @@ const DoctorDashboard = () => {
     queryKey: ['doctor-lab-results', doctorId],
     queryFn: async () => {
       if (!doctorId) return [];
-      const { data, error } = await supabase
-        .from('lab_orders')
-        .select(
-          `id, order_number, patient_id, status, priority, result_value, result_notes, 
-           is_abnormal, completed_at, sample_collected_at,
-           patients(first_name, last_name), lab_tests(test_name)`
-        )
-        .order('created_at', { ascending: false })
-        .limit(50);
+      try {
+        const { data, error } = await supabase
+          .from('lab_orders')
+          .select(
+            `id, order_number, patient_id, status, priority, result_value, result_notes, 
+             is_abnormal, completed_at, sample_collected_at,
+             patients(first_name, last_name), lab_tests(test_name)`
+          )
+          .order('created_at', { ascending: false })
+          .limit(50);
 
-      if (error) throw error;
-      return (data || []).map((lr: any) => ({
-        id: lr.id,
-        order_number: lr.order_number,
-        patient_id: lr.patient_id,
-        patient_name: lr.patients ? `${lr.patients.first_name} ${lr.patients.last_name}` : 'Unknown',
-        test_type: lr.lab_tests?.test_name || 'Unknown',
-        result_date: lr.completed_at ? new Date(lr.completed_at).toLocaleDateString() : 'Pending',
-        status: lr.status,
-        priority: lr.priority,
-        result_value: lr.result_value,
-        result_notes: lr.result_notes,
-        is_abnormal: lr.is_abnormal,
-        sample_collected_at: lr.sample_collected_at,
-      }));
+        if (error) {
+          console.error('[DoctorDashboard] Error fetching lab results:', error);
+          throw error;
+        }
+        return (data || []).map((lr: any) => ({
+          id: lr.id,
+          order_number: lr.order_number,
+          patient_id: lr.patient_id,
+          patient_name: lr.patients ? `${lr.patients.first_name} ${lr.patients.last_name}` : 'Unknown',
+          test_type: lr.lab_tests?.test_name || 'Unknown',
+          result_date: lr.completed_at ? new Date(lr.completed_at).toLocaleDateString() : 'Pending',
+          status: lr.status,
+          priority: lr.priority,
+          result_value: lr.result_value,
+          result_notes: lr.result_notes,
+          is_abnormal: lr.is_abnormal,
+          sample_collected_at: lr.sample_collected_at,
+        }));
+      } catch (err) {
+        console.error('[DoctorDashboard] Lab results query failed:', err);
+        throw err;
+      }
     },
     enabled: !!doctorId,
     refetchInterval: 60000,
@@ -297,21 +329,29 @@ const DoctorDashboard = () => {
     queryKey: ['doctor-medical-examinations', doctorId],
     queryFn: async () => {
       if (!doctorId) return [];
-      const { data, error } = await (supabase as any)
-        .from('medical_examinations')
-        .select(
-          `id, patient_id, examination_date, chief_complaint, assessment_diagnosis,
-           triage_temperature, triage_blood_pressure, triage_pulse_rate, plan_treatment,
-           patients(first_name, last_name)`
-        )
-        .order('examination_date', { ascending: false })
-        .limit(50);
+      try {
+        const { data, error } = await (supabase as any)
+          .from('medical_examinations')
+          .select(
+            `id, patient_id, examination_date, chief_complaint, assessment_diagnosis,
+             triage_temperature, triage_blood_pressure, triage_pulse_rate, plan_treatment,
+             patients(first_name, last_name)`
+          )
+          .order('examination_date', { ascending: false })
+          .limit(50);
 
-      if (error) throw error;
-      return (data || []).map((me: any) => ({
-        ...me,
-        patient_name: me.patients ? `${me.patients.first_name} ${me.patients.last_name}` : 'Unknown',
-      }));
+        if (error) {
+          console.error('[DoctorDashboard] Error fetching medical examinations:', error);
+          throw error;
+        }
+        return (data || []).map((me: any) => ({
+          ...me,
+          patient_name: me.patients ? `${me.patients.first_name} ${me.patients.last_name}` : 'Unknown',
+        }));
+      } catch (err) {
+        console.error('[DoctorDashboard] Medical examinations query failed:', err);
+        throw err;
+      }
     },
     enabled: !!doctorId,
     refetchInterval: 60000,
@@ -322,29 +362,37 @@ const DoctorDashboard = () => {
     queryKey: ['patient-examinations', selectedPatient?.id],
     queryFn: async () => {
       if (!selectedPatient?.id) return [];
-      const { data, error } = await (supabase as any)
-        .from('medical_examinations')
-        .select(
-          `id, patient_id, examination_date, chief_complaint, assessment_diagnosis,
-           history_of_present_illness, past_medical_history, past_surgical_history,
-           medication_list, allergies, family_history, social_history,
-           general_appearance, heent_examination, cardiovascular_examination,
-           respiratory_examination, abdominal_examination, neurological_examination,
-           musculoskeletal_examination, skin_examination, other_systems,
-           triage_temperature, triage_blood_pressure, triage_pulse_rate,
-           triage_respiratory_rate, triage_oxygen_saturation, triage_weight,
-           triage_height, triage_bmi, triage_notes, plan_treatment,
-           medications_prescribed, follow_up_date, referrals,
-           patients(first_name, last_name)`
-        )
-        .eq('patient_id', selectedPatient.id)
-        .order('examination_date', { ascending: false });
+      try {
+        const { data, error } = await (supabase as any)
+          .from('medical_examinations')
+          .select(
+            `id, patient_id, examination_date, chief_complaint, assessment_diagnosis,
+             history_of_present_illness, past_medical_history, past_surgical_history,
+             medication_list, allergies, family_history, social_history,
+             general_appearance, heent_examination, cardiovascular_examination,
+             respiratory_examination, abdominal_examination, neurological_examination,
+             musculoskeletal_examination, skin_examination, other_systems,
+             triage_temperature, triage_blood_pressure, triage_pulse_rate,
+             triage_respiratory_rate, triage_oxygen_saturation, triage_weight,
+             triage_height, triage_bmi, triage_notes, plan_treatment,
+             medications_prescribed, follow_up_date, referrals,
+             patients(first_name, last_name)`
+          )
+          .eq('patient_id', selectedPatient.id)
+          .order('examination_date', { ascending: false });
 
-      if (error) throw error;
-      return (data || []).map((me: any) => ({
-        ...me,
-        patient_name: me.patients ? `${me.patients.first_name} ${me.patients.last_name}` : 'Unknown',
-      }));
+        if (error) {
+          console.error('[DoctorDashboard] Error fetching patient examinations:', error);
+          throw error;
+        }
+        return (data || []).map((me: any) => ({
+          ...me,
+          patient_name: me.patients ? `${me.patients.first_name} ${me.patients.last_name}` : 'Unknown',
+        }));
+      } catch (err) {
+        console.error('[DoctorDashboard] Patient examinations query failed:', err);
+        throw err;
+      }
     },
     enabled: !!selectedPatient?.id,
   });
@@ -352,11 +400,16 @@ const DoctorDashboard = () => {
   // ===== MUTATIONS =====
   const confirmAppointmentMutation = useMutation({
     mutationFn: async (appointmentId: string) => {
-      const { error } = await supabase
-        .from('appointments')
-        .update({ status: 'confirmed' })
-        .eq('id', appointmentId);
-      if (error) throw error;
+      try {
+        const { error } = await supabase
+          .from('appointments')
+          .update({ status: 'confirmed' })
+          .eq('id', appointmentId);
+        if (error) throw error;
+      } catch (err) {
+        console.error('[DoctorDashboard] Confirm appointment error:', err);
+        throw err;
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['doctor-today-appointments'] });
@@ -364,18 +417,24 @@ const DoctorDashboard = () => {
       setSelectedAppointment(null);
       setAppointmentDialog(false);
     },
-    onError: () => {
-      toast.error('Failed to confirm appointment');
+    onError: (error: any) => {
+      console.error('[DoctorDashboard] Confirm appointment failed:', error);
+      toast.error(error?.message || 'Failed to confirm appointment');
     },
   });
 
   const cancelAppointmentMutation = useMutation({
     mutationFn: async (appointmentId: string) => {
-      const { error } = await supabase
-        .from('appointments')
-        .update({ status: 'cancelled' })
-        .eq('id', appointmentId);
-      if (error) throw error;
+      try {
+        const { error } = await supabase
+          .from('appointments')
+          .update({ status: 'cancelled' })
+          .eq('id', appointmentId);
+        if (error) throw error;
+      } catch (err) {
+        console.error('[DoctorDashboard] Cancel appointment error:', err);
+        throw err;
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['doctor-today-appointments'] });
@@ -383,29 +442,34 @@ const DoctorDashboard = () => {
       setSelectedAppointment(null);
       setCancelAppointmentDialog(false);
     },
-    onError: () => {
-      toast.error('Failed to cancel appointment');
+    onError: (error: any) => {
+      console.error('[DoctorDashboard] Cancel appointment failed:', error);
+      toast.error(error?.message || 'Failed to cancel appointment');
     },
   });
 
   const rescheduleAppointmentMutation = useMutation({
     mutationFn: async ({ appointmentId, date, time }: { appointmentId: string; date: string; time: string }) => {
-      const { error } = await supabase
-        .from('appointments')
-        .update({ appointment_date: date, appointment_time: time + ':00', status: 'rescheduled' })
-        .eq('id', appointmentId);
-      if (error) throw error;
+      try {
+        const { error } = await supabase
+          .from('appointments')
+          .update({ appointment_date: date, appointment_time: time + ':00', status: 'rescheduled' })
+          .eq('id', appointmentId);
+        if (error) throw error;
+      } catch (err) {
+        console.error('[DoctorDashboard] Reschedule appointment error:', err);
+        throw err;
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['doctor-today-appointments'] });
       toast.success('Appointment rescheduled');
-      setRescheduleDialog(false);
       setSelectedAppointment(null);
-      setRescheduleDate('');
-      setRescheduleTime('');
+      setRescheduleDialog(false);
     },
-    onError: () => {
-      toast.error('Failed to reschedule appointment');
+    onError: (error: any) => {
+      console.error('[DoctorDashboard] Reschedule appointment failed:', error);
+      toast.error(error?.message || 'Failed to reschedule appointment');
     },
   });
 
@@ -482,39 +546,58 @@ const { data: availableMedications, isLoading: loadingMedications } = useQuery({
 
 const createPrescriptionMutation = useMutation({
   mutationFn: async (prescriptionData: any) => {
-    // First, get the staff ID for the current doctor from their email
-    const { data: staffData, error: staffError } = await (supabase as any)
-      .from('staff')
-      .select('id')
-      .eq('email', prescriptionData.doctor_email)
-      .single();
-
-    if (staffError || !staffData?.id) {
-      throw new Error('Doctor staff record not found');
+    // Validate that we have a doctor ID
+    if (!prescriptionData.doctor_user_id) {
+      throw new Error('Doctor information is missing. Please ensure you are logged in as a doctor.');
     }
 
-    const doctor_id = staffData.id;
+    if (!prescriptionData.patient_id) {
+      throw new Error('Patient ID is required');
+    }
 
-    // Create the prescription record with all required fields
+    if (!prescriptionData.medicine_id) {
+      throw new Error('Medicine/Medication is required');
+    }
+
+    // Create the prescription record
+    // The prescriptions table expects: patient_id, doctor_id, status
+    // prescription_items table contains: prescription_id, medication_id, dosage, frequency, duration
     const { data: prescriptionResponse, error: prescriptionError } = await (supabase as any)
       .from('prescriptions')
       .insert({
         patient_id: prescriptionData.patient_id,
-        doctor_id: doctor_id,
-        medicine_id: prescriptionData.medicine_id,
-        dosage: prescriptionData.dosage,
-        frequency: prescriptionData.frequency,
-        duration: prescriptionData.duration || null,
+        doctor_id: prescriptionData.doctor_user_id, // Using doctor_id as per the actual table structure
         status: 'active',
-        prescribed_date: new Date().toISOString().split('T')[0],
+        created_at: new Date().toISOString(),
       })
       .select()
       .single();
 
-    if (prescriptionError) throw prescriptionError;
+    if (prescriptionError) {
+      console.error('[DoctorDashboard] Prescription insert error:', prescriptionError);
+      throw prescriptionError;
+    }
+
+    // Now create the prescription item with medication details
+    const { error: itemError } = await (supabase as any)
+      .from('prescription_items')
+      .insert({
+        prescription_id: prescriptionResponse.id,
+        medication_id: prescriptionData.medicine_id,
+        dosage: prescriptionData.dosage || null,
+        frequency: prescriptionData.frequency || null,
+        duration: prescriptionData.duration || null,
+      });
+
+    if (itemError) {
+      console.error('[DoctorDashboard] Prescription item insert error:', itemError);
+      throw itemError;
+    }
+
+    return prescriptionResponse;
   },
   onSuccess: () => {
-    queryClient.invalidateQueries({ queryKey: ['doctor-active-prescriptions'] });
+    queryClient.invalidateQueries({ queryKey: ['doctor-active-prescriptions', doctorId] });
     toast.success('Prescription created successfully');
     setIsPrescriptionModalOpen(false);
     setPrescriptionForm({
@@ -527,9 +610,78 @@ const createPrescriptionMutation = useMutation({
     setSelectedPrescriptionPatient(null);
   },
   onError: (error: Error) => {
+    console.error('[DoctorDashboard] Prescription creation error:', error);
     toast.error('Failed to create prescription: ' + error.message);
   },
 });
+
+const updatePrescriptionMutation = useMutation({
+  mutationFn: async (prescriptionData: any) => {
+    if (!prescriptionData.prescription_id) {
+      throw new Error('Prescription ID is required');
+    }
+
+    // Update prescription_items with new medication details
+    const { error: itemError } = await (supabase as any)
+      .from('prescription_items')
+      .update({
+        medication_id: prescriptionData.medicine_id,
+        dosage: prescriptionData.dosage || null,
+        frequency: prescriptionData.frequency || null,
+        duration: prescriptionData.duration || null,
+      })
+      .eq('prescription_id', prescriptionData.prescription_id);
+
+    if (itemError) {
+      console.error('[DoctorDashboard] Prescription item update error:', itemError);
+      throw itemError;
+    }
+
+    return { id: prescriptionData.prescription_id };
+  },
+  onSuccess: () => {
+    queryClient.invalidateQueries({ queryKey: ['doctor-active-prescriptions', doctorId] });
+    toast.success('Prescription updated successfully');
+    setIsPrescriptionModalOpen(false);
+    setSelectedEditingPrescription(null);
+    setPrescriptionForm({
+      patient_id: '',
+      medicine_id: '',
+      dosage: '',
+      frequency: '',
+      duration: '',
+    });
+  },
+  onError: (error: Error) => {
+    console.error('[DoctorDashboard] Prescription update error:', error);
+    toast.error('Failed to update prescription: ' + error.message);
+  },
+});
+
+const cancelPrescriptionMutation = useMutation({
+  mutationFn: async (prescriptionId: string) => {
+    const { error } = await (supabase as any)
+      .from('prescriptions')
+      .update({ status: 'cancelled' })
+      .eq('id', prescriptionId);
+
+    if (error) {
+      console.error('[DoctorDashboard] Prescription cancel error:', error);
+      throw error;
+    }
+
+    return { id: prescriptionId };
+  },
+  onSuccess: () => {
+    queryClient.invalidateQueries({ queryKey: ['doctor-active-prescriptions', doctorId] });
+    toast.success('Prescription cancelled successfully');
+  },
+  onError: (error: Error) => {
+    console.error('[DoctorDashboard] Prescription cancel error:', error);
+    toast.error('Failed to cancel prescription: ' + error.message);
+  },
+});
+
   // ===== HANDLERS =====
   const handleConfirmAppointment = (appointment: Appointment) => {
     confirmAppointmentMutation.mutate(appointment.id);
@@ -693,19 +845,59 @@ const createPrescriptionMutation = useMutation({
   };
 
   const handleSubmitPrescription = () => {
-    if (!prescriptionForm.patient_id || !prescriptionForm.medicine_id || !prescriptionForm.dosage || !prescriptionForm.frequency) {
-      toast.error('Please fill in all required fields');
+    // Validate all required fields
+    if (!prescriptionForm.patient_id) {
+      toast.error('Please select a patient');
       return;
     }
-    if (!user?.email) {
-      toast.error('Doctor information not available');
+    if (!prescriptionForm.medicine_id) {
+      toast.error('Please select a medication');
       return;
     }
-    // We'll fetch the staff ID in the mutation
-    createPrescriptionMutation.mutate({
-      ...prescriptionForm,
-      doctor_email: user.email,
+    if (!prescriptionForm.dosage) {
+      toast.error('Please enter dosage');
+      return;
+    }
+    if (!prescriptionForm.frequency) {
+      toast.error('Please select frequency');
+      return;
+    }
+    if (!user?.id) {
+      toast.error('Doctor information not available. Please ensure you are logged in.');
+      return;
+    }
+
+    // If editing an existing prescription, use update mutation
+    if (selectedEditingPrescription) {
+      updatePrescriptionMutation.mutate({
+        ...prescriptionForm,
+        prescription_id: selectedEditingPrescription.id,
+      });
+    } else {
+      // Otherwise create new prescription
+      createPrescriptionMutation.mutate({
+        ...prescriptionForm,
+        doctor_user_id: user.id,
+      });
+    }
+  };
+
+  const handleEditPrescription = (prescription: Prescription) => {
+    setSelectedEditingPrescription(prescription);
+    setPrescriptionForm({
+      patient_id: prescription.patient_id,
+      medicine_id: prescription.medicine_id,
+      dosage: prescription.dosage,
+      frequency: prescription.frequency,
+      duration: prescription.duration,
     });
+    setIsPrescriptionModalOpen(true);
+  };
+
+  const handleCancelPrescription = (prescriptionId: string) => {
+    if (confirm('Are you sure you want to cancel this prescription?')) {
+      cancelPrescriptionMutation.mutate(prescriptionId);
+    }
   };
 
   const handleDiagnosisFormChange = (field: string, value: string) => {
@@ -1101,83 +1293,108 @@ const createPrescriptionMutation = useMutation({
           )}
 
           {/* View Examinations Modal */}
-          {isViewExaminationModalOpen && selectedPatient && (
+          {isViewExaminationModalOpen && selectedExamination && (
             <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-50 overflow-y-auto">
               <div className="bg-white rounded-lg shadow-lg p-6 w-full max-w-4xl my-4">
                 <div className="flex justify-between items-center mb-4">
-                  <h3 className="text-2xl font-bold">Examination Records - {selectedPatient.first_name} {selectedPatient.last_name}</h3>
+                  <h3 className="text-2xl font-bold">Examination Details</h3>
                   <button
                     className="text-gray-500 hover:text-gray-700 text-2xl"
                     onClick={() => {
                       setIsViewExaminationModalOpen(false);
                       setSelectedPatient(null);
+                      setSelectedExamination(null);
                     }}
                   >
                     ✕
                   </button>
                 </div>
 
-                {loadingPatientExaminations ? (
-                  <div className="text-center py-8">Loading examination records...</div>
-                ) : !patientExaminations || patientExaminations.length === 0 ? (
-                  <div className="text-center py-8 text-gray-500">No examination records found for this patient</div>
-                ) : (
-                  <div className="space-y-4 max-h-96 overflow-y-auto">
-                    {patientExaminations.map((exam, index) => (
-                      <div key={exam.id} className="border border-gray-200 rounded-lg p-4 hover:bg-gray-50">
-                        <div className="flex justify-between items-start mb-3">
-                          <h4 className="font-semibold text-lg">
-                            Examination #{index + 1}
-                          </h4>
-                          <span className="text-sm text-gray-600">
-                            {format(new Date(exam.examination_date), 'MMM dd, yyyy HH:mm')}
-                          </span>
-                        </div>
+                <div className="space-y-6 max-h-96 overflow-y-auto">
+                  <div className="border border-gray-200 rounded-lg p-4">
+                    <div className="flex justify-between items-start mb-3">
+                      <h4 className="font-semibold text-lg">Examination Record</h4>
+                      <span className="text-sm text-gray-600">
+                        {format(new Date(selectedExamination.examination_date), 'MMM dd, yyyy HH:mm')}
+                      </span>
+                    </div>
 
-                        <div className="grid grid-cols-2 gap-4 text-sm">
-                          <div>
-                            <p className="text-gray-600">Chief Complaint</p>
-                            <p className="font-medium">{exam.chief_complaint}</p>
-                          </div>
-                          <div>
-                            <p className="text-gray-600">Assessment/Diagnosis</p>
-                            <p className="font-medium">{exam.assessment_diagnosis}</p>
-                          </div>
-                          {exam.triage_temperature && (
-                            <div>
-                              <p className="text-gray-600">Temperature</p>
-                              <p className="font-medium">{exam.triage_temperature}°C</p>
-                            </div>
-                          )}
-                          {exam.triage_blood_pressure && (
-                            <div>
-                              <p className="text-gray-600">Blood Pressure</p>
-                              <p className="font-medium">{exam.triage_blood_pressure}</p>
-                            </div>
-                          )}
-                          {exam.triage_pulse_rate && (
-                            <div>
-                              <p className="text-gray-600">Pulse Rate</p>
-                              <p className="font-medium">{exam.triage_pulse_rate} bpm</p>
-                            </div>
-                          )}
-                          {exam.plan_treatment && (
-                            <div className="col-span-2">
-                              <p className="text-gray-600">Treatment Plan</p>
-                              <p className="font-medium">{exam.plan_treatment}</p>
-                            </div>
-                          )}
-                          {exam.follow_up_date && (
-                            <div>
-                              <p className="text-gray-600">Follow-up Date</p>
-                              <p className="font-medium">{format(new Date(exam.follow_up_date), 'MMM dd, yyyy')}</p>
-                            </div>
-                          )}
-                        </div>
+                    <div className="grid grid-cols-2 gap-4 text-sm">
+                      <div>
+                        <p className="text-gray-600">Patient</p>
+                        <p className="font-medium">{selectedExamination.patient_name}</p>
                       </div>
-                    ))}
+                      <div>
+                        <p className="text-gray-600">Chief Complaint</p>
+                        <p className="font-medium">{selectedExamination.chief_complaint}</p>
+                      </div>
+                      <div className="col-span-2">
+                        <p className="text-gray-600">Assessment/Diagnosis</p>
+                        <p className="font-medium">{selectedExamination.assessment_diagnosis}</p>
+                      </div>
+                      {selectedExamination.history_of_present_illness && (
+                        <div className="col-span-2">
+                          <p className="text-gray-600">History of Present Illness</p>
+                          <p className="font-medium">{selectedExamination.history_of_present_illness}</p>
+                        </div>
+                      )}
+                      {selectedExamination.triage_temperature && (
+                        <div>
+                          <p className="text-gray-600">Temperature</p>
+                          <p className="font-medium">{selectedExamination.triage_temperature}°C</p>
+                        </div>
+                      )}
+                      {selectedExamination.triage_blood_pressure && (
+                        <div>
+                          <p className="text-gray-600">Blood Pressure</p>
+                          <p className="font-medium">{selectedExamination.triage_blood_pressure}</p>
+                        </div>
+                      )}
+                      {selectedExamination.triage_pulse_rate && (
+                        <div>
+                          <p className="text-gray-600">Pulse Rate</p>
+                          <p className="font-medium">{selectedExamination.triage_pulse_rate} bpm</p>
+                        </div>
+                      )}
+                      {selectedExamination.triage_respiratory_rate && (
+                        <div>
+                          <p className="text-gray-600">Respiratory Rate</p>
+                          <p className="font-medium">{selectedExamination.triage_respiratory_rate} breaths/min</p>
+                        </div>
+                      )}
+                      {selectedExamination.triage_oxygen_saturation && (
+                        <div>
+                          <p className="text-gray-600">O₂ Saturation</p>
+                          <p className="font-medium">{selectedExamination.triage_oxygen_saturation}%</p>
+                        </div>
+                      )}
+                      {selectedExamination.plan_treatment && (
+                        <div className="col-span-2">
+                          <p className="text-gray-600">Treatment Plan</p>
+                          <p className="font-medium whitespace-pre-wrap">{selectedExamination.plan_treatment}</p>
+                        </div>
+                      )}
+                      {selectedExamination.medications_prescribed && (
+                        <div className="col-span-2">
+                          <p className="text-gray-600">Medications Prescribed</p>
+                          <p className="font-medium whitespace-pre-wrap">{selectedExamination.medications_prescribed}</p>
+                        </div>
+                      )}
+                      {selectedExamination.follow_up_date && (
+                        <div>
+                          <p className="text-gray-600">Follow-up Date</p>
+                          <p className="font-medium">{format(new Date(selectedExamination.follow_up_date), 'MMM dd, yyyy')}</p>
+                        </div>
+                      )}
+                      {selectedExamination.referrals && (
+                        <div className="col-span-2">
+                          <p className="text-gray-600">Referrals</p>
+                          <p className="font-medium">{selectedExamination.referrals}</p>
+                        </div>
+                      )}
+                    </div>
                   </div>
-                )}
+                </div>
 
                 <div className="flex gap-2 justify-end mt-6">
                   <button
@@ -1185,6 +1402,7 @@ const createPrescriptionMutation = useMutation({
                     onClick={() => {
                       setIsViewExaminationModalOpen(false);
                       setSelectedPatient(null);
+                      setSelectedExamination(null);
                     }}
                   >
                     Close
@@ -1256,13 +1474,13 @@ const createPrescriptionMutation = useMutation({
                 <td className="py-3 px-4 flex gap-2">
                   <button
                     className="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded text-sm"
-                    onClick={() => alert('Edit functionality to be implemented')}
+                    onClick={() => handleEditPrescription(prescription)}
                   >
                     Edit
                   </button>
                   <button
                     className="bg-red-500 hover:bg-red-600 text-white px-3 py-1 rounded text-sm"
-                    onClick={() => alert('Cancel functionality to be implemented')}
+                    onClick={() => handleCancelPrescription(prescription.id)}
                   >
                     Cancel
                   </button>
@@ -1278,8 +1496,14 @@ const createPrescriptionMutation = useMutation({
     {isPrescriptionModalOpen && (
       <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-50 overflow-y-auto">
         <div className="bg-white rounded-lg shadow-lg p-6 w-full max-w-md my-4">
-          <h3 className="text-xl font-bold mb-4">Create Prescription</h3>
-          <p className="mb-4 text-gray-600">Create a new prescription for the selected patient.</p>
+          <h3 className="text-xl font-bold mb-4">
+            {selectedEditingPrescription ? 'Edit Prescription' : 'Create Prescription'}
+          </h3>
+          <p className="mb-4 text-gray-600">
+            {selectedEditingPrescription
+              ? 'Update the prescription details below.'
+              : 'Create a new prescription for the selected patient.'}
+          </p>
 
           {/* Patient Selection */}
           <div className="mb-4">
@@ -1292,7 +1516,8 @@ const createPrescriptionMutation = useMutation({
                 const patient = activePatients?.find((p) => p.id === patientId);
                 if (patient) setSelectedPrescriptionPatient(patient);
               }}
-              className="w-full border border-gray-300 rounded px-3 py-2"
+              disabled={!!selectedEditingPrescription}
+              className="w-full border border-gray-300 rounded px-3 py-2 disabled:bg-gray-100 disabled:cursor-not-allowed"
             >
               <option value="">Select patient</option>
               {activePatients?.map((patient) => (
@@ -1374,6 +1599,7 @@ const createPrescriptionMutation = useMutation({
               className="px-4 py-2 bg-gray-300 text-gray-700 rounded hover:bg-gray-400"
               onClick={() => {
                 setIsPrescriptionModalOpen(false);
+                setSelectedEditingPrescription(null);
                 setPrescriptionForm({
                   patient_id: '',
                   medicine_id: '',
@@ -1390,9 +1616,15 @@ const createPrescriptionMutation = useMutation({
             <button
               className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-50"
               onClick={handleSubmitPrescription}
-              disabled={createPrescriptionMutation.isPending}
+              disabled={createPrescriptionMutation.isPending || updatePrescriptionMutation.isPending}
             >
-              {createPrescriptionMutation.isPending ? 'Creating...' : 'Create Prescription'}
+              {selectedEditingPrescription
+                ? updatePrescriptionMutation.isPending
+                  ? 'Updating...'
+                  : 'Update Prescription'
+                : createPrescriptionMutation.isPending
+                ? 'Creating...'
+                : 'Create Prescription'}
             </button>
           </div>
         </div>
@@ -1525,29 +1757,48 @@ const createPrescriptionMutation = useMutation({
             <div className="text-center py-8 text-gray-500">No medical examinations found</div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full">
+              <table className="w-full border-collapse">
                 <thead>
                   <tr className="border-b-2 border-gray-200">
-                    <th className="text-left py-3 px-4 font-semibold">Patient</th>
-                    <th className="text-left py-3 px-4 font-semibold">Examination Date</th>
-                    <th className="text-left py-3 px-4 font-semibold">Chief Complaint</th>
-                    <th className="text-left py-3 px-4 font-semibold">Diagnosis</th>
-                    <th className="text-left py-3 px-4 font-semibold">BP</th>
-                    <th className="text-left py-3 px-4 font-semibold">Temp</th>
+                    <th className="text-left py-3 px-4 font-semibold w-24">Patient</th>
+                    <th className="text-left py-3 px-4 font-semibold w-32">Examination Date</th>
+                    <th className="text-left py-3 px-4 font-semibold w-40">Diagnosis</th>
+                    <th className="text-left py-3 px-4 font-semibold w-20">BP</th>
+                    <th className="text-left py-3 px-4 font-semibold w-20">Temp</th>
+                    <th className="text-left py-3 px-4 font-semibold w-32">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {medicalExaminations.map((exam) => (
                     <tr key={exam.id} className="border-b border-gray-200 hover:bg-gray-50">
-                      <td className="py-3 px-4 font-medium">{exam.patient_name}</td>
-                      <td className="py-3 px-4">
+                      <td className="py-4 px-4 font-medium h-20 align-top whitespace-normal break-words">{exam.patient_name}</td>
+                      <td className="py-4 px-4 h-20 align-top whitespace-normal break-words">
                         {format(new Date(exam.examination_date), 'MMM dd, yyyy')}
                       </td>
 
-                      <td className="py-3 px-4">{exam.chief_complaint}</td>
-                      <td className="py-3 px-4 max-w-xs truncate">{exam.assessment_diagnosis}</td>
-                      <td className="py-3 px-4">{exam.triage_blood_pressure || 'N/A'}</td>
-                      <td className="py-3 px-4">{exam.triage_temperature ? `${exam.triage_temperature}°C` : 'N/A'}</td>
+                      <td className="py-4 px-4 h-20 align-top whitespace-normal break-words">{exam.assessment_diagnosis}</td>
+                      <td className="py-4 px-4 h-20 align-top whitespace-normal break-words">{exam.triage_blood_pressure || 'N/A'}</td>
+                      <td className="py-4 px-4 h-20 align-top whitespace-normal break-words">{exam.triage_temperature ? `${exam.triage_temperature}°C` : 'N/A'}</td>
+                      <td className="py-4 px-4 h-20 align-top">
+                        <button
+                          className="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded text-sm"
+                          onClick={() => {
+                            setSelectedExamination(exam);
+                            setSelectedPatient({
+                              id: exam.patient_id,
+                              patient_number: '',
+                              first_name: exam.patient_name?.split(' ')[0] || '',
+                              last_name: exam.patient_name?.split(' ').slice(1).join(' ') || '',
+                              date_of_birth: '',
+                              gender: '',
+                              blood_type: null,
+                            });
+                            setIsViewExaminationModalOpen(true);
+                          }}
+                        >
+                          View
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>

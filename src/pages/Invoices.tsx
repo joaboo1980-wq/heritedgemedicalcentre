@@ -144,10 +144,12 @@ const Invoices = () => {
   const createInvoiceMutation = useMutation({
     mutationFn: async (data: typeof newInvoice) => {
       if (!data.patient_id) {
+        console.warn('[Invoices] Patient is required');
         throw new Error('Patient is required');
       }
 
       if (data.items.length === 0) {
+        console.warn('[Invoices] At least one item is required');
         throw new Error('At least one item is required');
       }
 
@@ -155,49 +157,56 @@ const Invoices = () => {
         (item) => !item.description || item.quantity <= 0 || item.unit_price <= 0
       );
       if (invalidItems.length > 0) {
+        console.warn('[Invoices] Invalid invoice items found');
         throw new Error('All items must have description, quantity > 0, and unit price > 0');
       }
 
-      const subtotal = data.items.reduce((sum, item) => sum + (item.quantity * item.unit_price), 0);
-      const totalAmount = subtotal;
+      try {
+        const subtotal = data.items.reduce((sum, item) => sum + (item.quantity * item.unit_price), 0);
+        const totalAmount = subtotal;
 
-      const { data: invoice, error: invoiceError } = await supabase
-        .from('invoices')
-        .insert({
-          patient_id: data.patient_id,
-          due_date: data.due_date && data.due_date.trim() ? data.due_date : null,
-          subtotal: subtotal,
-          total_amount: totalAmount,
-          tax_amount: 0,
-          discount_amount: 0,
-          amount_paid: 0,
-          invoice_number: `INV-${Date.now()}`,
-          status: 'draft',
-        })
-        .select()
-        .single();
+        const { data: invoice, error: invoiceError } = await supabase
+          .from('invoices')
+          .insert({
+            patient_id: data.patient_id,
+            due_date: data.due_date && data.due_date.trim() ? data.due_date : null,
+            subtotal: subtotal,
+            total_amount: totalAmount,
+            tax_amount: 0,
+            discount_amount: 0,
+            amount_paid: 0,
+            invoice_number: `INV-${Date.now()}`,
+            status: 'draft',
+          })
+          .select()
+          .single();
 
-      if (invoiceError) {
-        console.error('Invoice creation error:', invoiceError);
-        throw new Error(`Failed to create invoice: ${invoiceError.message}`);
+        if (invoiceError) {
+          console.error('[Invoices] Invoice creation error:', invoiceError);
+          throw new Error(`Failed to create invoice: ${invoiceError.message}`);
+        }
+
+        const items = data.items.map((item) => ({
+          invoice_id: invoice.id,
+          description: item.description.trim(),
+          item_type: item.item_type,
+          quantity: parseInt(item.quantity.toString()),
+          unit_price: parseFloat(item.unit_price.toString()),
+          total_price: parseFloat((item.quantity * item.unit_price).toString()),
+        }));
+
+        const { error: itemsError } = await supabase.from('invoice_items').insert(items);
+        if (itemsError) {
+          console.error('[Invoices] Invoice items creation error:', itemsError);
+          throw new Error(`Failed to create invoice items: ${itemsError.message}`);
+        }
+
+        console.log('[Invoices] Invoice created successfully, ID:', invoice.id);
+        return invoice;
+      } catch (err) {
+        console.error('[Invoices] Invoice creation failed:', err);
+        throw err;
       }
-
-      const items = data.items.map((item) => ({
-        invoice_id: invoice.id,
-        description: item.description.trim(),
-        item_type: item.item_type,
-        quantity: parseInt(item.quantity.toString()),
-        unit_price: parseFloat(item.unit_price.toString()),
-        total_price: parseFloat((item.quantity * item.unit_price).toString()),
-      }));
-
-      const { error: itemsError } = await supabase.from('invoice_items').insert(items);
-      if (itemsError) {
-        console.error('Invoice items creation error:', itemsError);
-        throw new Error(`Failed to create invoice items: ${itemsError.message}`);
-      }
-
-      return invoice;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['invoices'] });
@@ -209,7 +218,10 @@ const Invoices = () => {
       });
       toast.success('Invoice created successfully');
     },
-    onError: (error: Error) => toast.error(error.message),
+    onError: (error: Error) => {
+      console.error('[Invoices] Mutation error:', error.message);
+      toast.error(`Failed to create invoice: ${error.message}`);
+    },
   });
 
   const addItem = () => {

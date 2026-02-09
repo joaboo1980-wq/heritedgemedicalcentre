@@ -91,17 +91,42 @@ const Patients = () => {
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isMedicalHistoryDialogOpen, setIsMedicalHistoryDialogOpen] = useState(false);
+  const [isScheduleAppointmentDialogOpen, setIsScheduleAppointmentDialogOpen] = useState(false);
   const [medicalExaminations, setMedicalExaminations] = useState<MedicalExamination[]>([]);
+  const [appointmentForm, setAppointmentForm] = useState({
+    doctor_id: '',
+    appointment_date: '',
+    appointment_time: '',
+    duration_minutes: 30,
+    department: '',
+    reason: '',
+  });
 
   // Edit patient mutation
   const editPatientMutation = useMutation({
     mutationFn: async (patient: Patient) => {
-      const { id, ...updateFields } = patient;
-      const { error } = await supabase
-        .from('patients')
-        .update(updateFields)
-        .eq('id', id);
-      if (error) throw error;
+      try {
+        // Validate required fields
+        if (!patient.first_name?.trim() || !patient.last_name?.trim()) {
+          throw new Error('First name and last name are required');
+        }
+        if (!patient.date_of_birth) {
+          throw new Error('Date of birth is required');
+        }
+        
+        const { id, ...updateFields } = patient;
+        const { error } = await supabase
+          .from('patients')
+          .update(updateFields)
+          .eq('id', id);
+        if (error) {
+          console.error('[Patients] Edit error:', error);
+          throw error;
+        }
+      } catch (err) {
+        console.error('[Patients] Edit mutation failed:', err);
+        throw err;
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['patients'] });
@@ -109,7 +134,8 @@ const Patients = () => {
       toast.success('Patient details updated successfully');
     },
     onError: (error: any) => {
-      toast.error(error.message || 'Failed to update patient');
+      console.error('[Patients] Edit failed:', error);
+      toast.error(error?.message || 'Failed to update patient');
     },
   });
   
@@ -155,19 +181,98 @@ const Patients = () => {
   });
 
   // Fetch medical examinations for selected patient
-  const { data: patientExaminations } = useQuery({
+  const { data: patientExaminations, error: examinationsError } = useQuery({
     queryKey: ['medical-examinations', selectedPatient?.id],
     queryFn: async () => {
       if (!selectedPatient?.id) return [];
-      const { data, error } = await supabase
-        .from('medical_examinations' as any)
-        .select('*')
-        .eq('patient_id', selectedPatient.id)
-        .order('examination_date', { ascending: false });
-      if (error) throw error;
-      return data as MedicalExamination[];
+      try {
+        const { data, error } = await supabase
+          .from('medical_examinations' as any)
+          .select('*')
+          .eq('patient_id', selectedPatient.id)
+          .order('examination_date', { ascending: false });
+        if (error) {
+          console.error('[Patients] Error fetching medical examinations:', error);
+          throw error;
+        }
+        return data as MedicalExamination[];
+      } catch (err) {
+        console.error('[Patients] Medical examinations query failed:', err);
+        return [];
+      }
     },
     enabled: isMedicalHistoryDialogOpen && !!selectedPatient?.id,
+  });
+
+  // Fetch doctors for appointment scheduling
+  const { data: doctors } = useQuery({
+    queryKey: ['doctors-for-appointment'],
+    queryFn: async () => {
+      try {
+        console.log('[Patients] Fetching doctors...');
+        
+        // First fetch doctor role assignments
+        const { data: doctorRoles, error: rolesError } = await supabase
+          .from('user_roles')
+          .select('user_id')
+          .eq('role', 'doctor');
+        
+        if (rolesError) {
+          console.error('[Patients] Error fetching doctor roles:', rolesError);
+          throw rolesError;
+        }
+        
+        console.log('[Patients] Doctor roles found:', doctorRoles?.length || 0);
+        
+        if (!doctorRoles || doctorRoles.length === 0) {
+          console.warn('[Patients] No doctors found in user_roles');
+          // Fallback: fetch all profiles in case roles aren't properly set
+          const { data: allProfiles, error: profileError } = await supabase
+            .from('profiles')
+            .select('user_id, full_name, email')
+            .limit(100);
+          
+          if (profileError) throw profileError;
+          
+          // Transform to match expected format
+          return (allProfiles || []).map((p: any) => ({
+            id: p.user_id,
+            first_name: p.full_name?.split(' ')[0] || '',
+            last_name: p.full_name?.split(' ').slice(1).join(' ') || '',
+            email: p.email,
+          }));
+        }
+        
+        // Get list of doctor user IDs
+        const doctorUserIds = doctorRoles.map((dr: any) => dr.user_id);
+        console.log('[Patients] Doctor user IDs:', doctorUserIds);
+        
+        // Fetch doctor profiles
+        const { data: doctorProfiles, error: profileError } = await supabase
+          .from('profiles')
+          .select('user_id, full_name, email')
+          .in('user_id', doctorUserIds)
+          .order('full_name', { ascending: true });
+        
+        if (profileError) {
+          console.error('[Patients] Error fetching doctor profiles:', profileError);
+          throw profileError;
+        }
+        
+        console.log('[Patients] Fetched doctors from profiles:', doctorProfiles?.length || 0);
+        
+        // Transform to match expected format
+        return (doctorProfiles || []).map((p: any) => ({
+          id: p.user_id,
+          first_name: p.full_name?.split(' ')[0] || '',
+          last_name: p.full_name?.split(' ').slice(1).join(' ') || '',
+          email: p.email,
+        }));
+      } catch (err) {
+        console.error('[Patients] Fetch doctors error:', err);
+        return [];
+      }
+    },
   });
 
   // Create patient mutation
@@ -236,24 +341,33 @@ const Patients = () => {
   // Delete patient mutation
   const deletePatientMutation = useMutation({
     mutationFn: async (patientId: string) => {
-      console.log('[DELETE] Starting patient deletion for ID:', patientId);
-      
-      const { error, data } = await supabase
-        .from('patients')
-        .delete()
-        .eq('id', patientId)
-        .select();
-      
-      if (error) {
-        console.error('[DELETE ERROR]', error.message, error.details, error.hint, error.code);
-        throw new Error(error.message || 'Failed to delete patient');
+      try {
+        if (!patientId) {
+          throw new Error('Patient ID is required');
+        }
+        
+        console.log('[Patients] Starting patient deletion for ID:', patientId);
+        
+        const { error, data } = await supabase
+          .from('patients')
+          .delete()
+          .eq('id', patientId)
+          .select();
+        
+        if (error) {
+          console.error('[Patients] Delete error:', error.message, error.details, error.code);
+          throw new Error(error.message || 'Failed to delete patient');
+        }
+        
+        console.log('[Patients] Patient deleted:', data);
+        return data;
+      } catch (err) {
+        console.error('[Patients] Delete mutation failed:', err);
+        throw err;
       }
-      
-      console.log('[DELETE SUCCESS] Patient deleted:', data);
-      return data;
     },
     onSuccess: () => {
-      console.log('[DELETE] Cache invalidation starting...');
+      console.log('[Patients] Cache invalidation starting...');
       queryClient.invalidateQueries({ queryKey: ['patients'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] });
       setIsDeleteDialogOpen(false);
@@ -261,8 +375,52 @@ const Patients = () => {
       toast.success('Patient deleted successfully');
     },
     onError: (error: Error) => {
-      console.error('[DELETE MUTATION ERROR]', error.message);
+      console.error('[Patients] Delete mutation error:', error.message);
       toast.error(`Failed to delete patient: ${error.message}`);
+    },
+  });
+
+  // Create appointment mutation
+  const createAppointmentMutation = useMutation({
+    mutationFn: async (appointmentData: typeof appointmentForm) => {
+      if (!selectedPatient?.id) throw new Error('Patient not selected');
+      if (!appointmentData.doctor_id) throw new Error('Doctor is required');
+      if (!appointmentData.appointment_date) throw new Error('Appointment date is required');
+      if (!appointmentData.appointment_time) throw new Error('Appointment time is required');
+
+      const { error } = await supabase
+        .from('appointments')
+        .insert({
+          patient_id: selectedPatient.id,
+          doctor_id: appointmentData.doctor_id,
+          appointment_date: appointmentData.appointment_date,
+          appointment_time: appointmentData.appointment_time,
+          duration_minutes: appointmentData.duration_minutes,
+          department: appointmentData.department || null,
+          reason: appointmentData.reason || null,
+          status: 'scheduled',
+        });
+
+      if (error) {
+        console.error('[Patients] Appointment creation error:', error);
+        throw error;
+      }
+    },
+    onSuccess: () => {
+      toast.success('Appointment scheduled successfully');
+      setIsScheduleAppointmentDialogOpen(false);
+      setAppointmentForm({
+        doctor_id: '',
+        appointment_date: '',
+        appointment_time: '',
+        duration_minutes: 30,
+        department: '',
+        reason: '',
+      });
+      queryClient.invalidateQueries({ queryKey: ['appointments'] });
+    },
+    onError: (error: any) => {
+      toast.error(error?.message || 'Failed to schedule appointment');
     },
   });
 
@@ -309,6 +467,25 @@ const Patients = () => {
             <form
               onSubmit={(e) => {
                 e.preventDefault();
+                
+                // Validate required fields
+                if (!newPatient.first_name?.trim()) {
+                  toast.error('First name is required');
+                  return;
+                }
+                if (!newPatient.last_name?.trim()) {
+                  toast.error('Last name is required');
+                  return;
+                }
+                if (!newPatient.date_of_birth) {
+                  toast.error('Date of birth is required');
+                  return;
+                }
+                if (!newPatient.gender) {
+                  toast.error('Gender is required');
+                  return;
+                }
+                
                 createPatientMutation.mutate(newPatient);
               }}
               className="space-y-6"
@@ -593,8 +770,15 @@ const Patients = () => {
                           <DropdownMenuItem
                             onClick={() => {
                               setSelectedPatient(patient);
-                              // Navigate to appointments with patient selected
-                              window.location.href = `/appointments?patientId=${patient.id}`;
+                              setAppointmentForm({
+                                doctor_id: '',
+                                appointment_date: '',
+                                appointment_time: '',
+                                duration_minutes: 30,
+                                department: '',
+                                reason: '',
+                              });
+                              setIsScheduleAppointmentDialogOpen(true);
                             }}
                           >
                             <Calendar className="mr-2 h-4 w-4" />
@@ -989,6 +1173,173 @@ const Patients = () => {
                 No medical examination records found for this patient
               </div>
             )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Schedule Appointment Dialog */}
+      <Dialog open={isScheduleAppointmentDialogOpen} onOpenChange={setIsScheduleAppointmentDialogOpen}>
+        <DialogContent className="sm:max-w-md overflow-visible">
+          <DialogHeader>
+            <DialogTitle>Schedule Appointment</DialogTitle>
+            <DialogDescription>
+              Create a new appointment for {selectedPatient?.first_name} {selectedPatient?.last_name}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 overflow-visible">
+            {/* Doctor Selection */}
+            <div className="relative z-50">
+              <Label htmlFor="doctor" className="text-sm font-medium">
+                Doctor *
+              </Label>
+              <Select
+                value={appointmentForm.doctor_id}
+                onValueChange={(value) =>
+                  setAppointmentForm({ ...appointmentForm, doctor_id: value })
+                }
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Select doctor" />
+                </SelectTrigger>
+                <SelectContent side="bottom" align="start" className="z-50">
+                  {doctors && doctors.length > 0 ? (
+                    doctors.map((doctor: any) => (
+                      <SelectItem key={doctor.id} value={doctor.id}>
+                        Dr. {doctor.first_name} {doctor.last_name}
+                      </SelectItem>
+                    ))
+                  ) : (
+                    <div className="p-2 text-sm text-gray-500">No doctors available</div>
+                  )}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Date */}
+            <div>
+              <Label htmlFor="date" className="text-sm font-medium">
+                Date *
+              </Label>
+              <Input
+                id="date"
+                type="date"
+                value={appointmentForm.appointment_date}
+                onChange={(e) =>
+                  setAppointmentForm({
+                    ...appointmentForm,
+                    appointment_date: e.target.value,
+                  })
+                }
+              />
+            </div>
+
+            {/* Time */}
+            <div>
+              <Label htmlFor="time" className="text-sm font-medium">
+                Time *
+              </Label>
+              <Input
+                id="time"
+                type="time"
+                value={appointmentForm.appointment_time}
+                onChange={(e) =>
+                  setAppointmentForm({
+                    ...appointmentForm,
+                    appointment_time: e.target.value,
+                  })
+                }
+              />
+            </div>
+
+            {/* Duration */}
+            <div>
+              <Label htmlFor="duration" className="text-sm font-medium">
+                Duration (minutes)
+              </Label>
+              <Select
+                value={appointmentForm.duration_minutes.toString()}
+                onValueChange={(value) =>
+                  setAppointmentForm({
+                    ...appointmentForm,
+                    duration_minutes: parseInt(value),
+                  })
+                }
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="15">15 minutes</SelectItem>
+                  <SelectItem value="30">30 minutes</SelectItem>
+                  <SelectItem value="45">45 minutes</SelectItem>
+                  <SelectItem value="60">1 hour</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Department */}
+            <div>
+              <Label htmlFor="department" className="text-sm font-medium">
+                Department
+              </Label>
+              <Input
+                id="department"
+                placeholder="e.g. Cardiology, Pediatrics"
+                value={appointmentForm.department}
+                onChange={(e) =>
+                  setAppointmentForm({
+                    ...appointmentForm,
+                    department: e.target.value,
+                  })
+                }
+              />
+            </div>
+
+            {/* Reason for Visit */}
+            <div>
+              <Label htmlFor="reason" className="text-sm font-medium">
+                Reason for Visit
+              </Label>
+              <Input
+                id="reason"
+                placeholder="Brief description of the visit reason"
+                value={appointmentForm.reason}
+                onChange={(e) =>
+                  setAppointmentForm({
+                    ...appointmentForm,
+                    reason: e.target.value,
+                  })
+                }
+              />
+            </div>
+          </div>
+
+          <div className="flex gap-2 justify-end">
+            <Button
+              variant="outline"
+              onClick={() => setIsScheduleAppointmentDialogOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                if (
+                  !appointmentForm.doctor_id ||
+                  !appointmentForm.appointment_date ||
+                  !appointmentForm.appointment_time
+                ) {
+                  toast.error('Please fill in all required fields');
+                  return;
+                }
+                createAppointmentMutation.mutate(appointmentForm);
+              }}
+              disabled={createAppointmentMutation.isPending}
+            >
+              {createAppointmentMutation.isPending
+                ? 'Scheduling...'
+                : 'Schedule Appointment'}
+            </Button>
           </div>
         </DialogContent>
       </Dialog>

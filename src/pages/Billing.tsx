@@ -60,6 +60,7 @@ interface InvoiceItem {
   quantity: number;
   unit_price: number;
   total_price: number;
+  item_type: string;
 }
 
 const statusColors: Record<string, string> = {
@@ -82,7 +83,7 @@ const Billing = () => {
   const [formData, setFormData] = useState({
     patient_id: '',
     due_date: '',
-    items: [{ description: '', quantity: 1, unit_price: 0 }],
+    items: [{ description: '', quantity: 1, unit_price: 0, item_type: 'other' }],
   });
 
   // Fetch patients
@@ -102,112 +103,154 @@ const Billing = () => {
   });
 
   // Fetch invoices
-  const { data: invoices, isLoading: isLoadingInvoices } = useQuery({
+  const { data: invoices, isLoading: isLoadingInvoices, error: invoicesError } = useQuery({
     queryKey: ['invoices'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('invoices')
-        .select(`*, patients (first_name, last_name, patient_number)`)
-        .order('created_at', { ascending: false });
-      if (error) {
-        console.error('Error fetching invoices:', error);
-        throw error;
+      try {
+        const { data, error } = await supabase
+          .from('invoices')
+          .select(`*, patients (first_name, last_name, patient_number)`)
+          .order('created_at', { ascending: false });
+        if (error) {
+          console.error('[Billing] Error fetching invoices:', error);
+          throw error;
+        }
+        return data as Invoice[];
+      } catch (err) {
+        console.error('[Billing] Invoices query failed:', err);
+        return [];
       }
-      return data as Invoice[];
     },
   });
 
   // Create invoice
   const createInvoiceMutation = useMutation({
     mutationFn: async (data: typeof formData) => {
-      if (!data.patient_id) throw new Error('Patient is required');
-      if (data.items.some(item => !item.description || item.quantity <= 0 || item.unit_price <= 0)) {
-        throw new Error('All items must be filled with valid data');
+      try {
+        if (!data.patient_id) throw new Error('Patient is required');
+        if (data.items.some(item => !item.description || item.quantity <= 0 || item.unit_price <= 0)) {
+          throw new Error('All items must be filled with valid data');
+        }
+
+        const totalAmount = data.items.reduce((sum, item) => sum + (item.quantity * item.unit_price), 0);
+
+        const { data: newInvoice, error: invoiceError } = await supabase
+          .from('invoices')
+          .insert({
+            patient_id: data.patient_id,
+            invoice_number: `INV-${Date.now()}`,
+            status: 'draft',
+            total_amount: totalAmount,
+            amount_paid: 0,
+            due_date: data.due_date || null,
+          })
+          .select()
+          .single();
+
+        if (invoiceError) {
+          console.error('[Billing] Invoice creation error:', invoiceError);
+          throw invoiceError;
+        }
+
+        // Insert line items
+        const items = data.items.map(item => ({
+          invoice_id: newInvoice.id,
+          description: item.description,
+          quantity: item.quantity,
+          unit_price: item.unit_price,
+          total_price: item.quantity * item.unit_price,
+          item_type: item.item_type || 'other',
+        }));
+
+        const { error: itemsError } = await supabase
+          .from('invoice_items')
+          .insert(items);
+
+        if (itemsError) {
+          console.error('[Billing] Invoice items creation error:', itemsError);
+          throw itemsError;
+        }
+
+        return newInvoice;
+      } catch (err) {
+        console.error('[Billing] Create invoice mutation failed:', err);
+        throw err;
       }
-
-      const totalAmount = data.items.reduce((sum, item) => sum + (item.quantity * item.unit_price), 0);
-
-      const { data: newInvoice, error: invoiceError } = await supabase
-        .from('invoices')
-        .insert({
-          patient_id: data.patient_id,
-          invoice_number: `INV-${Date.now()}`,
-          status: 'draft',
-          total_amount: totalAmount,
-          amount_paid: 0,
-          due_date: data.due_date || null,
-        })
-        .select()
-        .single();
-
-      if (invoiceError) throw invoiceError;
-
-      // Insert line items
-      const items = data.items.map(item => ({
-        invoice_id: newInvoice.id,
-        description: item.description,
-        quantity: item.quantity,
-        unit_price: item.unit_price,
-        total_price: item.quantity * item.unit_price,
-      }));
-
-      const { error: itemsError } = await supabase
-        .from('invoice_items')
-        .insert(items);
-
-      if (itemsError) throw itemsError;
-
-      return newInvoice;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['invoices'] });
       setIsCreateDialogOpen(false);
-      setFormData({ patient_id: '', due_date: '', items: [{ description: '', quantity: 1, unit_price: 0 }] });
+      setFormData({ patient_id: '', due_date: '', items: [{ description: '', quantity: 1, unit_price: 0, item_type: 'other' }] });
       toast.success('Invoice created successfully');
     },
-    onError: (error: Error) => toast.error(error.message),
+    onError: (error: Error) => {
+      console.error('[Billing] Create invoice failed:', error);
+      toast.error(error.message || 'Failed to create invoice');
+    },
   });
 
   // Delete invoice
   const deleteInvoiceMutation = useMutation({
     mutationFn: async (invoiceId: string) => {
-      const { error: itemsError } = await supabase
-        .from('invoice_items')
-        .delete()
-        .eq('invoice_id', invoiceId);
+      try {
+        if (!invoiceId) throw new Error('Invoice ID is required');
+        
+        const { error: itemsError } = await supabase
+          .from('invoice_items')
+          .delete()
+          .eq('invoice_id', invoiceId);
 
-      if (itemsError) throw itemsError;
+        if (itemsError) {
+          console.error('[Billing] Delete items error:', itemsError);
+          throw itemsError;
+        }
 
-      const { error } = await supabase
-        .from('invoices')
-        .delete()
-        .eq('id', invoiceId);
+        const { error } = await supabase
+          .from('invoices')
+          .delete()
+          .eq('id', invoiceId);
 
-      if (error) throw error;
+        if (error) {
+          console.error('[Billing] Delete invoice error:', error);
+          throw error;
+        }
+      } catch (err) {
+        console.error('[Billing] Delete invoice mutation failed:', err);
+        throw err;
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['invoices'] });
+      setIsViewDialogOpen(false);
       toast.success('Invoice deleted successfully');
     },
-    onError: (error: Error) => toast.error(error.message),
+    onError: (error: Error) => {
+      console.error('[Billing] Delete invoice failed:', error);
+      toast.error(error.message || 'Failed to delete invoice');
+    },
   });
 
   // View invoice details
   const handleViewInvoice = async (invoice: Invoice) => {
-    setSelectedInvoice(invoice);
-    const { data: items, error } = await supabase
-      .from('invoice_items')
-      .select('*')
-      .eq('invoice_id', invoice.id);
-    
-    if (error) {
-      console.error('Error fetching invoice items:', error);
-      toast.error('Failed to load invoice items');
-      return;
+    try {
+      setSelectedInvoice(invoice);
+      const { data: items, error } = await supabase
+        .from('invoice_items')
+        .select('*')
+        .eq('invoice_id', invoice.id);
+      
+      if (error) {
+        console.error('[Billing] Error fetching invoice items:', error);
+        toast.error('Failed to load invoice items');
+        return;
+      }
+      
+      setInvoiceItems(items as InvoiceItem[]);
+      setIsViewDialogOpen(true);
+    } catch (err) {
+      console.error('[Billing] Error viewing invoice:', err);
+      toast.error('Failed to load invoice details');
     }
-    
-    setInvoiceItems(items as InvoiceItem[]);
-    setIsViewDialogOpen(true);
   };
 
   // Filter invoices
@@ -240,7 +283,30 @@ const Billing = () => {
             </DialogHeader>
             <form 
               onSubmit={(e) => { 
-                e.preventDefault(); 
+                e.preventDefault();
+                
+                // Validate form data
+                if (!formData.patient_id) {
+                  toast.error('Please select a patient');
+                  return;
+                }
+                if (!formData.items || formData.items.length === 0) {
+                  toast.error('Please add at least one invoice item');
+                  return;
+                }
+                if (formData.items.some(item => !item.description?.trim())) {
+                  toast.error('All items must have a description');
+                  return;
+                }
+                if (formData.items.some(item => item.quantity <= 0)) {
+                  toast.error('All items must have a quantity greater than 0');
+                  return;
+                }
+                if (formData.items.some(item => item.unit_price < 0)) {
+                  toast.error('All items must have a valid price');
+                  return;
+                }
+                
                 createInvoiceMutation.mutate(formData); 
               }} 
               className="space-y-4"
@@ -273,49 +339,73 @@ const Billing = () => {
               <div className="space-y-3">
                 <Label>Invoice Items *</Label>
                 {formData.items.map((item, idx) => (
-                  <div key={idx} className="flex gap-2">
-                    <Input 
-                      placeholder="Description" 
-                      value={item.description} 
-                      onChange={(e) => {
-                        const newItems = [...formData.items];
-                        newItems[idx].description = e.target.value;
-                        setFormData({ ...formData, items: newItems });
-                      }} 
-                      className="flex-1"
-                    />
-                    <Input 
-                      type="number" 
-                      placeholder="Qty" 
-                      value={item.quantity} 
-                      onChange={(e) => {
-                        const newItems = [...formData.items];
-                        newItems[idx].quantity = parseFloat(e.target.value) || 0;
-                        setFormData({ ...formData, items: newItems });
-                      }} 
-                      className="w-20"
-                    />
-                    <Input 
-                      type="number" 
-                      placeholder="Price" 
-                      value={item.unit_price} 
-                      onChange={(e) => {
-                        const newItems = [...formData.items];
-                        newItems[idx].unit_price = parseFloat(e.target.value) || 0;
-                        setFormData({ ...formData, items: newItems });
-                      }} 
-                      className="w-24"
-                    />
-                    <Button 
-                      type="button" 
-                      variant="outline" 
-                      onClick={() => {
-                        const newItems = formData.items.filter((_, i) => i !== idx);
-                        setFormData({ ...formData, items: newItems });
-                      }}
-                    >
-                      Remove
-                    </Button>
+                  <div key={idx} className="space-y-2 p-3 border rounded-md">
+                    <div className="flex gap-2">
+                      <Input 
+                        placeholder="Description" 
+                        value={item.description} 
+                        onChange={(e) => {
+                          const newItems = [...formData.items];
+                          newItems[idx].description = e.target.value;
+                          setFormData({ ...formData, items: newItems });
+                        }} 
+                        className="flex-1"
+                      />
+                    </div>
+                    <div className="flex gap-2">
+                      <Select 
+                        value={item.item_type || 'other'} 
+                        onValueChange={(value) => {
+                          const newItems = [...formData.items];
+                          newItems[idx].item_type = value;
+                          setFormData({ ...formData, items: newItems });
+                        }}
+                      >
+                        <SelectTrigger className="w-40">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="consultation">Consultation</SelectItem>
+                          <SelectItem value="lab_test">Lab Test</SelectItem>
+                          <SelectItem value="medication">Medication</SelectItem>
+                          <SelectItem value="procedure">Procedure</SelectItem>
+                          <SelectItem value="room">Room</SelectItem>
+                          <SelectItem value="other">Other</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <Input 
+                        type="number" 
+                        placeholder="Qty" 
+                        value={item.quantity} 
+                        onChange={(e) => {
+                          const newItems = [...formData.items];
+                          newItems[idx].quantity = parseFloat(e.target.value) || 0;
+                          setFormData({ ...formData, items: newItems });
+                        }} 
+                        className="w-20"
+                      />
+                      <Input 
+                        type="number" 
+                        placeholder="Price" 
+                        value={item.unit_price} 
+                        onChange={(e) => {
+                          const newItems = [...formData.items];
+                          newItems[idx].unit_price = parseFloat(e.target.value) || 0;
+                          setFormData({ ...formData, items: newItems });
+                        }} 
+                        className="w-24"
+                      />
+                      <Button 
+                        type="button" 
+                        variant="outline" 
+                        onClick={() => {
+                          const newItems = formData.items.filter((_, i) => i !== idx);
+                          setFormData({ ...formData, items: newItems });
+                        }}
+                      >
+                        Remove
+                      </Button>
+                    </div>
                   </div>
                 ))}
                 <Button 
@@ -323,7 +413,7 @@ const Billing = () => {
                   variant="outline" 
                   onClick={() => setFormData({
                     ...formData, 
-                    items: [...formData.items, { description: '', quantity: 1, unit_price: 0 }]
+                    items: [...formData.items, { description: '', quantity: 1, unit_price: 0, item_type: 'other' }]
                   })}
                   className="w-full"
                 >

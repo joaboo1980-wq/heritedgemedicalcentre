@@ -32,7 +32,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { toast } from 'sonner';
-import { Plus, Clock, User, Calendar as CalendarIcon, CheckCircle, XCircle, AlertCircle, MessageSquare } from 'lucide-react';
+import { Plus, Clock, User, Calendar as CalendarIcon, CheckCircle, XCircle, AlertCircle, MessageSquare, RefreshCw } from 'lucide-react';
 import { format, isSameDay, parseISO, isAfter, isBefore, startOfDay, endOfDay } from 'date-fns';
 import PermissionGuard from '@/components/layout/PermissionGuard';
 
@@ -123,10 +123,11 @@ const Appointments = () => {
   console.log('newAppointment state:', newAppointment);
 
   // Fetch appointments
-  const { data: appointments, isLoading } = useQuery({
+  const { data: appointments, isLoading, error: appointmentsError } = useQuery({
     queryKey: ['appointments'],
     queryFn: async () => {
       try {
+        console.log('[Appointments] Fetching appointments...');
         const { data, error } = await supabase
           .from('appointments')
           .select('*')
@@ -134,11 +135,11 @@ const Appointments = () => {
           .order('appointment_time', { ascending: true });
         
         if (error) {
-          console.error('Error fetching appointments:', error);
+          console.error('[Appointments] Error fetching appointments:', error);
           throw error;
         }
 
-        console.log('Raw appointments data:', data);
+        console.log('[Appointments] Raw appointments data:', data, 'Count:', data?.length || 0);
 
         // Fetch patient and doctor data separately
         const appointmentData = data || [];
@@ -149,25 +150,41 @@ const Appointments = () => {
         let doctors: Record<string, any> = {};
 
         if (patientIds.length > 0) {
-          const { data: patientData } = await supabase
-            .from('patients')
-            .select('id, first_name, last_name, patient_number')
-            .in('id', patientIds);
-          patients = (patientData || []).reduce((acc: Record<string, any>, p: any) => {
-            acc[p.id] = p;
-            return acc;
-          }, {});
+          try {
+            const { data: patientData, error: patientError } = await supabase
+              .from('patients')
+              .select('id, first_name, last_name, patient_number')
+              .in('id', patientIds);
+            if (patientError) {
+              console.error('[Appointments] Error fetching patients:', patientError);
+            } else {
+              patients = (patientData || []).reduce((acc: Record<string, any>, p: any) => {
+                acc[p.id] = p;
+                return acc;
+              }, {});
+            }
+          } catch (err) {
+            console.error('[Appointments] Exception fetching patients:', err);
+          }
         }
 
         if (doctorIds.length > 0) {
-          const { data: profileData } = await supabase
-            .from('profiles')
-            .select('user_id, full_name')
-            .in('user_id', doctorIds);
-          doctors = (profileData || []).reduce((acc: Record<string, any>, d: any) => {
-            acc[d.user_id] = d;
-            return acc;
-          }, {});
+          try {
+            const { data: profileData, error: profileError } = await supabase
+              .from('profiles')
+              .select('user_id, full_name')
+              .in('user_id', doctorIds);
+            if (profileError) {
+              console.error('[Appointments] Error fetching doctor profiles:', profileError);
+            } else {
+              doctors = (profileData || []).reduce((acc: Record<string, any>, d: any) => {
+                acc[d.user_id] = d;
+                return acc;
+              }, {});
+            }
+          } catch (err) {
+            console.error('[Appointments] Exception fetching doctor profiles:', err);
+          }
         }
 
         // Map the data together
@@ -187,17 +204,20 @@ const Appointments = () => {
           };
         });
 
-        console.log('Appointments with details:', appointmentsWithDetails);
+        console.log('[Appointments] Appointments with details:', appointmentsWithDetails);
         return appointmentsWithDetails as Appointment[];
       } catch (err) {
-        console.error('Exception in appointments queryFn:', err);
-        throw err;
+        console.error('[Appointments] Exception in appointments queryFn:', err);
+        return [];
       }
     },
+    staleTime: 0, // Treat data as immediately stale to ensure fresh refetch
+    refetchOnMount: true,
+    refetchOnWindowFocus: true,
   });
 
   // Fetch patients for dropdown
-  const { data: patients } = useQuery({
+  const { data: patientsList, error: patientsListError } = useQuery({
     queryKey: ['patients-list'],
     queryFn: async () => {
       try {
@@ -206,67 +226,100 @@ const Appointments = () => {
           .select('id, first_name, last_name, patient_number')
           .order('first_name');
         if (error) {
-          console.error('Error fetching patients:', error);
+          console.error('[Appointments] Error fetching patients list:', error);
           throw error;
         }
-        console.log('Fetched patients:', data);
+        console.log('[Appointments] Fetched patients list:', data);
         return data as Patient[];
       } catch (err) {
-        console.error('Exception in patients queryFn:', err);
-        throw err;
+        console.error('[Appointments] Exception in patients list queryFn:', err);
+        return [];
       }
     },
   });
 
-  // Fetch doctors from profiles with doctor role
-  const { data: doctors } = useQuery({
+  // Fetch doctors from user_roles
+  const { data: doctors, error: doctorsError } = useQuery({
     queryKey: ['doctors-list'],
     queryFn: async () => {
       try {
-        // Get all users with doctor role from user_roles table
+        console.log('[Appointments] Fetching registered doctors from user_roles...');
+        
+        // First fetch doctor role assignments
         const { data: doctorRoles, error: rolesError } = await supabase
           .from('user_roles')
-          .select('user_id')
+          .select('user_id, role')
           .eq('role', 'doctor');
         
         if (rolesError) {
-          console.error('Error fetching doctor roles:', rolesError);
+          console.error('[Appointments] Error fetching doctor roles:', rolesError);
+          console.error('[Appointments] RLS or permission error details:', {
+            code: rolesError.code,
+            message: rolesError.message,
+          });
           throw rolesError;
         }
-
+        
+        console.log('[Appointments] doctor_roles from user_roles:', doctorRoles, 'Count:', doctorRoles?.length || 0);
+        
         if (!doctorRoles || doctorRoles.length === 0) {
-          console.log('No doctors found with doctor role');
+          console.warn('[Appointments] No doctors found in user_roles with role="doctor"');
+          
+          // Debug: Show all roles in user_roles
+          const { data: allRoles, error: allRolesError } = await supabase
+            .from('user_roles')
+            .select('user_id, role');
+          
+          if (!allRolesError && allRoles) {
+            console.log('[Appointments] All roles in user_roles table:', allRoles);
+            const uniqueRoles = [...new Set(allRoles.map((r: any) => r.role))];
+            console.log('[Appointments] Unique roles available:', uniqueRoles);
+          }
+          
           return [];
         }
-
-        // Get the user IDs of all doctors
-        const doctorUserIds = (doctorRoles as Array<{ user_id: string }>).map((role) => role.user_id);
-        console.log('Doctor user IDs from user_roles:', doctorUserIds);
-
-        // Fetch their profiles
-        const { data: doctorProfiles, error: profilesError } = await supabase
+        
+        // Get list of doctor user IDs
+        const doctorUserIds = doctorRoles.map((dr: any) => dr.user_id);
+        console.log('[Appointments] Doctor user IDs to fetch:', doctorUserIds);
+        
+        // Now fetch the profiles for these doctor IDs
+        const { data: doctorProfiles, error: profileError } = await supabase
           .from('profiles')
           .select('user_id, full_name, email, department')
-          .in('user_id', doctorUserIds);
-
-        if (profilesError) {
-          console.error('Error fetching doctor profiles:', profilesError);
-          throw profilesError;
-        }
-
-        console.log('Doctor profiles fetched:', doctorProfiles);
-        const doctors = (doctorProfiles || []).map((profile: { user_id: string; email?: string; full_name?: string; department?: string | null }) => ({
-          user_id: profile.user_id,
-          email: profile.email || '',
-          full_name: profile.full_name || 'Unknown Doctor',
-          department: profile.department || null,
-        }));
+          .in('user_id', doctorUserIds)
+          .order('full_name', { ascending: true });
         
-        console.log('Processed doctors for dropdown:', doctors);
-        return doctors;
+        if (profileError) {
+          console.error('[Appointments] Error fetching doctor profiles:', profileError);
+          console.error('[Appointments] Profile fetch error details:', {
+            code: profileError.code,
+            message: profileError.message,
+          });
+          // Don't throw - try fallback
+        }
+        
+        console.log('[Appointments] Fetched doctor profiles from profiles table:', doctorProfiles, 'Count:', doctorProfiles?.length || 0);
+        
+        // If some doctors are missing profiles, show a warning and use what we have
+        if (!doctorProfiles || doctorProfiles.length < doctorUserIds.length) {
+          const foundIds = new Set((doctorProfiles || []).map((p: any) => p.user_id));
+          const missingIds = doctorUserIds.filter((id: string) => !foundIds.has(id));
+          
+          if (missingIds.length > 0) {
+            console.warn('[Appointments] Doctor user IDs exist in user_roles but not found in profiles table');
+            console.warn('[Appointments] Missing profiles for doctor IDs:', missingIds);
+            console.warn('[Appointments] SOLUTION: Execute the migration 20260209_create_missing_doctor_profiles.sql in Supabase');
+          }
+        }
+        
+        return doctorProfiles || [];
       } catch (err) {
-        console.error('Exception in doctors queryFn:', err);
-        toast.error(`Failed to load doctors: ${err instanceof Error ? err.message : 'Unknown error'}`);
+        console.error('[Appointments] Exception in doctors queryFn:', err);
+        if (err instanceof Error) {
+          console.error('[Appointments] Error message:', err.message);
+        }
+        // Don't show toast here - we'll display it in the Select component
         return [];
       }
     },
@@ -283,11 +336,11 @@ const Appointments = () => {
         if (!data.doctor_id) {
           throw new Error('Please select a doctor.');
         }
-        console.log('Creating appointment with data:', data);
-        console.log('Doctor ID being used:', data.doctor_id);
-        console.log('Available doctors:', doctors);
+        console.log('[Appointments] Creating appointment with data:', data);
+        console.log('[Appointments] Doctor ID being used:', data.doctor_id);
+        console.log('[Appointments] Available doctors:', doctors);
         
-        const { data: result, error } = await supabase.from('appointments').insert({
+        const insertObj = {
           patient_id: data.patient_id,
           doctor_id: data.doctor_id,
           appointment_date: data.appointment_date,
@@ -296,25 +349,37 @@ const Appointments = () => {
           reason: data.reason || null,
           department: data.department || null,
           status: 'scheduled',
-        });
+        };
+        
+        console.log('[Appointments] Insert object:', insertObj);
+        
+        const { data: result, error } = await supabase.from('appointments').insert(insertObj);
         
         if (error) {
-          console.error('Error inserting appointment:', error);
-          console.error('Error details:', {
+          console.error('[Appointments] Error inserting appointment:', error);
+          console.error('[Appointments] Error details:', {
             code: error.code,
             message: error.message,
             details: error.details,
           });
-          throw error;
+          throw new Error(`Failed to create appointment: ${error.message}`);
         }
-        console.log('Appointment created:', result);
+        console.log('[Appointments] Appointment created successfully:', result);
+        return result;
       } catch (err) {
-        console.error('Exception in createAppointmentMutation:', err);
+        console.error('[Appointments] Exception in createAppointmentMutation:', err);
         throw err;
       }
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['appointments'] });
+    onSuccess: async (result) => {
+      console.log('[Appointments] Mutation onSuccess triggered, refetching...');
+      try {
+        // Explicitly refetch to ensure we get the latest data
+        await queryClient.refetchQueries({ queryKey: ['appointments'] });
+        console.log('[Appointments] Refetch completed');
+      } catch (err) {
+        console.error('[Appointments] Error during refetch:', err);
+      }
       setIsAddDialogOpen(false);
       setNewAppointment({
         patient_id: '',
@@ -328,7 +393,8 @@ const Appointments = () => {
       toast.success('Appointment scheduled successfully');
     },
     onError: (error: Error) => {
-      toast.error(error.message);
+      console.error('[Appointments] Mutation error:', error);
+      toast.error(`Failed to schedule appointment: ${error.message}`);
     },
   });
 
@@ -350,8 +416,8 @@ const Appointments = () => {
         throw err;
       }
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['appointments'] });
+    onSuccess: async () => {
+      await queryClient.refetchQueries({ queryKey: ['appointments'] });
       toast.success('Status updated');
     },
   });
@@ -451,14 +517,24 @@ const Appointments = () => {
             Schedule and manage patient appointments
           </p>
         </div>
-        <PermissionGuard module="appointments" action="create">
-          <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-            <DialogTrigger asChild>
-              <Button>
-                <Plus className="h-4 w-4 mr-2" />
-                New Appointment
-              </Button>
-            </DialogTrigger>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={() => queryClient.refetchQueries({ queryKey: ['appointments'] })}
+            title="Refresh appointments"
+            disabled={isLoading}
+          >
+            <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
+          </Button>
+          <PermissionGuard module="appointments" action="create">
+            <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+              <DialogTrigger asChild>
+                <Button>
+                  <Plus className="h-4 w-4 mr-2" />
+                  New Appointment
+                </Button>
+              </DialogTrigger>
             <DialogContent className="sm:max-w-md">
             <DialogHeader>
               <DialogTitle>Schedule Appointment</DialogTitle>
@@ -485,7 +561,7 @@ const Appointments = () => {
                     <SelectValue placeholder="Select patient" />
                   </SelectTrigger>
                   <SelectContent>
-                    {patients?.map((p) => (
+                    {patientsList?.map((p) => (
                       <SelectItem key={p.id} value={p.id}>
                         {p.first_name} {p.last_name} ({p.patient_number})
                       </SelectItem>
@@ -496,6 +572,9 @@ const Appointments = () => {
 
               <div className="space-y-2">
                 <Label>Doctor *</Label>
+                {doctorsError && (
+                  <p className="text-xs text-red-600 font-semibold">Error loading doctors: {doctorsError.message}</p>
+                )}
                 <Select
                   value={newAppointment.doctor_id}
                   onValueChange={(value) =>
@@ -503,19 +582,19 @@ const Appointments = () => {
                   }
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder="Select doctor" />
+                    <SelectValue placeholder={!doctors || doctors.length === 0 ? "No doctors available" : "Select doctor"} />
                   </SelectTrigger>
                   <SelectContent>
                     {doctors && doctors.length > 0 ? (
-                      doctors.map((d) => (
+                      doctors.map((d: any) => (
                         <SelectItem key={d.user_id} value={d.user_id}>
                           Dr. {d.full_name} {d.department && `(${d.department})`}
                         </SelectItem>
                       ))
                     ) : (
-                      <SelectItem disabled value="">
-                        No doctors available
-                      </SelectItem>
+                      <div className="p-2 text-xs text-gray-500">
+                        {doctorsError ? 'Error loading doctors' : 'No doctors available'}
+                      </div>
                     )}
                   </SelectContent>
                 </Select>
@@ -598,10 +677,45 @@ const Appointments = () => {
                 {createAppointmentMutation.isPending ? 'Scheduling...' : 'Schedule Appointment'}
               </Button>
             </form>
-          </DialogContent>
-        </Dialog>
-      </PermissionGuard>
+            </DialogContent>
+          </Dialog>
+          </PermissionGuard>
+        </div>
       </div>
+
+      {/* Error Display */}
+      {appointmentsError && (
+        <Card className="border-red-200 bg-red-50">
+          <CardContent className="p-4">
+            <p className="text-sm text-red-800 font-semibold">Error loading appointments:</p>
+            <p className="text-sm text-red-700 mt-2">{appointmentsError.message}</p>
+            {appointmentsError instanceof Error && appointmentsError.cause && (
+              <p className="text-xs text-red-600 mt-1">Details: {String(appointmentsError.cause)}</p>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Loading State */}
+      {isLoading && (
+        <Card>
+          <CardContent className="p-4">
+            <p className="text-sm text-muted-foreground animate-pulse">Loading appointments...</p>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Debug Info */}
+      {appointments && appointments.length === 0 && !isLoading && (
+        <Card className="border-yellow-200 bg-yellow-50">
+          <CardContent className="p-4">
+            <p className="text-sm font-semibold">Debug: No appointments found</p>
+            <p className="text-xs text-muted-foreground mt-2">
+              Check browser console (F12) for [Appointments] logs to see what data is being fetched.
+            </p>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Stats */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">

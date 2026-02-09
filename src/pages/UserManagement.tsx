@@ -201,37 +201,75 @@ const UserManagement = () => {
   // Add role mutation
   const addRoleMutation = useMutation({
     mutationFn: async ({ userId, role }: { userId: string; role: AppRole }) => {
-      const { error } = await supabase.from('user_roles').insert({
-        user_id: userId,
-        role: role,
-      });
-      if (error) throw error;
+      if (!userId?.trim()) {
+        console.warn('[UserManagement] User ID is required');
+        throw new Error('User ID is required');
+      }
+      if (!role?.trim()) {
+        console.warn('[UserManagement] Role is required');
+        throw new Error('Role is required');
+      }
+
+      try {
+        const { error } = await supabase.from('user_roles').insert({
+          user_id: userId,
+          role: role,
+        });
+        if (error) {
+          console.error('[UserManagement] Error adding role:', error);
+          throw error;
+        }
+        console.log('[UserManagement] Role added successfully');
+      } catch (err) {
+        console.error('[UserManagement] Role addition failed:', err);
+        throw err;
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['staff-management'] });
       toast.success('Role added successfully');
     },
     onError: (error: Error) => {
-      toast.error(error.message);
+      console.error('[UserManagement] Mutation error:', error.message);
+      toast.error(`Failed to add role: ${error.message}`);
     },
   });
 
   // Remove role mutation
   const removeRoleMutation = useMutation({
     mutationFn: async ({ userId, role }: { userId: string; role: AppRole }) => {
-      const { error } = await supabase
-        .from('user_roles')
-        .delete()
-        .eq('user_id', userId)
-        .eq('role', role);
-      if (error) throw error;
+      if (!userId?.trim()) {
+        console.warn('[UserManagement] User ID is required');
+        throw new Error('User ID is required');
+      }
+      if (!role?.trim()) {
+        console.warn('[UserManagement] Role is required');
+        throw new Error('Role is required');
+      }
+
+      try {
+        const { error } = await supabase
+          .from('user_roles')
+          .delete()
+          .eq('user_id', userId)
+          .eq('role', role);
+        if (error) {
+          console.error('[UserManagement] Error removing role:', error);
+          throw error;
+        }
+        console.log('[UserManagement] Role removed successfully');
+      } catch (err) {
+        console.error('[UserManagement] Role removal failed:', err);
+        throw err;
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['staff-management'] });
       toast.success('Role removed successfully');
     },
     onError: (error: Error) => {
-      toast.error(error.message);
+      console.error('[UserManagement] Mutation error:', error.message);
+      toast.error(`Failed to remove role: ${error.message}`);
     },
   });
 

@@ -92,54 +92,64 @@ const ReceptionDashboard = () => {
   const { data: waitingPatients, isLoading: loadingWaiting } = useQuery({
     queryKey: ['reception-waiting-patients', today],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('appointments')
-        .select('id, patient_id, doctor_id')
-        .eq('appointment_date', today)
-        .eq('status', 'waiting') as { data: any; error: any };
-      if (error) throw error;
-      
-      // Fetch patient and doctor data separately
-      const appointmentData = data || [];
-      const patientIds = [...new Set(appointmentData.map((apt: any) => apt.patient_id).filter(Boolean))] as string[];
-      const doctorIds = [...new Set(appointmentData.map((apt: any) => apt.doctor_id).filter(Boolean))] as string[];
-      
-      let patients: any = {};
-      let doctors: any = {};
-      
-      if (patientIds.length > 0) {
-        const { data: patientData } = await supabase
-          .from('patients')
-          .select('id, first_name, last_name')
-          .in('id', patientIds);
-        patients = (patientData || []).reduce((acc: any, p: any) => {
-          acc[p.id] = p;
-          return acc;
-        }, {});
+      try {
+        const { data, error } = await supabase
+          .from('appointments')
+          .select('id, patient_id, doctor_id, status, appointment_time')
+          .eq('appointment_date', today)
+          .eq('status', 'waiting');
+        
+        if (error) {
+          console.error('[ReceptionDashboard] Error fetching waiting patients:', error);
+          throw error;
+        }
+        
+        const appointmentData = data || [];
+        const patientIds = [...new Set(appointmentData.map((apt: any) => apt.patient_id).filter(Boolean))] as string[];
+        const doctorIds = [...new Set(appointmentData.map((apt: any) => apt.doctor_id).filter(Boolean))] as string[];
+        
+        let patients: any = {};
+        let doctors: any = {};
+        
+        if (patientIds.length > 0) {
+          const { data: patientData } = await supabase
+            .from('patients')
+            .select('id, first_name, last_name')
+            .in('id', patientIds);
+          patients = (patientData || []).reduce((acc: any, p: any) => {
+            acc[p.id] = p;
+            return acc;
+          }, {});
+        }
+        
+        if (doctorIds.length > 0) {
+          const { data: doctorData } = await supabase
+            .from('profiles')
+            .select('id, full_name')
+            .in('id', doctorIds);
+          doctors = (doctorData || []).reduce((acc: any, d: any) => {
+            acc[d.id] = d;
+            return acc;
+          }, {});
+        }
+        
+        return appointmentData.map((apt: any) => {
+          const patient = patients[apt.patient_id];
+          const doctor = doctors[apt.doctor_id];
+          return {
+            id: apt.id,
+            patient_name: patient ? `${patient.first_name} ${patient.last_name}` : 'Unknown',
+            doctor_name: doctor?.full_name || 'Unknown',
+            appointment_time: apt.appointment_time,
+            status: apt.status,
+          };
+        });
+      } catch (err) {
+        console.error('[ReceptionDashboard] Waiting patients query failed:', err);
+        return [];
       }
-      
-      if (doctorIds.length > 0) {
-        const { data: doctorData } = await supabase
-          .from('profiles')
-          .select('id, full_name')
-          .in('id', doctorIds);
-        doctors = (doctorData || []).reduce((acc: any, d: any) => {
-          acc[d.id] = d;
-          return acc;
-        }, {});
-      }
-      
-      return appointmentData.map((apt: any) => {
-        const patient = patients[apt.patient_id];
-        const doctor = doctors[apt.doctor_id];
-        return {
-          id: apt.id,
-          patient_name: patient ? `${patient.first_name} ${patient.last_name}` : 'Unknown',
-          doctor_name: doctor?.full_name || 'Unknown',
-        };
-      });
     },
-    refetchInterval: 60000,
+    refetchInterval: 30000, // Refetch every 30 seconds for reception updates
   });
 
   // Fetch new registrations today
