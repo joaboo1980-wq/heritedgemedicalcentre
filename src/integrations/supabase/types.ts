@@ -67,6 +67,183 @@ export type Database = {
           },
         ]
       }
+      bank_reconciliations: {
+        Row: {
+          bank_statement_balance: number
+          book_balance: number
+          created_at: string
+          id: string
+          notes: string | null
+          reconciled_by: string | null
+          reconciliation_date: string
+          reconciliation_status: string
+          updated_at: string
+        }
+        Insert: {
+          bank_statement_balance: number
+          book_balance: number
+          created_at?: string
+          id?: string
+          notes?: string | null
+          reconciled_by?: string | null
+          reconciliation_date: string
+          reconciliation_status?: string
+          updated_at?: string
+        }
+        Update: {
+          bank_statement_balance?: number
+          book_balance?: number
+          created_at?: string
+          id?: string
+          notes?: string | null
+          reconciled_by?: string | null
+          reconciliation_date?: string
+          reconciliation_status?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      budgets: {
+        Row: {
+          budget_year: number
+          budgeted_amount: number
+          category: string
+          created_at: string
+          created_by: string | null
+          id: string
+          is_active: boolean
+          notes: string | null
+          spent_amount: number
+          updated_at: string
+        }
+        Insert: {
+          budget_year?: number
+          budgeted_amount: number
+          category: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          is_active?: boolean
+          notes?: string | null
+          spent_amount?: number
+          updated_at?: string
+        }
+        Update: {
+          budget_year?: number
+          budgeted_amount?: number
+          category?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          is_active?: boolean
+          notes?: string | null
+          spent_amount?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      chart_of_accounts: {
+        Row: {
+          account_code: string
+          account_name: string
+          account_type: string
+          balance: number
+          created_at: string
+          description: string | null
+          id: string
+          is_active: boolean
+          updated_at: string
+        }
+        Insert: {
+          account_code: string
+          account_name: string
+          account_type: string
+          balance?: number
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_active?: boolean
+          updated_at?: string
+        }
+        Update: {
+          account_code?: string
+          account_name?: string
+          account_type?: string
+          balance?: number
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_active?: boolean
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      financial_transactions: {
+        Row: {
+          account_code_id: string | null
+          amount: number
+          category: string
+          created_at: string
+          created_by: string | null
+          description: string
+          id: string
+          invoice_id: string | null
+          notes: string | null
+          payment_method: string | null
+          reference_number: string | null
+          transaction_date: string
+          transaction_type: string
+          updated_at: string
+        }
+        Insert: {
+          account_code_id?: string | null
+          amount: number
+          category: string
+          created_at?: string
+          created_by?: string | null
+          description: string
+          id?: string
+          invoice_id?: string | null
+          notes?: string | null
+          payment_method?: string | null
+          reference_number?: string | null
+          transaction_date: string
+          transaction_type: string
+          updated_at?: string
+        }
+        Update: {
+          account_code_id?: string | null
+          amount?: number
+          category?: string
+          created_at?: string
+          created_by?: string | null
+          description?: string
+          id?: string
+          invoice_id?: string | null
+          notes?: string | null
+          payment_method?: string | null
+          reference_number?: string | null
+          transaction_date?: string
+          transaction_type?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "financial_transactions_account_code_id_fkey"
+            columns: ["account_code_id"]
+            isOneToOne: false
+            referencedRelation: "chart_of_accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "financial_transactions_invoice_id_fkey"
+            columns: ["invoice_id"]
+            isOneToOne: false
+            referencedRelation: "invoices"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       invoice_items: {
         Row: {
           created_at: string
@@ -487,6 +664,47 @@ export type Database = {
             columns: ["invoice_id"]
             isOneToOne: false
             referencedRelation: "invoices"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      reconciliation_items: {
+        Row: {
+          amount: number
+          created_at: string
+          description: string
+          id: string
+          item_date: string | null
+          item_type: string
+          reconciliation_id: string
+          reference_number: string | null
+        }
+        Insert: {
+          amount: number
+          created_at?: string
+          description: string
+          id?: string
+          item_date?: string | null
+          item_type: string
+          reconciliation_id: string
+          reference_number?: string | null
+        }
+        Update: {
+          amount?: number
+          created_at?: string
+          description?: string
+          id?: string
+          item_date?: string | null
+          item_type?: string
+          reconciliation_id?: string
+          reference_number?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "reconciliation_items_reconciliation_id_fkey"
+            columns: ["reconciliation_id"]
+            isOneToOne: false
+            referencedRelation: "bank_reconciliations"
             referencedColumns: ["id"]
           },
         ]

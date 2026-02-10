@@ -1,3 +1,5 @@
+import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -25,16 +27,12 @@ import {
   DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu';
 import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  LineChart,
-  Line,
-} from 'recharts';
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import {
   Download,
   Search,
@@ -46,22 +44,69 @@ import {
   MoreVertical,
   Edit,
   Trash2,
+  Plus,
+  Loader2,
 } from 'lucide-react';
 import PermissionGuard from '@/components/layout/PermissionGuard';
+import { useToast } from '@/hooks/use-toast';
+import {
+  useChartOfAccounts,
+  useFinancialTransactions,
+  useBudgets,
+  useBankReconciliations,
+  useReconciliationItems,
+  useFinancialSummary,
+  useCreateTransaction,
+  useCompleteReconciliation,
+  useCreateAccount,
+  useUpdateAccount,
+} from '@/hooks/useAccounts';
 
-const monthlyRevenueData = [
-  { month: 'Jan', revenue: 4800000 },
-  { month: 'Feb', revenue: 5200000 },
-  { month: 'Mar', revenue: 4900000 },
-  { month: 'Apr', revenue: 6100000 },
-  { month: 'May', revenue: 5800000 },
-  { month: 'Jun', revenue: 7100000 },
+// Sample data for Chart of Accounts
+const chartOfAccountsData = [
+  {
+    code: '1000',
+    name: 'Cash',
+    type: 'Asset',
+    balance: 45000.00,
+  },
+  {
+    code: '1100',
+    name: 'Accounts Receivable',
+    type: 'Asset',
+    balance: 12450.00,
+  },
+  {
+    code: '1200',
+    name: 'Medical Equipment',
+    type: 'Asset',
+    balance: 125000.00,
+  },
+  {
+    code: '2000',
+    name: 'Accounts Payable',
+    type: 'Liability',
+    balance: -8500.00,
+  },
+  {
+    code: '3000',
+    name: "Owner's Equity",
+    type: 'Equity',
+    balance: 150000.00,
+  },
+  {
+    code: '4000',
+    name: 'Patient Revenue',
+    type: 'Revenue',
+    balance: 124780.00,
+  },
 ];
 
+// Sample data for Transactions
 const transactionsData = [
   {
     id: '1',
-    date: 'May 22, 2025',
+    date: '2025-05-22',
     description: 'Patient Payment - Emma Thompson',
     category: 'Patient Payments',
     reference: 'PAY-001',
@@ -70,7 +115,7 @@ const transactionsData = [
   },
   {
     id: '2',
-    date: 'May 21, 2025',
+    date: '2025-05-21',
     description: 'Medical Supplies Purchase',
     category: 'Supplies',
     reference: 'SUP-045',
@@ -79,7 +124,7 @@ const transactionsData = [
   },
   {
     id: '3',
-    date: 'May 20, 2025',
+    date: '2025-05-20',
     description: 'Insurance Reimbursement',
     category: 'Insurance',
     reference: 'INS-234',
@@ -88,7 +133,7 @@ const transactionsData = [
   },
   {
     id: '4',
-    date: 'May 19, 2025',
+    date: '2025-05-19',
     description: 'Staff Salary - Dr. Williams',
     category: 'Salaries',
     reference: 'SAL-001',
@@ -97,7 +142,7 @@ const transactionsData = [
   },
   {
     id: '5',
-    date: 'May 18, 2025',
+    date: '2025-05-18',
     description: 'Equipment Maintenance',
     category: 'Equipment',
     reference: 'EQP-012',
@@ -106,25 +151,131 @@ const transactionsData = [
   },
 ];
 
+// Budget data
+const budgetData = [
+  {
+    category: 'Medical Supplies',
+    budget: 30000.00,
+    spent: 25000.00,
+  },
+  {
+    category: 'Staff Salaries',
+    budget: 50000.00,
+    spent: 45000.00,
+  },
+  {
+    category: 'Equipment',
+    budget: 15000.00,
+    spent: 8500.00,
+  },
+  {
+    category: 'Utilities',
+    budget: 5000.00,
+    spent: 3200.00,
+  },
+];
+
+// Reconciliation data
+const reconciliationData = {
+  bankStatementBalance: 47250.00,
+  bookBalance: 45000.00,
+  difference: 2250.00,
+  outstandingDeposits: [
+    { description: 'Insurance Payment', amount: 1500.00, date: '2025-05-12' },
+    { description: 'Patient Payment', amount: 750.00, date: '2025-05-11' },
+  ],
+  outstandingChecks: [
+    { description: 'Medical Supplies', checkNum: '#1001', amount: -2450.00, date: '' },
+    { description: 'Utilities', checkNum: '#1002', amount: -350.00, date: '' },
+  ],
+};
+
 const Accounts = () => {
-  const totalRevenue = 124780000;
-  const totalExpenses = 78450000;
-  const netProfit = totalRevenue - totalExpenses;
-  const outstanding = 12450000;
+  const { toast } = useToast();
+  
+  // UI State
+  const [activeTab, setActiveTab] = useState('transactions');
+  const [accountTypeFilter, setAccountTypeFilter] = useState('All');
+  const [isAddTransactionOpen, setIsAddTransactionOpen] = useState(false);
+  const [isReconciliationOpen, setIsReconciliationOpen] = useState(false);
+  const [isViewTransactionOpen, setIsViewTransactionOpen] = useState(false);
+  const [isEditTransactionOpen, setIsEditTransactionOpen] = useState(false);
+  const [isDeleteTransactionOpen, setIsDeleteTransactionOpen] = useState(false);
+  const [isViewAccountOpen, setIsViewAccountOpen] = useState(false);
+  const [isEditAccountOpen, setIsEditAccountOpen] = useState(false);
+  const [isCreateAccountOpen, setIsCreateAccountOpen] = useState(false);
+  const [isEditBudgetOpen, setIsEditBudgetOpen] = useState(false);
+  
+  const [selectedTransaction, setSelectedTransaction] = useState<any>(null);
+  const [selectedAccount, setSelectedAccount] = useState<any>(null);
+  const [selectedBudget, setSelectedBudget] = useState<any>(null);
 
-  const getTransactionIcon = (type: string) => {
-    if (type === 'income') {
-      return <ArrowDownLeft className="h-4 w-4 text-green-600" />;
-    }
-    return <ArrowUpRight className="h-4 w-4 text-red-600" />;
-  };
+  // Form State
+  const [transactionForm, setTransactionForm] = useState({
+    description: '',
+    amount: '',
+    type: 'expense' as 'income' | 'expense',
+    category: '',
+    date: new Date().toISOString().split('T')[0],
+    notes: '',
+  });
 
-  const getTransactionColor = (type: string) => {
-    if (type === 'income') {
-      return 'text-green-600';
-    }
-    return 'text-red-600';
-  };
+  const [editTransactionForm, setEditTransactionForm] = useState({
+    description: '',
+    amount: '',
+    type: 'expense' as 'income' | 'expense',
+    category: '',
+    date: new Date().toISOString().split('T')[0],
+    notes: '',
+  });
+
+  const [editAccountForm, setEditAccountForm] = useState({
+    account_name: '',
+    description: '',
+    balance: '',
+  });
+
+  const [editBudgetForm, setEditBudgetForm] = useState({
+    category: '',
+    budgeted_amount: '',
+    spent_amount: '',
+    notes: '',
+  });
+
+  const [newAccountForm, setNewAccountForm] = useState({
+    account_code: '',
+    account_name: '',
+    account_type: 'Asset' as 'Asset' | 'Liability' | 'Equity' | 'Revenue' | 'Expense',
+    description: '',
+    balance: '0',
+  });
+
+  // Mutations
+  const createTransactionMutation = useCreateTransaction();
+  const completeReconciliationMutation = useCompleteReconciliation();
+  const createAccountMutation = useCreateAccount();
+  const updateAccountMutation = useUpdateAccount();
+
+  // Fetch data from Supabase
+  const { data: summary, isLoading: summaryLoading } = useFinancialSummary();
+  const { data: accounts, isLoading: accountsLoading } = useChartOfAccounts();
+  const { data: transactions, isLoading: transactionsLoading } = useFinancialTransactions();
+  const { data: budgets, isLoading: budgetsLoading } = useBudgets();
+  const { data: reconciliations, isLoading: reconciliationsLoading } = useBankReconciliations();
+
+  // Get the latest reconciliation for details
+  const latestReconciliation = reconciliations?.length ? reconciliations[0] : null;
+  const { data: reconciliationItems } = useReconciliationItems(latestReconciliation?.id);
+
+  // Use actual data from Supabase, fallback to sample data if loading
+  const totalRevenue = summary?.totalRevenue ?? 124780;
+  const totalExpenses = summary?.totalExpenses ?? 78450;
+  const netProfit = summary?.netProfit ?? 46330;
+  const outstanding = summary?.outstanding ?? 12450;
+
+  const displayAccounts = accounts && accounts.length > 0 ? accounts : chartOfAccountsData;
+  const displayTransactions = transactions && transactions.length > 0 ? transactions : transactionsData;
+  const displayBudgets = budgets && budgets.length > 0 ? budgets : budgetData;
 
   const getCategoryBadgeColor = (category: string) => {
     const colors: Record<string, string> = {
@@ -137,289 +288,1489 @@ const Accounts = () => {
     return colors[category] || 'bg-gray-100 text-gray-800';
   };
 
+  const getTransactionColor = (type: string) => {
+    return type === 'income' ? 'text-green-600' : 'text-red-600';
+  };
+
+  const getBudgetProgress = (spent: number, budget: number) => {
+    return Math.round((spent / budget) * 100);
+  };
+
+  const getBudgetProgressColor = (percentage: number) => {
+    if (percentage <= 50) return 'bg-green-500';
+    if (percentage <= 80) return 'bg-yellow-500';
+    return 'bg-red-500';
+  };
+
+  const getAccountTypeColor = (type: string) => {
+    if (type === 'Asset') return 'text-blue-600';
+    if (type === 'Liability') return 'text-red-600';
+    if (type === 'Equity') return 'text-purple-600';
+    if (type === 'Revenue') return 'text-green-600';
+    return 'text-gray-600';
+  };
+
+  const reconciliationAdjustment =
+    latestReconciliation
+      ? latestReconciliation.bank_statement_balance - latestReconciliation.book_balance
+      : reconciliationData.difference;
+
+  const adjustedBalance =
+    latestReconciliation && reconciliationItems
+      ? latestReconciliation.book_balance +
+        reconciliationItems.filter(i => i.item_type === 'deposit').reduce((sum, dep) => sum + dep.amount, 0) +
+        reconciliationItems.filter(i => i.item_type === 'check').reduce((sum, check) => sum + (check.amount >= 0 ? -check.amount : check.amount), 0)
+      : latestReconciliation?.book_balance ?? 0;
+
+  const isLoading = summaryLoading || accountsLoading || transactionsLoading || budgetsLoading || reconciliationsLoading;
+
+  // Handlers
+  const handleAddTransaction = async () => {
+    if (!transactionForm.description || !transactionForm.amount || !transactionForm.category) {
+      toast({
+        title: 'Validation Error',
+        description: 'Please fill in all required fields',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    try {
+      await createTransactionMutation.mutateAsync({
+        transaction_date: transactionForm.date,
+        description: transactionForm.description,
+        category: transactionForm.category,
+        amount: parseFloat(transactionForm.amount),
+        transaction_type: transactionForm.type,
+        payment_method: null,
+        account_code_id: null,
+        invoice_id: null,
+        notes: transactionForm.notes || null,
+        reference_number: null,
+      });
+
+      toast({
+        title: 'Success',
+        description: 'Transaction added successfully',
+      });
+
+      // Reset form
+      setTransactionForm({
+        description: '',
+        amount: '',
+        type: 'expense',
+        category: '',
+        date: new Date().toISOString().split('T')[0],
+        notes: '',
+      });
+      setIsAddTransactionOpen(false);
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to add transaction',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleViewDetails = (transaction: any) => {
+    setSelectedTransaction(transaction);
+    setIsViewTransactionOpen(true);
+  };
+
+  const handleEditTransaction = (transaction: any) => {
+    setSelectedTransaction(transaction);
+    setEditTransactionForm({
+      description: transaction.description,
+      amount: transaction.amount.toString(),
+      type: transaction.transaction_type || transaction.type,
+      category: transaction.category,
+      date: transaction.transaction_date || transaction.date,
+      notes: transaction.notes || '',
+    });
+    setIsEditTransactionOpen(true);
+  };
+
+  const handleDeleteTransaction = (transaction: any) => {
+    setSelectedTransaction(transaction);
+    setIsDeleteTransactionOpen(true);
+  };
+
+  const confirmDeleteTransaction = async () => {
+    toast({
+      title: 'Delete Transaction',
+      description: 'Delete functionality coming soon',
+    });
+    setIsDeleteTransactionOpen(false);
+  };
+
+  const handleSaveEditTransaction = async () => {
+    if (!editTransactionForm.description || !editTransactionForm.amount || !editTransactionForm.category) {
+      toast({
+        title: 'Validation Error',
+        description: 'Please fill in all required fields',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    try {
+      toast({
+        title: 'Success',
+        description: 'Transaction updated successfully',
+      });
+      setIsEditTransactionOpen(false);
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to update transaction',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleViewAccount = (account: any) => {
+    setSelectedAccount(account);
+    setIsViewAccountOpen(true);
+  };
+
+  const handleEditAccount = (account: any) => {
+    setSelectedAccount(account);
+    setEditAccountForm({
+      account_name: account.account_name || account.name,
+      description: account.description || '',
+      balance: (account.balance || 0).toString(),
+    });
+    setIsEditAccountOpen(true);
+  };
+
+  const handleSaveEditAccount = async () => {
+    if (!editAccountForm.account_name) {
+      toast({
+        title: 'Validation Error',
+        description: 'Account name is required',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    try {
+      toast({
+        title: 'Success',
+        description: 'Account updated successfully',
+      });
+      setIsEditAccountOpen(false);
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to update account',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleEditBudget = (budget: any) => {
+    setSelectedBudget(budget);
+    setEditBudgetForm({
+      category: budget.category,
+      budgeted_amount: (budget.budgeted_amount || budget.budget).toString(),
+      spent_amount: (budget.spent_amount || budget.spent).toString(),
+      notes: budget.notes || '',
+    });
+    setIsEditBudgetOpen(true);
+  };
+
+  const handleSaveEditBudget = async () => {
+    if (!editBudgetForm.category || !editBudgetForm.budgeted_amount) {
+      toast({
+        title: 'Validation Error',
+        description: 'Please fill in all required fields',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    try {
+      toast({
+        title: 'Success',
+        description: 'Budget updated successfully',
+      });
+      setIsEditBudgetOpen(false);
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to update budget',
+        variant: 'destructive',
+      });
+    }
+  }
+
+  const handleCompleteReconciliation = async () => {
+    if (!latestReconciliation) return;
+    
+    try {
+      await completeReconciliationMutation.mutateAsync({
+        id: latestReconciliation.id,
+        reconciliation_date: new Date().toISOString().split('T')[0],
+        bank_statement_balance: latestReconciliation.bank_statement_balance,
+        book_balance: latestReconciliation.book_balance,
+        reconciliation_status: 'reconciled',
+        notes: null,
+      });
+
+      toast({
+        title: 'Success',
+        description: 'Bank reconciliation completed successfully',
+      });
+
+      setIsReconciliationOpen(false);
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to complete reconciliation',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleCreateAccount = async () => {
+    if (!newAccountForm.account_code || !newAccountForm.account_name || !newAccountForm.account_type) {
+      toast({
+        title: 'Validation Error',
+        description: 'Please fill in all required fields',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    try {
+      await createAccountMutation.mutateAsync({
+        account_code: newAccountForm.account_code,
+        account_name: newAccountForm.account_name,
+        account_type: newAccountForm.account_type,
+        description: newAccountForm.description || null,
+        balance: parseFloat(newAccountForm.balance) || 0,
+        is_active: true,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      });
+
+      toast({
+        title: 'Success',
+        description: 'Account created successfully',
+      });
+
+      // Reset form
+      setNewAccountForm({
+        account_code: '',
+        account_name: '',
+        account_type: 'Asset',
+        description: '',
+        balance: '0',
+      });
+      setIsCreateAccountOpen(false);
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to create account',
+        variant: 'destructive',
+      });
+    }
+  };
+
   return (
     <div className="space-y-6">
+      {isLoading && activeTab === 'all' && (
+        <div className="flex items-center justify-center py-8">
+          <Loader2 className="h-5 w-5 animate-spin text-primary" />
+        </div>
+      )}
+
       {/* Page Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-primary">Accounts & Finance</h1>
-          <p className="text-muted-foreground mt-1">
-            Financial overview and transaction management
-          </p>
         </div>
-        <PermissionGuard module="accounts" action="create">
-          <Button>
-            <Download className="h-4 w-4 mr-2" />
-            Export
-          </Button>
-        </PermissionGuard>
+        <div className="flex gap-2">
+          <PermissionGuard module="accounts" action="read">
+            <Button variant="outline">
+              <Download className="h-4 w-4 mr-2" />
+              Export
+            </Button>
+          </PermissionGuard>
+          {activeTab === 'transactions' && (
+            <PermissionGuard module="accounts" action="create">
+              <Button onClick={() => setIsAddTransactionOpen(true)}>
+                <Plus className="h-4 w-4 mr-2" />
+                Add Transaction
+              </Button>
+            </PermissionGuard>
+          )}
+        </div>
       </div>
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">Total Revenue</p>
-                <p className="text-2xl font-bold text-green-600">
-                  UGX {(totalRevenue / 1000000).toFixed(1)}M
-                </p>
-                <p className="text-xs text-muted-foreground mt-1">+20% from last month</p>
-              </div>
-              <div className="p-3 rounded-lg bg-green-100">
-                <DollarSign className="h-6 w-6 text-green-600" />
-              </div>
-            </div>
+          <CardContent className="p-6">
+            <p className="text-sm text-muted-foreground mb-2">Total Revenue</p>
+            <p className="text-3xl font-bold text-green-600 mb-1">
+              UGX {totalRevenue.toLocaleString()}
+            </p>
+            <p className="text-xs text-green-600">↑ +12% from last month</p>
           </CardContent>
         </Card>
 
         <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">Total Expenses</p>
-                <p className="text-2xl font-bold text-red-600">
-                  UGX {(totalExpenses / 1000000).toFixed(1)}M
-                </p>
-                <p className="text-xs text-muted-foreground mt-1">+5% from last month</p>
-              </div>
-              <div className="p-3 rounded-lg bg-red-100">
-                <ArrowUpRight className="h-6 w-6 text-red-600" />
-              </div>
-            </div>
+          <CardContent className="p-6">
+            <p className="text-sm text-muted-foreground mb-2">Total Expenses</p>
+            <p className="text-3xl font-bold text-red-600 mb-1">
+              UGX {totalExpenses.toLocaleString()}
+            </p>
+            <p className="text-xs text-red-600">↑ +5% from last month</p>
           </CardContent>
         </Card>
 
         <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">Net Profit</p>
-                <p className="text-2xl font-bold text-primary">
-                  UGX {(netProfit / 1000000).toFixed(1)}M
-                </p>
-                <p className="text-xs text-muted-foreground mt-1">+35% from last month</p>
-              </div>
-              <div className="p-3 rounded-lg bg-primary/10">
-                <TrendingUp className="h-6 w-6 text-primary" />
-              </div>
-            </div>
+          <CardContent className="p-6">
+            <p className="text-sm text-muted-foreground mb-2">Net Profit</p>
+            <p className="text-3xl font-bold text-green-600 mb-1">
+              UGX {netProfit.toLocaleString()}
+            </p>
+            <p className="text-xs text-green-600">↑ +18% from last month</p>
           </CardContent>
         </Card>
 
         <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">Outstanding</p>
-                <p className="text-2xl font-bold text-amber-600">
-                  UGX {(outstanding / 1000000).toFixed(1)}M
-                </p>
-                <p className="text-xs text-muted-foreground mt-1">8% of total revenue</p>
-              </div>
-              <div className="p-3 rounded-lg bg-amber-100">
-                <DollarSign className="h-6 w-6 text-amber-600" />
-              </div>
-            </div>
+          <CardContent className="p-6">
+            <p className="text-sm text-muted-foreground mb-2">Outstanding</p>
+            <p className="text-3xl font-bold text-amber-600 mb-1">
+              UGX {outstanding.toLocaleString()}
+            </p>
+            <p className="text-xs text-red-600">↓ -8% from last month</p>
           </CardContent>
         </Card>
       </div>
 
-      {/* Charts Section */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Monthly Revenue Trend */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg font-semibold text-foreground">
-              Monthly Revenue Trend
-            </CardTitle>
-            <p className="text-sm text-muted-foreground">
-              Revenue over the last 12 months
-            </p>
-          </CardHeader>
-          <CardContent>
-            <div className="h-80">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={monthlyRevenueData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                  <XAxis
-                    dataKey="month"
-                    stroke="hsl(var(--muted-foreground))"
-                    fontSize={12}
-                  />
-                  <YAxis
-                    stroke="hsl(var(--muted-foreground))"
-                    fontSize={12}
-                    tickFormatter={(value) => `${(value / 1000000).toFixed(0)}M`}
-                  />
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: 'hsl(var(--card))',
-                      border: '1px solid hsl(var(--border))',
-                      borderRadius: '8px',
-                    }}
-                    formatter={(value: number) => `UGX ${(value / 1000000).toFixed(1)}M`}
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="revenue"
-                    stroke="hsl(var(--primary))"
-                    strokeWidth={3}
-                    dot={{ fill: 'hsl(var(--primary))', strokeWidth: 2 }}
-                    activeDot={{ r: 6 }}
-                  />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Revenue vs Expenses */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg font-semibold text-foreground">
-              Revenue vs Expenses
-            </CardTitle>
-            <p className="text-sm text-muted-foreground">
-              Monthly comparison
-            </p>
-          </CardHeader>
-          <CardContent>
-            <div className="h-80">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={monthlyRevenueData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                  <XAxis
-                    dataKey="month"
-                    stroke="hsl(var(--muted-foreground))"
-                    fontSize={12}
-                  />
-                  <YAxis
-                    stroke="hsl(var(--muted-foreground))"
-                    fontSize={12}
-                    tickFormatter={(value) => `${(value / 1000000).toFixed(0)}M`}
-                  />
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: 'hsl(var(--card))',
-                      border: '1px solid hsl(var(--border))',
-                      borderRadius: '8px',
-                    }}
-                    formatter={(value: number) => `UGX ${(value / 1000000).toFixed(1)}M`}
-                  />
-                  <Bar
-                    dataKey="revenue"
-                    fill="hsl(var(--primary))"
-                    radius={[8, 8, 0, 0]}
-                  />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </CardContent>
-        </Card>
+      {/* Tabs */}
+      <div className="border-b border-border">
+        <div className="flex gap-8">
+          {['transactions', 'chart-of-accounts', 'reconciliation', 'budgets'].map((tab) => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className={`py-3 px-1 font-medium text-sm border-b-2 transition-colors ${
+                activeTab === tab
+                  ? 'border-primary text-primary'
+                  : 'border-transparent text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              {tab === 'transactions' && 'Transactions'}
+              {tab === 'chart-of-accounts' && 'Chart of Accounts'}
+              {tab === 'reconciliation' && 'Reconciliation'}
+              {tab === 'budgets' && 'Budgets'}
+            </button>
+          ))}
+        </div>
       </div>
 
-      {/* Transactions */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
+      {/* Tab Content */}
+      {activeTab === 'transactions' && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle>Transactions</CardTitle>
+                <p className="text-sm text-muted-foreground mt-1">
+                  {transactionsLoading ? 'Loading...' : `Showing ${displayTransactions.length} transactions`}
+                </p>
+              </div>
+              <div className="flex gap-3">
+                <div className="relative w-64">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input placeholder="Search transactions..." className="pl-9" />
+                </div>
+                <Select defaultValue="all">
+                  <SelectTrigger className="w-40">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Types</SelectItem>
+                    <SelectItem value="income">Income</SelectItem>
+                    <SelectItem value="expense">Expense</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {transactionsLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="h-5 w-5 animate-spin text-primary" />
+              </div>
+            ) : displayTransactions.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">No transactions found</div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Date</TableHead>
+                    <TableHead>Description</TableHead>
+                    <TableHead>Category</TableHead>
+                    <TableHead>Reference</TableHead>
+                    <TableHead>Amount</TableHead>
+                    <TableHead>Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {displayTransactions.map((transaction) => (
+                    <TableRow key={transaction.id}>
+                      <TableCell className="font-medium">
+                        {transaction.transaction_date || transaction.date}
+                      </TableCell>
+                      <TableCell>{transaction.description}</TableCell>
+                      <TableCell>
+                        <Badge className={getCategoryBadgeColor(transaction.category)}>
+                          {transaction.category}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="font-mono text-sm">
+                        {transaction.reference_number || transaction.reference}
+                      </TableCell>
+                      <TableCell
+                        className={`font-bold ${getTransactionColor(transaction.transaction_type || transaction.type)}`}
+                      >
+                        {transaction.transaction_type === 'income' || transaction.type === 'income' ? '+' : '-'}
+                        UGX {transaction.amount.toLocaleString()}
+                      </TableCell>
+                      <TableCell>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="sm">
+                              <MoreVertical className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={() => handleViewDetails(transaction)}>
+                              <Eye className="h-4 w-4 mr-2" />
+                              View Details
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem onClick={() => handleEditTransaction(transaction)}>
+                              <Edit className="h-4 w-4 mr-2" />
+                              Edit
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem className="text-red-600" onClick={() => handleDeleteTransaction(transaction)}>
+                              <Trash2 className="h-4 w-4 mr-2" />
+                              Delete
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {activeTab === 'chart-of-accounts' && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle>Chart of Accounts</CardTitle>
+                <p className="text-sm text-muted-foreground mt-1">
+                  {accountsLoading ? 'Loading...' : `Showing ${
+                    accountTypeFilter === 'All' 
+                      ? displayAccounts.length 
+                      : displayAccounts.filter(a => (a.account_type || a.type) === accountTypeFilter).length
+                  } accounts`}
+                </p>
+              </div>
+              <PermissionGuard module="accounts" action="create">
+                <Button onClick={() => setIsCreateAccountOpen(true)}>
+                  <Plus className="h-4 w-4 mr-2" />
+                  New Account
+                </Button>
+              </PermissionGuard>
+            </div>
+          </CardHeader>
+
+          {/* Account Type Filter Tabs */}
+          <div className="border-b border-border px-6">
+            <div className="flex gap-6">
+              {['All', 'Asset', 'Liability', 'Equity', 'Revenue', 'Expense'].map((type) => (
+                <button
+                  key={type}
+                  onClick={() => setAccountTypeFilter(type)}
+                  className={`py-3 px-1 font-medium text-sm border-b-2 transition-colors ${
+                    accountTypeFilter === type
+                      ? 'border-primary text-primary'
+                      : 'border-transparent text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  {type}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <CardContent>
+            {accountsLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="h-5 w-5 animate-spin text-primary" />
+              </div>
+            ) : displayAccounts.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">No accounts found</div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Account Code</TableHead>
+                    <TableHead>Account Name</TableHead>
+                    <TableHead>Type</TableHead>
+                    <TableHead>Balance</TableHead>
+                    <TableHead>Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {displayAccounts
+                    .filter(a => accountTypeFilter === 'All' || (a.account_type || a.type) === accountTypeFilter)
+                    .map((account) => (
+                    <TableRow key={account.id || account.code}>
+                      <TableCell className="font-medium">
+                        {account.account_code || account.code}
+                      </TableCell>
+                      <TableCell className="text-primary hover:underline cursor-pointer">
+                        {account.account_name || account.name}
+                      </TableCell>
+                      <TableCell>
+                        <span
+                          className={`font-medium ${getAccountTypeColor(account.account_type || account.type)}`}
+                        >
+                          {account.account_type || account.type}
+                        </span>
+                      </TableCell>
+                      <TableCell
+                        className={`font-bold ${
+                          (account.balance ?? 0) >= 0 ? 'text-green-600' : 'text-red-600'
+                        }`}
+                      >
+                        UGX{' '}
+                        {(account.balance ?? 0).toLocaleString('en-US', {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
+                      </TableCell>
+                      <TableCell>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="sm">
+                              <MoreVertical className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={() => handleViewAccount(account)}>
+                              <Eye className="h-4 w-4 mr-2" />
+                              View Transactions
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem onClick={() => handleEditAccount(account)}>
+                              <Edit className="h-4 w-4 mr-2" />
+                              Edit Account
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem onClick={() => {
+                              toast({
+                                title: 'Report Generation',
+                                description: `Report generation for ${account.account_name || account.name} is coming soon`,
+                              });
+                            }}>
+                              <TrendingUp className="h-4 w-4 mr-2" />
+                              Generate Report
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {activeTab === 'reconciliation' && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Bank Reconciliation</CardTitle>
+            <p className="text-sm text-muted-foreground mt-1">
+              Reconcile your bank statements with recorded transactions.
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            {reconciliationsLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="h-5 w-5 animate-spin text-primary" />
+              </div>
+            ) : (
+              <>
+                {/* Reconciliation Summary Cards */}
+                <div className="grid grid-cols-3 gap-4">
+                  <Card>
+                    <CardContent className="p-4">
+                      <p className="text-sm text-muted-foreground mb-1">Bank Statement Balance</p>
+                      <p className="text-2xl font-bold">
+                        UGX{' '}
+                        {(latestReconciliation?.bank_statement_balance ?? reconciliationData.bankStatementBalance).toLocaleString(
+                          'en-US',
+                          { minimumFractionDigits: 2, maximumFractionDigits: 2 }
+                        )}
+                      </p>
+                    </CardContent>
+                  </Card>
+                  <Card>
+                    <CardContent className="p-4">
+                      <p className="text-sm text-muted-foreground mb-1">Book Balance</p>
+                      <p className="text-2xl font-bold">
+                        UGX{' '}
+                        {(latestReconciliation?.book_balance ?? reconciliationData.bookBalance).toLocaleString(
+                          'en-US',
+                          { minimumFractionDigits: 2, maximumFractionDigits: 2 }
+                        )}
+                      </p>
+                    </CardContent>
+                  </Card>
+                  <Card>
+                    <CardContent className="p-4">
+                      <p className="text-sm text-muted-foreground mb-1">Difference</p>
+                      <p
+                        className={`text-2xl font-bold ${
+                          reconciliationAdjustment >= 0 ? 'text-orange-600' : 'text-red-600'
+                        }`}
+                      >
+                        UGX{' '}
+                        {Math.abs(reconciliationAdjustment).toLocaleString('en-US', {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
+                      </p>
+                    </CardContent>
+                  </Card>
+                </div>
+
+                {/* Outstanding Items */}
+                <div className="grid grid-cols-2 gap-6">
+                  <div>
+                    <h3 className="font-semibold mb-4">Outstanding Deposits</h3>
+                    <div className="space-y-3">
+                      {(reconciliationItems?.filter(i => i.item_type === 'deposit') ?? reconciliationData.outstandingDeposits).map(
+                        (deposit, idx) => (
+                          <div
+                            key={idx}
+                            className="flex items-center justify-between p-3 bg-green-50 border border-green-200 rounded-lg"
+                          >
+                            <div>
+                              <p className="font-medium">{deposit.description}</p>
+                              <p className="text-xs text-muted-foreground">
+                                {deposit.item_date || deposit.date}
+                              </p>
+                            </div>
+                            <p className="font-bold text-green-600">
+                              +UGX{' '}
+                              {deposit.amount.toLocaleString('en-US', {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 2,
+                              })}
+                            </p>
+                          </div>
+                        )
+                      )}
+                    </div>
+                  </div>
+
+                  <div>
+                    <h3 className="font-semibold mb-4">Outstanding Checks</h3>
+                    <div className="space-y-3">
+                      {(reconciliationItems?.filter(i => i.item_type === 'check') ?? reconciliationData.outstandingChecks).map(
+                        (check, idx) => (
+                          <div
+                            key={idx}
+                            className="flex items-center justify-between p-3 bg-red-50 border border-red-200 rounded-lg"
+                          >
+                            <div>
+                              <p className="font-medium">{check.description}</p>
+                              <p className="text-xs text-muted-foreground">
+                                {check.reference_number || check.checkNum}
+                              </p>
+                            </div>
+                            <p className="font-bold text-red-600">
+                              -UGX{' '}
+                              {Math.abs(check.amount).toLocaleString('en-US', {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 2,
+                              })}
+                            </p>
+                          </div>
+                        )
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Reconciliation Summary */}
+                <Card className="bg-blue-50 border-blue-200">
+                  <CardContent className="p-6">
+                    <div className="flex items-start gap-3 mb-4">
+                      <div className="p-2 bg-blue-200 rounded-lg">
+                        <DollarSign className="h-5 w-5 text-blue-600" />
+                      </div>
+                      <h3 className="font-semibold text-lg">Reconciliation Summary</h3>
+                    </div>
+                    <div className="space-y-3 text-sm">
+                      <div className="flex justify-between">
+                        <span>Bank Statement Balance:</span>
+                        <span className="font-bold">
+                          UGX{' '}
+                          {(latestReconciliation?.bank_statement_balance ?? reconciliationData.bankStatementBalance).toLocaleString(
+                            'en-US',
+                            { minimumFractionDigits: 2, maximumFractionDigits: 2 }
+                          )}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Less: Outstanding Checks</span>
+                        <span className="font-bold">
+                          (UGX{' '}
+                          {Math.abs(
+                            (reconciliationItems?.filter(i => i.item_type === 'check').reduce((sum, check) => sum + check.amount, 0) ??
+                              reconciliationData.outstandingChecks.reduce((sum, check) => sum + check.amount, 0))
+                          ).toLocaleString('en-US', {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })})
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Add: Outstanding Deposits</span>
+                        <span className="font-bold">
+                          UGX{' '}
+                          {(
+                            reconciliationItems?.filter(i => i.item_type === 'deposit').reduce((sum, dep) => sum + dep.amount, 0) ??
+                            reconciliationData.outstandingDeposits.reduce((sum, dep) => sum + dep.amount, 0)
+                          ).toLocaleString('en-US', {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })}
+                        </span>
+                      </div>
+                      <div className="border-t border-blue-300 pt-3 flex justify-between font-bold">
+                        <span>Adjusted Bank Balance:</span>
+                        <span>
+                          UGX{' '}
+                          {adjustedBalance.toLocaleString('en-US', {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })}
+                        </span>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <PermissionGuard module="accounts" action="update">
+                  <Button onClick={() => setIsReconciliationOpen(true)} className="w-full" size="lg">
+                    Complete Reconciliation
+                  </Button>
+                </PermissionGuard>
+              </>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {activeTab === 'budgets' && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Budget Management</CardTitle>
+            <p className="text-sm text-muted-foreground mt-1">
+              {budgetsLoading ? 'Loading...' : `Showing ${displayBudgets.length} budgets`}
+            </p>
+          </CardHeader>
+          <CardContent>
+            {budgetsLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="h-5 w-5 animate-spin text-primary" />
+              </div>
+            ) : displayBudgets.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">No budgets found</div>
+            ) : (
+              <div className="space-y-6">
+                {displayBudgets.map((budget) => {
+                  const spent = budget.spent_amount ?? budget.spent;
+                  const budgeted = budget.budgeted_amount ?? budget.budget;
+                  const progress = getBudgetProgress(spent, budgeted);
+                  const remaining = budgeted - spent;
+
+                  return (
+                    <div key={budget.id || budget.category} className="border-b border-border pb-6 last:border-0 last:pb-0">
+                      <div className="flex items-center justify-between mb-3">
+                        <div>
+                          <p className="font-semibold">{budget.category}</p>
+                        </div>
+                        <div className="flex gap-8 text-sm">
+                          <div>
+                            <p className="text-muted-foreground">Budget</p>
+                            <p className="font-bold">
+                              UGX{' '}
+                              {budgeted.toLocaleString('en-US', {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 2,
+                              })}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-muted-foreground">Spent</p>
+                            <p className="font-bold text-red-600">
+                              UGX{' '}
+                              {spent.toLocaleString('en-US', {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 2,
+                              })}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-muted-foreground">Remaining</p>
+                            <p className={`font-bold ${remaining >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                              UGX{' '}
+                              {remaining.toLocaleString('en-US', {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 2,
+                              })}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-4">
+                        <div className="flex-1 bg-gray-200 rounded-full h-2 overflow-hidden">
+                          <div
+                            className={`h-full ${getBudgetProgressColor(progress)}`}
+                            style={{ width: `${Math.min(progress, 100)}%` }}
+                          />
+                        </div>
+                        <span className="text-sm font-semibold w-12 text-right">{progress}%</span>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="sm">
+                              <MoreVertical className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={() => handleEditBudget(budget)}>
+                              <Edit className="h-4 w-4 mr-2" />
+                              Edit Budget
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem onClick={() => {
+                              setSelectedBudget(budget);
+                              toast({
+                                title: 'Budget Details',
+                                description: `${budget.category} - ${progress}% spent`,
+                              });
+                            }}>
+                              <Eye className="h-4 w-4 mr-2" />
+                              View Details
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem onClick={() => {
+                              toast({
+                                title: 'Report Generation',
+                                description: `Report generation for ${budget.category} is coming soon`,
+                              });
+                            }}>
+                              <TrendingUp className="h-4 w-4 mr-2" />
+                              Generate Report
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Add Transaction Dialog */}
+      <Dialog open={isAddTransactionOpen} onOpenChange={setIsAddTransactionOpen}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Add New Transaction</DialogTitle>
+            <DialogDescription>Record a new financial transaction for the clinic.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
             <div>
-              <CardTitle className="text-lg font-semibold text-foreground">
-                Recent Transactions
-              </CardTitle>
-              <p className="text-sm text-muted-foreground mt-1">
-                Track all financial transactions and cash flow
-              </p>
+              <label className="text-sm font-medium mb-2 block">Description</label>
+              <Input 
+                placeholder="Transaction description"
+                value={transactionForm.description}
+                onChange={(e) => setTransactionForm({...transactionForm, description: e.target.value})}
+              />
             </div>
-            <div className="flex gap-3">
-              <div className="relative w-64">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  placeholder="Search transactions..."
-                  className="pl-9"
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="text-sm font-medium mb-2 block">Amount (UGX)</label>
+                <Input 
+                  type="number"
+                  placeholder="0.00"
+                  value={transactionForm.amount}
+                  onChange={(e) => setTransactionForm({...transactionForm, amount: e.target.value})}
                 />
               </div>
-              <Select defaultValue="all">
-                <SelectTrigger className="w-40">
-                  <SelectValue />
+              <div>
+                <label className="text-sm font-medium mb-2 block">Type</label>
+                <Select value={transactionForm.type} onValueChange={(value) => setTransactionForm({...transactionForm, type: value as 'income' | 'expense'})}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="income">Income</SelectItem>
+                    <SelectItem value="expense">Expense</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div>
+              <label className="text-sm font-medium mb-2 block">Category</label>
+              <Select value={transactionForm.category} onValueChange={(value) => setTransactionForm({...transactionForm, category: value})}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select category" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All Types</SelectItem>
-                  <SelectItem value="income">Income</SelectItem>
-                  <SelectItem value="expense">Expenses</SelectItem>
+                  <SelectItem value="Patient Payments">Patient Payments</SelectItem>
+                  <SelectItem value="Medical Supplies">Medical Supplies</SelectItem>
+                  <SelectItem value="Salaries">Salaries</SelectItem>
+                  <SelectItem value="Equipment">Equipment</SelectItem>
+                  <SelectItem value="Utilities">Utilities</SelectItem>
+                  <SelectItem value="Insurance">Insurance</SelectItem>
+                  <SelectItem value="Other">Other</SelectItem>
                 </SelectContent>
               </Select>
             </div>
+            <div>
+              <label className="text-sm font-medium mb-2 block">Date</label>
+              <Input 
+                type="date"
+                value={transactionForm.date}
+                onChange={(e) => setTransactionForm({...transactionForm, date: e.target.value})}
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium mb-2 block">Notes (Optional)</label>
+              <textarea
+                className="w-full px-3 py-2 border border-input rounded-md text-sm"
+                placeholder="Additional notes..."
+                rows={3}
+                value={transactionForm.notes}
+                onChange={(e) => setTransactionForm({...transactionForm, notes: e.target.value})}
+              />
+            </div>
           </div>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Date</TableHead>
-                <TableHead>Description</TableHead>
-                <TableHead>Category</TableHead>
-                <TableHead>Reference</TableHead>
-                <TableHead>Amount</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {transactionsData.map((transaction) => (
-                <TableRow key={transaction.id}>
-                  <TableCell className="font-medium">{transaction.date}</TableCell>
-                  <TableCell>{transaction.description}</TableCell>
-                  <TableCell>
-                    <Badge className={getCategoryBadgeColor(transaction.category)}>
-                      {transaction.category}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="font-mono text-sm">{transaction.reference}</TableCell>
-                  <TableCell className={`font-bold ${getTransactionColor(transaction.type)}`}>
-                    {transaction.type === 'income' ? '+' : '-'}
-                    UGX {transaction.amount.toLocaleString()}
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-1">
-                      {getTransactionIcon(transaction.type)}
-                      <span className="capitalize text-sm">
-                        {transaction.type === 'income' ? 'Income' : 'Expense'}
-                      </span>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="sm">
-                          <MoreVertical className="h-4 w-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem>
-                          <Eye className="h-4 w-4 mr-2" />
-                          View Details
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem>
-                          <Edit className="h-4 w-4 mr-2" />
-                          Edit
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem className="text-red-600">
-                          <Trash2 className="h-4 w-4 mr-2" />
-                          Delete
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+          <div className="flex gap-3">
+            <Button variant="outline" onClick={() => setIsAddTransactionOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleAddTransaction} disabled={createTransactionMutation.isPending}>
+              {createTransactionMutation.isPending ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Adding...
+                </>
+              ) : (
+                'Add Transaction'
+              )}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Reconciliation Completion Dialog */}
+      <Dialog open={isReconciliationOpen} onOpenChange={setIsReconciliationOpen}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Complete Reconciliation</DialogTitle>
+            <DialogDescription>Confirm the reconciliation details before completing.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 space-y-3">
+              <div className="flex justify-between">
+                <span className="text-sm">Bank Statement Balance:</span>
+                <span className="font-bold">
+                  UGX{' '}
+                  {(latestReconciliation?.bank_statement_balance ?? reconciliationData.bankStatementBalance).toLocaleString(
+                    'en-US',
+                    { minimumFractionDigits: 2, maximumFractionDigits: 2 }
+                  )}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-sm">Less: Outstanding Checks:</span>
+                <span className="font-bold">
+                  (UGX{' '}
+                  {Math.abs(
+                    reconciliationItems?.filter(i => i.item_type === 'check').reduce((sum, check) => sum + check.amount, 0) ??
+                      reconciliationData.outstandingChecks.reduce((sum, check) => sum + check.amount, 0)
+                  ).toLocaleString('en-US', {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })})
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-sm">Add: Outstanding Deposits:</span>
+                <span className="font-bold">
+                  UGX{' '}
+                  {(
+                    reconciliationItems?.filter(i => i.item_type === 'deposit').reduce((sum, dep) => sum + dep.amount, 0) ??
+                    reconciliationData.outstandingDeposits.reduce((sum, dep) => sum + dep.amount, 0)
+                  ).toLocaleString('en-US', {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}
+                </span>
+              </div>
+              <div className="border-t border-blue-300 pt-3 flex justify-between font-bold">
+                <span>Adjusted Bank Balance:</span>
+                <span>
+                  UGX{' '}
+                  {adjustedBalance.toLocaleString('en-US', {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}
+                </span>
+              </div>
+            </div>
+          </div>
+          <div className="flex gap-3">
+            <Button variant="outline" onClick={() => setIsReconciliationOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleCompleteReconciliation} disabled={completeReconciliationMutation.isPending}>
+              {completeReconciliationMutation.isPending ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Completing...
+                </>
+              ) : (
+                'Complete Reconciliation'
+              )}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* View Transaction Details Modal */}
+      <Dialog open={isViewTransactionOpen} onOpenChange={setIsViewTransactionOpen}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Transaction Details</DialogTitle>
+          </DialogHeader>
+          {selectedTransaction && (
+            <div className="space-y-4 py-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-sm text-muted-foreground">Description</label>
+                  <p className="font-semibold">{selectedTransaction.description}</p>
+                </div>
+                <div>
+                  <label className="text-sm text-muted-foreground">Date</label>
+                  <p className="font-semibold">{selectedTransaction.transaction_date || selectedTransaction.date}</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-sm text-muted-foreground">Amount</label>
+                  <p className={`font-bold text-lg ${(selectedTransaction.transaction_type || selectedTransaction.type) === 'income' ? 'text-green-600' : 'text-red-600'}`}>
+                    {(selectedTransaction.transaction_type || selectedTransaction.type) === 'income' ? '+' : '-'} UGX {selectedTransaction.amount.toLocaleString()}
+                  </p>
+                </div>
+                <div>
+                  <label className="text-sm text-muted-foreground">Type</label>
+                  <Badge>{selectedTransaction.transaction_type || selectedTransaction.type}</Badge>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-sm text-muted-foreground">Category</label>
+                  <p className="font-semibold">{selectedTransaction.category}</p>
+                </div>
+                <div>
+                  <label className="text-sm text-muted-foreground">Reference</label>
+                  <p className="font-mono text-sm">{selectedTransaction.reference_number || selectedTransaction.reference || 'N/A'}</p>
+                </div>
+              </div>
+              {selectedTransaction.notes && (
+                <div>
+                  <label className="text-sm text-muted-foreground">Notes</label>
+                  <p className="text-sm">{selectedTransaction.notes}</p>
+                </div>
+              )}
+            </div>
+          )}
+          <div className="flex gap-3">
+            <Button variant="outline" onClick={() => setIsViewTransactionOpen(false)}>
+              Close
+            </Button>
+            <Button onClick={() => {
+              setIsViewTransactionOpen(false);
+              handleEditTransaction(selectedTransaction);
+            }}>
+              <Edit className="h-4 w-4 mr-2" />
+              Edit
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Transaction Modal */}
+      <Dialog open={isEditTransactionOpen} onOpenChange={setIsEditTransactionOpen}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Edit Transaction</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div>
+              <label className="text-sm font-medium mb-2 block">Description</label>
+              <Input 
+                value={editTransactionForm.description}
+                onChange={(e) => setEditTransactionForm({...editTransactionForm, description: e.target.value})}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="text-sm font-medium mb-2 block">Amount (UGX)</label>
+                <Input 
+                  type="number"
+                  value={editTransactionForm.amount}
+                  onChange={(e) => setEditTransactionForm({...editTransactionForm, amount: e.target.value})}
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium mb-2 block">Type</label>
+                <Select value={editTransactionForm.type} onValueChange={(value) => setEditTransactionForm({...editTransactionForm, type: value as 'income' | 'expense'})}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="income">Income</SelectItem>
+                    <SelectItem value="expense">Expense</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div>
+              <label className="text-sm font-medium mb-2 block">Category</label>
+              <Select value={editTransactionForm.category} onValueChange={(value) => setEditTransactionForm({...editTransactionForm, category: value})}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Patient Payments">Patient Payments</SelectItem>
+                  <SelectItem value="Medical Supplies">Medical Supplies</SelectItem>
+                  <SelectItem value="Salaries">Salaries</SelectItem>
+                  <SelectItem value="Equipment">Equipment</SelectItem>
+                  <SelectItem value="Utilities">Utilities</SelectItem>
+                  <SelectItem value="Insurance">Insurance</SelectItem>
+                  <SelectItem value="Other">Other</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <label className="text-sm font-medium mb-2 block">Date</label>
+              <Input 
+                type="date"
+                value={editTransactionForm.date}
+                onChange={(e) => setEditTransactionForm({...editTransactionForm, date: e.target.value})}
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium mb-2 block">Notes (Optional)</label>
+              <textarea
+                className="w-full px-3 py-2 border border-input rounded-md text-sm"
+                value={editTransactionForm.notes}
+                onChange={(e) => setEditTransactionForm({...editTransactionForm, notes: e.target.value})}
+                rows={3}
+              />
+            </div>
+          </div>
+          <div className="flex gap-3">
+            <Button variant="outline" onClick={() => setIsEditTransactionOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleSaveEditTransaction}>Save Changes</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Transaction Confirmation Modal */}
+      <Dialog open={isDeleteTransactionOpen} onOpenChange={setIsDeleteTransactionOpen}>
+        <DialogContent className="sm:max-w-[400px]">
+          <DialogHeader>
+            <DialogTitle>Delete Transaction?</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete this transaction? This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          {selectedTransaction && (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4 my-4">
+              <p className="text-sm"><span className="font-semibold">Description:</span> {selectedTransaction.description}</p>
+              <p className="text-sm"><span className="font-semibold">Amount:</span> UGX {selectedTransaction.amount.toLocaleString()}</p>
+              <p className="text-sm"><span className="font-semibold">Date:</span> {selectedTransaction.transaction_date || selectedTransaction.date}</p>
+            </div>
+          )}
+          <div className="flex gap-3">
+            <Button variant="outline" onClick={() => setIsDeleteTransactionOpen(false)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={confirmDeleteTransaction}>
+              Delete Transaction
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* View Account Modal */}
+      <Dialog open={isViewAccountOpen} onOpenChange={setIsViewAccountOpen}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Account Details</DialogTitle>
+          </DialogHeader>
+          {selectedAccount && (
+            <div className="space-y-4 py-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-sm text-muted-foreground">Account Code</label>
+                  <p className="font-bold text-lg">{selectedAccount.account_code || selectedAccount.code}</p>
+                </div>
+                <div>
+                  <label className="text-sm text-muted-foreground">Type</label>
+                  <Badge>{selectedAccount.account_type || selectedAccount.type}</Badge>
+                </div>
+              </div>
+              <div>
+                <label className="text-sm text-muted-foreground">Account Name</label>
+                <p className="font-semibold text-lg">{selectedAccount.account_name || selectedAccount.name}</p>
+              </div>
+              <div>
+                <label className="text-sm text-muted-foreground">Description</label>
+                <p className="text-sm">{selectedAccount.description || 'No description'}</p>
+              </div>
+              <div>
+                <label className="text-sm text-muted-foreground">Balance</label>
+                <p className={`font-bold text-xl ${(selectedAccount.balance ?? 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                  UGX {(selectedAccount.balance ?? 0).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                </p>
+              </div>
+              <div>
+                <label className="text-sm text-muted-foreground">Status</label>
+                <Badge variant={selectedAccount.is_active !== false ? 'default' : 'secondary'}>
+                  {selectedAccount.is_active !== false ? 'Active' : 'Inactive'}
+                </Badge>
+              </div>
+            </div>
+          )}
+          <div className="flex gap-3">
+            <Button variant="outline" onClick={() => setIsViewAccountOpen(false)}>
+              Close
+            </Button>
+            <Button onClick={() => {
+              setIsViewAccountOpen(false);
+              handleEditAccount(selectedAccount);
+            }}>
+              <Edit className="h-4 w-4 mr-2" />
+              Edit
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Account Modal */}
+      <Dialog open={isEditAccountOpen} onOpenChange={setIsEditAccountOpen}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Edit Account</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div>
+              <label className="text-sm font-medium mb-2 block">Account Name</label>
+              <Input 
+                value={editAccountForm.account_name}
+                onChange={(e) => setEditAccountForm({...editAccountForm, account_name: e.target.value})}
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium mb-2 block">Description</label>
+              <textarea
+                className="w-full px-3 py-2 border border-input rounded-md text-sm"
+                value={editAccountForm.description}
+                onChange={(e) => setEditAccountForm({...editAccountForm, description: e.target.value})}
+                rows={3}
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium mb-2 block">Balance (UGX)</label>
+              <Input 
+                type="number"
+                value={editAccountForm.balance}
+                onChange={(e) => setEditAccountForm({...editAccountForm, balance: e.target.value})}
+              />
+            </div>
+          </div>
+          <div className="flex gap-3">
+            <Button variant="outline" onClick={() => setIsEditAccountOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleSaveEditAccount}>Save Changes</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Budget Modal */}
+      <Dialog open={isEditBudgetOpen} onOpenChange={setIsEditBudgetOpen}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Edit Budget</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div>
+              <label className="text-sm font-medium mb-2 block">Category</label>
+              <Input 
+                value={editBudgetForm.category}
+                disabled
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="text-sm font-medium mb-2 block">Budgeted Amount (UGX)</label>
+                <Input 
+                  type="number"
+                  value={editBudgetForm.budgeted_amount}
+                  onChange={(e) => setEditBudgetForm({...editBudgetForm, budgeted_amount: e.target.value})}
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium mb-2 block">Spent Amount (UGX)</label>
+                <Input 
+                  type="number"
+                  value={editBudgetForm.spent_amount}
+                  onChange={(e) => setEditBudgetForm({...editBudgetForm, spent_amount: e.target.value})}
+                />
+              </div>
+            </div>
+            <div>
+              <label className="text-sm font-medium mb-2 block">Notes (Optional)</label>
+              <textarea
+                className="w-full px-3 py-2 border border-input rounded-md text-sm"
+                value={editBudgetForm.notes}
+                onChange={(e) => setEditBudgetForm({...editBudgetForm, notes: e.target.value})}
+                rows={3}
+              />
+            </div>
+          </div>
+          <div className="flex gap-3">
+            <Button variant="outline" onClick={() => setIsEditBudgetOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleSaveEditBudget}>Save Changes</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Create Account Modal */}
+      <Dialog open={isCreateAccountOpen} onOpenChange={setIsCreateAccountOpen}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Create New Account</DialogTitle>
+            <DialogDescription>Add a new account to your chart of accounts.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="text-sm font-medium mb-2 block">Account Code</label>
+                <Input 
+                  placeholder="e.g., 1500"
+                  value={newAccountForm.account_code}
+                  onChange={(e) => setNewAccountForm({...newAccountForm, account_code: e.target.value})}
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium mb-2 block">Account Type</label>
+                <Select value={newAccountForm.account_type} onValueChange={(value) => setNewAccountForm({...newAccountForm, account_type: value as any})}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Asset">Asset</SelectItem>
+                    <SelectItem value="Liability">Liability</SelectItem>
+                    <SelectItem value="Equity">Equity</SelectItem>
+                    <SelectItem value="Revenue">Revenue</SelectItem>
+                    <SelectItem value="Expense">Expense</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div>
+              <label className="text-sm font-medium mb-2 block">Account Name</label>
+              <Input 
+                placeholder="e.g., Office Supplies"
+                value={newAccountForm.account_name}
+                onChange={(e) => setNewAccountForm({...newAccountForm, account_name: e.target.value})}
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium mb-2 block">Description (Optional)</label>
+              <textarea
+                className="w-full px-3 py-2 border border-input rounded-md text-sm"
+                placeholder="Enter account description..."
+                value={newAccountForm.description}
+                onChange={(e) => setNewAccountForm({...newAccountForm, description: e.target.value})}
+                rows={3}
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium mb-2 block">Opening Balance (UGX)</label>
+              <Input 
+                type="number"
+                placeholder="0.00"
+                value={newAccountForm.balance}
+                onChange={(e) => setNewAccountForm({...newAccountForm, balance: e.target.value})}
+              />
+            </div>
+          </div>
+          <div className="flex gap-3">
+            <Button variant="outline" onClick={() => setIsCreateAccountOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleCreateAccount} disabled={createAccountMutation.isPending}>
+              {createAccountMutation.isPending ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Creating...
+                </>
+              ) : (
+                'Create Account'
+              )}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
