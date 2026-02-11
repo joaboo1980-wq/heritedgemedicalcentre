@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
@@ -38,9 +38,11 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
-import { Plus, Search, Receipt, Eye, Download, Trash2, MoreVertical, FileText } from 'lucide-react';
+import { Plus, Search, Receipt, Eye, Download, Trash2, MoreVertical, FileText, Mail, Printer } from 'lucide-react';
 import { format } from 'date-fns';
 import PermissionGuard from '@/components/layout/PermissionGuard';
+import { InvoiceTemplate } from '@/components/invoices/InvoiceTemplate';
+import { generatePDF, printInvoice, generateInvoiceFilename } from '@/lib/invoiceUtils';
 
 interface Invoice {
   id: string;
@@ -244,6 +246,75 @@ const Invoices = () => {
     setNewInvoice({ ...newInvoice, items });
   };
 
+  // Mark invoice as sent
+  const markAsSentMutation = useMutation({
+    mutationFn: async (invoiceId: string) => {
+      const { error } = await supabase
+        .from('invoices')
+        .update({ status: 'pending' })
+        .eq('id', invoiceId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['invoices'] });
+      toast.success('Invoice marked as sent');
+    },
+    onError: (error: Error) => {
+      toast.error('Failed to send invoice: ' + error.message);
+    },
+  });
+
+  // Record payment
+  const recordPaymentMutation = useMutation({
+    mutationFn: async ({ invoiceId, amount }: { invoiceId: string; amount: number }) => {
+      const invoice = invoices?.find(inv => inv.id === invoiceId);
+      if (!invoice) throw new Error('Invoice not found');
+      
+      const newAmountPaid = invoice.amount_paid + amount;
+      const newStatus = newAmountPaid >= invoice.total_amount ? 'paid' : 'partially_paid';
+      
+      const { error } = await supabase
+        .from('invoices')
+        .update({ 
+          amount_paid: newAmountPaid,
+          status: newStatus
+        })
+        .eq('id', invoiceId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['invoices'] });
+      toast.success('Payment recorded successfully');
+    },
+    onError: (error: Error) => {
+      toast.error('Failed to record payment: ' + error.message);
+    },
+  });
+
+  // Delete invoice
+  const deleteInvoiceMutation = useMutation({
+    mutationFn: async (invoiceId: string) => {
+      const { error: itemsError } = await supabase
+        .from('invoice_items')
+        .delete()
+        .eq('invoice_id', invoiceId);
+      if (itemsError) throw itemsError;
+
+      const { error } = await supabase
+        .from('invoices')
+        .delete()
+        .eq('id', invoiceId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['invoices'] });
+      toast.success('Invoice deleted successfully');
+    },
+    onError: (error: Error) => {
+      toast.error('Failed to delete invoice: ' + error.message);
+    },
+  });
+
   const filteredInvoices = invoices?.filter((inv) => {
     const matchesSearch = 
       inv.invoice_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -258,6 +329,7 @@ const Invoices = () => {
   const pendingCount = invoices?.filter((inv) => inv.status === 'pending' || inv.status === 'partially_paid').length || 0;
   const paidCount = invoices?.filter((inv) => inv.status === 'paid').length || 0;
   const overdueCount = invoices?.filter((inv) => inv.status === 'overdue').length || 0;
+  const totalOutstanding = invoices?.reduce((sum, inv) => sum + (inv.total_amount - inv.amount_paid), 0) || 0;
 
   return (
     <div className="space-y-6">
@@ -374,7 +446,7 @@ const Invoices = () => {
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-muted-foreground">Pending</p>
+                <p className="text-sm text-muted-foreground">Pending Payment</p>
                 <p className="text-2xl font-bold text-yellow-600">{pendingCount}</p>
               </div>
               <FileText className="h-8 w-8 text-yellow-400" />
@@ -396,8 +468,8 @@ const Invoices = () => {
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-muted-foreground">Overdue</p>
-                <p className="text-2xl font-bold text-red-600">{overdueCount}</p>
+                <p className="text-sm text-muted-foreground">Outstanding</p>
+                <p className="text-2xl font-bold text-red-600">UGX {(totalOutstanding / 1000000).toFixed(1)}M</p>
               </div>
               <Receipt className="h-8 w-8 text-red-400" />
             </div>
@@ -483,19 +555,59 @@ const Invoices = () => {
                             <Eye className="h-4 w-4 mr-2" />
                             View Details
                           </DropdownMenuItem>
+                          
+                          {invoice.status === 'draft' && (
+                            <>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem onClick={() => markAsSentMutation.mutate(invoice.id)}>
+                                <FileText className="h-4 w-4 mr-2" />
+                                Mark as Sent
+                              </DropdownMenuItem>
+                            </>
+                          )}
+                          
+                          {(invoice.status === 'pending' || invoice.status === 'partially_paid') && (
+                            <>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem onClick={() => {
+                                const amount = prompt('Enter payment amount:');
+                                if (amount) {
+                                  recordPaymentMutation.mutate({ 
+                                    invoiceId: invoice.id, 
+                                    amount: parseFloat(amount) 
+                                  });
+                                }
+                              }}>
+                                <FileText className="h-4 w-4 mr-2" />
+                                Record Payment
+                              </DropdownMenuItem>
+                            </>
+                          )}
+                          
                           <DropdownMenuSeparator />
                           <DropdownMenuItem>
                             <Download className="h-4 w-4 mr-2" />
                             Download PDF
                           </DropdownMenuItem>
-                          <DropdownMenuItem>
-                            <FileText className="h-4 w-4 mr-2" />
-                            Edit Invoice
-                          </DropdownMenuItem>
+                          
+                          {invoice.status === 'draft' && (
+                            <DropdownMenuItem>
+                              <FileText className="h-4 w-4 mr-2" />
+                              Edit Invoice
+                            </DropdownMenuItem>
+                          )}
+                          
                           <DropdownMenuSeparator />
-                          <DropdownMenuItem className="text-red-600">
+                          <DropdownMenuItem 
+                            className="text-red-600"
+                            onClick={() => {
+                              if (confirm('Delete this invoice?')) {
+                                deleteInvoiceMutation.mutate(invoice.id);
+                              }
+                            }}
+                          >
                             <Trash2 className="h-4 w-4 mr-2" />
-                            Delete Invoice
+                            Delete
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>

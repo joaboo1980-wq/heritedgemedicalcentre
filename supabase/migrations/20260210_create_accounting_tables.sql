@@ -89,92 +89,75 @@ CREATE INDEX IF NOT EXISTS idx_chart_of_accounts_code ON public.chart_of_account
 CREATE POLICY "Staff can view chart of accounts" ON public.chart_of_accounts
   FOR SELECT USING (true);
 
-CREATE POLICY "Admin can create accounts" ON public.chart_of_accounts
+CREATE POLICY "Authenticated staff can create accounts" ON public.chart_of_accounts
   FOR INSERT WITH CHECK (
-    (SELECT EXISTS(
-      SELECT 1 FROM public.user_roles 
-      WHERE user_id = auth.uid() AND role = 'admin'
-    ))
+    auth.uid() IS NOT NULL
   );
 
-CREATE POLICY "Admin can update accounts" ON public.chart_of_accounts
+CREATE POLICY "Authenticated staff can update accounts" ON public.chart_of_accounts
   FOR UPDATE USING (
-    (SELECT EXISTS(
-      SELECT 1 FROM public.user_roles 
-      WHERE user_id = auth.uid() AND role = 'admin'
-    ))
+    auth.uid() IS NOT NULL
+  );
+
+CREATE POLICY "Authenticated staff can delete accounts" ON public.chart_of_accounts
+  FOR DELETE USING (
+    auth.uid() IS NOT NULL
   );
 
 -- RLS Policies for financial_transactions
 CREATE POLICY "Staff can view financial transactions" ON public.financial_transactions
   FOR SELECT USING (true);
 
-CREATE POLICY "Admin and accountant can create transactions" ON public.financial_transactions
+CREATE POLICY "Authenticated staff can create transactions" ON public.financial_transactions
   FOR INSERT WITH CHECK (
-    (SELECT EXISTS(
-      SELECT 1 FROM public.user_roles 
-      WHERE user_id = auth.uid() AND role IN ('admin')
-    ))
+    auth.uid() IS NOT NULL
   );
 
-CREATE POLICY "Admin can update transactions" ON public.financial_transactions
+CREATE POLICY "Authenticated staff can update transactions" ON public.financial_transactions
   FOR UPDATE USING (
-    (SELECT EXISTS(
-      SELECT 1 FROM public.user_roles 
-      WHERE user_id = auth.uid() AND role = 'admin'
-    ))
+    auth.uid() IS NOT NULL
+  );
+
+CREATE POLICY "Authenticated staff can delete transactions" ON public.financial_transactions
+  FOR DELETE USING (
+    auth.uid() IS NOT NULL
   );
 
 -- RLS Policies for budgets
 CREATE POLICY "Staff can view budgets" ON public.budgets
   FOR SELECT USING (true);
 
-CREATE POLICY "Admin can manage budgets" ON public.budgets
-  FOR ALL USING (
-    (SELECT EXISTS(
-      SELECT 1 FROM public.user_roles 
-      WHERE user_id = auth.uid() AND role = 'admin'
-    ))
-  );
-
-CREATE POLICY "Admin can create budgets" ON public.budgets
+CREATE POLICY "Authenticated staff can create budgets" ON public.budgets
   FOR INSERT WITH CHECK (
-    (SELECT EXISTS(
-      SELECT 1 FROM public.user_roles 
-      WHERE user_id = auth.uid() AND role = 'admin'
-    ))
+    auth.uid() IS NOT NULL
   );
 
-CREATE POLICY "Admin can update budgets" ON public.budgets
+CREATE POLICY "Authenticated staff can update budgets" ON public.budgets
   FOR UPDATE USING (
-    (SELECT EXISTS(
-      SELECT 1 FROM public.user_roles 
-      WHERE user_id = auth.uid() AND role = 'admin'
-    ))
+    auth.uid() IS NOT NULL
+  );
+
+CREATE POLICY "Authenticated staff can delete budgets" ON public.budgets
+  FOR DELETE USING (
+    auth.uid() IS NOT NULL
   );
 
 -- RLS Policies for bank_reconciliations
 CREATE POLICY "Staff can view reconciliations" ON public.bank_reconciliations
   FOR SELECT USING (true);
 
-CREATE POLICY "Admin can manage reconciliations" ON public.bank_reconciliations
+CREATE POLICY "Authenticated staff can manage reconciliations" ON public.bank_reconciliations
   FOR ALL USING (
-    (SELECT EXISTS(
-      SELECT 1 FROM public.user_roles 
-      WHERE user_id = auth.uid() AND role = 'admin'
-    ))
+    auth.uid() IS NOT NULL
   );
 
 -- RLS Policies for reconciliation_items
 CREATE POLICY "Staff can view reconciliation items" ON public.reconciliation_items
   FOR SELECT USING (true);
 
-CREATE POLICY "Admin can manage reconciliation items" ON public.reconciliation_items
+CREATE POLICY "Authenticated staff can manage reconciliation items" ON public.reconciliation_items
   FOR ALL USING (
-    (SELECT EXISTS(
-      SELECT 1 FROM public.user_roles 
-      WHERE user_id = auth.uid() AND role = 'admin'
-    ))
+    auth.uid() IS NOT NULL
   );
 
 -- Insert default chart of accounts

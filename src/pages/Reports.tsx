@@ -1,5 +1,7 @@
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { useState } from 'react';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import {
   Select,
   SelectContent,
@@ -8,604 +10,686 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from '@/components/ui/tabs';
-import {
-  BarChart3,
-  Download,
-  TrendingUp,
-  Users,
-  Calendar,
-  DollarSign,
-  TrendingDown,
-  ArrowUpRight,
-  ArrowDownLeft,
-} from 'lucide-react';
-import PermissionGuard from '@/components/layout/PermissionGuard';
-import {
   BarChart,
   Bar,
+  LineChart,
+  Line,
   XAxis,
   YAxis,
   CartesianGrid,
   Tooltip,
+  Legend,
   ResponsiveContainer,
-  LineChart,
-  Line,
   PieChart,
   Pie,
   Cell,
-  Legend,
 } from 'recharts';
-import { Badge } from '@/components/ui/badge';
+import {
+  Download,
+  TrendingUp,
+  DollarSign,
+  AlertCircle,
+  FileText,
+  Calendar,
+  Filter,
+  ArrowUpRight,
+  ArrowDownLeft,
+} from 'lucide-react';
+import {
+  useIncomeStatement,
+  useBudgetVsActual,
+  useAccountsReceivableAging,
+  useExpenseAnalysis,
+} from '@/hooks/useAccounts';
+import { useToast } from '@/hooks/use-toast';
 
-const monthlyRevenue = [
-  { month: 'Jan', revenue: 4800000 },
-  { month: 'Feb', revenue: 5200000 },
-  { month: 'Mar', revenue: 4900000 },
-  { month: 'Apr', revenue: 6100000 },
-  { month: 'May', revenue: 5800000 },
-  { month: 'Jun', revenue: 7100000 },
-  { month: 'Jul', revenue: 7500000 },
-  { month: 'Aug', revenue: 8200000 },
-  { month: 'Sep', revenue: 7800000 },
-  { month: 'Oct', revenue: 9100000 },
-  { month: 'Nov', revenue: 8500000 },
-  { month: 'Dec', revenue: 8900000 },
-];
-
-const newPatientRegistration = [
-  { month: 'Jan', patients: 35 },
-  { month: 'Feb', patients: 42 },
-  { month: 'Mar', patients: 38 },
-  { month: 'Apr', patients: 55 },
-  { month: 'May', patients: 48 },
-  { month: 'Jun', patients: 61 },
-];
-
-const departmentPerformance = [
-  { name: 'General', appointments: 95 },
-  { name: 'Cardiology', appointments: 82 },
-  { name: 'Pediatrics', appointments: 76 },
-  { name: 'Neurology', appointments: 68 },
-  { name: 'Laboratory', appointments: 112 },
-];
-
-const patientAgeDistribution = [
-  { range: '0-18', value: 156 },
-  { range: '19-35', value: 324 },
-  { range: '36-55', value: 445 },
-  { range: '56+', value: 323 },
-];
-
-const genderDistribution = [
-  { name: 'Female', value: 648 },
-  { name: 'Male', value: 600 },
-];
-
-const patientsByDepartment = [
-  { name: 'General', value: 156 },
-  { name: 'Cardiology', value: 234 },
-  { name: 'Pediatrics', value: 189 },
-  { name: 'Neurology', value: 145 },
-];
-
-const appointmentStats = [
-  { day: 'Mon', completed: 45, cancelled: 5 },
-  { day: 'Tue', completed: 52, cancelled: 3 },
-  { day: 'Wed', completed: 48, cancelled: 7 },
-  { day: 'Thu', completed: 55, cancelled: 4 },
-  { day: 'Fri', completed: 42, cancelled: 6 },
-  { day: 'Sat', completed: 30, cancelled: 2 },
-  { day: 'Sun', completed: 15, cancelled: 1 },
-];
-
-const COLORS = ['#0EA5E9', '#22C55E', '#F59E0B', '#EF4444'];
+const COLORS = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#06b6d4'];
 
 const Reports = () => {
+  const { toast } = useToast();
+  const [activeReport, setActiveReport] = useState('dashboard');
+  const [dateRange, setDateRange] = useState('this-month');
+  const [exportFormat, setExportFormat] = useState('csv');
+
+  // Fetch all reporting data
+  const { data: incomeStatement, isLoading: incomeLoading } = useIncomeStatement();
+  const { data: budgetVsActual, isLoading: budgetLoading } = useBudgetVsActual();
+  const { data: arAging, isLoading: arLoading } = useAccountsReceivableAging();
+  const { data: expenseAnalysis, isLoading: expenseLoading } = useExpenseAnalysis();
+
+  const handleExport = (reportName: string) => {
+    try {
+      let csvContent = '';
+      let filename = '';
+
+      switch (reportName) {
+        case 'income-statement':
+          filename = `Income_Statement_${new Date().toISOString().split('T')[0]}.csv`;
+          csvContent = generateIncomeStatementCSV();
+          break;
+        case 'budget-vs-actual':
+          filename = `Budget_vs_Actual_${new Date().toISOString().split('T')[0]}.csv`;
+          csvContent = generateBudgetVsActualCSV();
+          break;
+        case 'ar-aging':
+          filename = `AR_Aging_Report_${new Date().toISOString().split('T')[0]}.csv`;
+          csvContent = generateARAgingCSV();
+          break;
+        case 'expense-analysis':
+          filename = `Expense_Analysis_${new Date().toISOString().split('T')[0]}.csv`;
+          csvContent = generateExpenseAnalysisCSV();
+          break;
+      }
+
+      const element = document.createElement('a');
+      element.setAttribute('href', `data:text/csv;charset=utf-8,${encodeURIComponent(csvContent)}`);
+      element.setAttribute('download', filename);
+      element.style.display = 'none';
+      document.body.appendChild(element);
+      element.click();
+      document.body.removeChild(element);
+
+      toast({
+        title: 'Success',
+        description: `${reportName} exported as ${exportFormat.toUpperCase()}`,
+      });
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: 'Failed to export report',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const generateIncomeStatementCSV = () => {
+    if (!incomeStatement) return '';
+    
+    let csv = 'INCOME STATEMENT\n';
+    csv += `Generated: ${new Date().toLocaleDateString()}\n\n`;
+    csv += 'REVENUE\n';
+    Object.entries(incomeStatement.incomeByCategory || {}).forEach(([category, amount]) => {
+      csv += `${category},UGX ${(amount as number).toLocaleString('en-US', { maximumFractionDigits: 2 })}\n`;
+    });
+    csv += `TOTAL REVENUE,UGX ${incomeStatement.totalRevenue.toLocaleString('en-US', { maximumFractionDigits: 2 })}\n\n`;
+    csv += 'EXPENSES\n';
+    Object.entries(incomeStatement.expenseByCategory || {}).forEach(([category, amount]) => {
+      csv += `${category},UGX ${(amount as number).toLocaleString('en-US', { maximumFractionDigits: 2 })}\n`;
+    });
+    csv += `TOTAL EXPENSES,UGX ${incomeStatement.totalExpenses.toLocaleString('en-US', { maximumFractionDigits: 2 })}\n\n`;
+    csv += `NET PROFIT,UGX ${incomeStatement.netProfit.toLocaleString('en-US', { maximumFractionDigits: 2 })}\n`;
+    
+    return csv;
+  };
+
+  const generateBudgetVsActualCSV = () => {
+    if (!budgetVsActual?.comparison) return '';
+    
+    let csv = 'BUDGET VS ACTUAL ANALYSIS\n';
+    csv += `Generated: ${new Date().toLocaleDateString()}\n\n`;
+    csv += 'Category,Budgeted,Actual,Variance,Variance %,Status\n';
+    budgetVsActual.comparison.forEach(item => {
+      csv += `${item.category},UGX ${item.budgeted},UGX ${item.actual},UGX ${item.variance},${item.variancePercent}%,${item.status}\n`;
+    });
+    csv += `\nTOTAL BUDGET,UGX ${budgetVsActual.totalBudget}\n`;
+    csv += `TOTAL ACTUAL,UGX ${budgetVsActual.totalActual}\n`;
+    
+    return csv;
+  };
+
+  const generateARAgingCSV = () => {
+    if (!arAging) return '';
+    
+    let csv = 'ACCOUNTS RECEIVABLE AGING REPORT\n';
+    csv += `Generated: ${new Date().toLocaleDateString()}\n\n`;
+    csv += 'Aging Bucket,Count,Outstanding Amount\n';
+    csv += `Current,${arAging.current.count},UGX ${arAging.current.total.toLocaleString('en-US', { maximumFractionDigits: 2 })}\n`;
+    csv += `30 Days Overdue,${arAging.thirtyDays.count},UGX ${arAging.thirtyDays.total.toLocaleString('en-US', { maximumFractionDigits: 2 })}\n`;
+    csv += `60 Days Overdue,${arAging.sixtyDays.count},UGX ${arAging.sixtyDays.total.toLocaleString('en-US', { maximumFractionDigits: 2 })}\n`;
+    csv += `90 Days Overdue,${arAging.ninetyDays.count},UGX ${arAging.ninetyDays.total.toLocaleString('en-US', { maximumFractionDigits: 2 })}\n`;
+    csv += `90+ Days Overdue,${arAging.ninetyPlus.count},UGX ${arAging.ninetyPlus.total.toLocaleString('en-US', { maximumFractionDigits: 2 })}\n`;
+    csv += `\nTOTAL OUTSTANDING,UGX ${arAging.totalOutstanding.toLocaleString('en-US', { maximumFractionDigits: 2 })}\n`;
+    
+    return csv;
+  };
+
+  const generateExpenseAnalysisCSV = () => {
+    if (!expenseAnalysis?.byCategory) return '';
+    
+    let csv = 'EXPENSE ANALYSIS REPORT\n';
+    csv += `Generated: ${new Date().toLocaleDateString()}\n\n`;
+    csv += 'Category,Total Expense,Count,Average,Percentage\n';
+    expenseAnalysis.byCategory.forEach(item => {
+      csv += `${item.category},UGX ${item.total.toLocaleString('en-US', { maximumFractionDigits: 2 })},${item.count},UGX ${item.average.toLocaleString('en-US', { maximumFractionDigits: 2 })},${item.percentage.toFixed(2)}%\n`;
+    });
+    csv += `\nTOTAL EXPENSES,UGX ${expenseAnalysis.totalExpenses.toLocaleString('en-US', { maximumFractionDigits: 2 })}\n`;
+    
+    return csv;
+  };
+
   return (
     <div className="space-y-6">
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-primary">Reports</h1>
-          <p className="text-muted-foreground mt-1">
-            View analytics and generate reports
-          </p>
+          <h1 className="text-3xl font-bold text-primary">Financial Reports</h1>
+          <p className="text-sm text-muted-foreground mt-1">Live data reports with export capabilities</p>
         </div>
-        <div className="flex gap-3">
-          <Select defaultValue="month">
-            <SelectTrigger className="w-32">
-              <SelectValue />
+        <div className="flex gap-2">
+          <Select value={dateRange} onValueChange={setDateRange}>
+            <SelectTrigger className="w-[180px]">
+              <Calendar className="h-4 w-4 mr-2" />
+              <SelectValue placeholder="Select period" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="week">This Week</SelectItem>
-              <SelectItem value="month">This Month</SelectItem>
-              <SelectItem value="quarter">This Quarter</SelectItem>
-              <SelectItem value="year">This Year</SelectItem>
+              <SelectItem value="today">Today</SelectItem>
+              <SelectItem value="this-month">This Month</SelectItem>
+              <SelectItem value="this-quarter">This Quarter</SelectItem>
+              <SelectItem value="this-year">This Year</SelectItem>
+              <SelectItem value="custom">Custom Range</SelectItem>
             </SelectContent>
           </Select>
-          <PermissionGuard module="reports" action="create">
-            <Button variant="outline">
-              <Download className="h-4 w-4 mr-2" />
-              Export
-            </Button>
-          </PermissionGuard>
         </div>
       </div>
 
-      {/* Summary Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Card>
-          <CardContent className="p-4 flex items-center gap-4">
-            <div className="p-3 rounded-lg bg-primary/10">
-              <Users className="h-6 w-6 text-primary" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">2,847</p>
-              <p className="text-sm text-muted-foreground">Total Patients</p>
-              <p className="text-xs text-green-600">+12% from last month</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4 flex items-center gap-4">
-            <div className="p-3 rounded-lg bg-blue-100">
-              <Calendar className="h-6 w-6 text-blue-600" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">1,423</p>
-              <p className="text-sm text-muted-foreground">Appointments</p>
-              <p className="text-xs text-green-600">+8% from last month</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4 flex items-center gap-4">
-            <div className="p-3 rounded-lg bg-green-100">
-              <DollarSign className="h-6 w-6 text-green-600" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">UGX 89.4M</p>
-              <p className="text-sm text-muted-foreground">Revenue</p>
-              <p className="text-xs text-green-600">+5% from last month</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4 flex items-center gap-4">
-            <div className="p-3 rounded-lg bg-purple-100">
-              <TrendingUp className="h-6 w-6 text-purple-600" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">94%</p>
-              <p className="text-sm text-muted-foreground">Satisfaction Rate</p>
-              <p className="text-xs text-green-600">+2% from last month</p>
-            </div>
-          </CardContent>
-        </Card>
+      {/* Report Navigation Tabs */}
+      <div className="border-b border-border">
+        <div className="flex gap-8 overflow-x-auto">
+          {[
+            { id: 'dashboard', label: 'Dashboard', icon: '📊' },
+            { id: 'income-statement', label: 'Income Statement', icon: '📈' },
+            { id: 'budget-vs-actual', label: 'Budget vs Actual', icon: '📊' },
+            { id: 'ar-aging', label: 'AR Aging', icon: '📋' },
+            { id: 'expense-analysis', label: 'Expense Analysis', icon: '💰' },
+          ].map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveReport(tab.id)}
+              className={`py-3 px-1 font-medium text-sm border-b-2 transition-colors flex items-center gap-2 whitespace-nowrap ${
+                activeReport === tab.id
+                  ? 'border-primary text-primary'
+                  : 'border-transparent text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              <span>{tab.icon}</span>
+              {tab.label}
+            </button>
+          ))}
+        </div>
       </div>
 
-      {/* Charts */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Revenue Chart */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <BarChart3 className="h-5 w-5" />
-              Monthly Revenue
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="h-80">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={monthlyRevenue}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                  <XAxis dataKey="month" stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                  <YAxis 
-                    stroke="hsl(var(--muted-foreground))" 
-                    fontSize={12}
-                    tickFormatter={(value) => `${(value / 1000000).toFixed(0)}M`}
-                  />
-                  <Tooltip 
-                    contentStyle={{
-                      backgroundColor: 'hsl(var(--card))',
-                      border: '1px solid hsl(var(--border))',
-                      borderRadius: '8px',
-                    }}
-                    formatter={(value: number) => [`UGX ${value.toLocaleString()}`, 'Revenue']}
-                  />
-                  <Bar dataKey="revenue" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Patient Distribution */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Patient Distribution</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="h-80">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={patientsByDepartment}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={60}
-                    outerRadius={100}
-                    paddingAngle={2}
-                    dataKey="value"
-                    label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                    labelLine={false}
-                  >
-                    {patientsByDepartment.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Legend verticalAlign="bottom" height={36} />
-                  <Tooltip 
-                    contentStyle={{
-                      backgroundColor: 'hsl(var(--card))',
-                      border: '1px solid hsl(var(--border))',
-                      borderRadius: '8px',
-                    }}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Appointment Stats */}
-        <Card className="lg:col-span-2">
-          <CardHeader>
-            <CardTitle>Weekly Appointment Statistics</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="h-80">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={appointmentStats}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                  <XAxis dataKey="day" stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                  <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                  <Tooltip 
-                    contentStyle={{
-                      backgroundColor: 'hsl(var(--card))',
-                      border: '1px solid hsl(var(--border))',
-                      borderRadius: '8px',
-                    }}
-                  />
-                  <Legend />
-                  <Bar dataKey="completed" name="Completed" fill="#22C55E" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="cancelled" name="Cancelled" fill="#EF4444" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Quick Reports */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Generate Reports</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <PermissionGuard module="reports" action="create">
-              <Button variant="outline" className="h-auto p-4 flex flex-col items-start gap-2">
-                <Users className="h-5 w-5 text-primary" />
-                <div>
-                  <p className="font-medium">Patient Report</p>
-                  <p className="text-xs text-muted-foreground">Demographics and visits</p>
-                </div>
-              </Button>
-            </PermissionGuard>
-            <PermissionGuard module="reports" action="create">
-              <Button variant="outline" className="h-auto p-4 flex flex-col items-start gap-2">
-                <DollarSign className="h-5 w-5 text-primary" />
-                <div>
-                  <p className="font-medium">Financial Report</p>
-                  <p className="text-xs text-muted-foreground">Revenue and billing</p>
-                </div>
-              </Button>
-            </PermissionGuard>
-            <PermissionGuard module="reports" action="create">
-              <Button variant="outline" className="h-auto p-4 flex flex-col items-start gap-2">
-                <Calendar className="h-5 w-5 text-primary" />
-                <div>
-                  <p className="font-medium">Appointment Report</p>
-                  <p className="text-xs text-muted-foreground">Scheduling analytics</p>
-                </div>
-              </Button>
-            </PermissionGuard>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Detailed Analytics */}
-      <Tabs defaultValue="patients" className="w-full">
-        <TabsList>
-          <TabsTrigger value="patients">Patient Analytics</TabsTrigger>
-          <TabsTrigger value="appointments">Appointments</TabsTrigger>
-          <TabsTrigger value="revenue">Revenue</TabsTrigger>
-          <TabsTrigger value="staff">Staff</TabsTrigger>
-          <TabsTrigger value="lab">Laboratory</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="patients" className="space-y-6">
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      {/* Dashboard View */}
+      {activeReport === 'dashboard' && (
+        <div className="space-y-6">
+          {/* KPI Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Total Patients</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-3xl font-bold">1,248</p>
-                <p className="text-sm text-green-600 flex items-center gap-1 mt-1">
-                  <TrendingUp className="h-4 w-4" />
-                  +55 this month
-                </p>
+              <CardContent className="p-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-muted-foreground">Total Revenue</p>
+                    <p className="text-2xl font-bold text-green-600 mt-1">
+                      UGX {(incomeStatement?.totalRevenue || 0).toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                    </p>
+                  </div>
+                  <DollarSign className="h-8 w-8 text-green-600 opacity-50" />
+                </div>
               </CardContent>
             </Card>
+
             <Card>
-              <CardHeader>
-                <CardTitle className="text-base">New Patients</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-3xl font-bold">55</p>
-                <p className="text-sm text-green-600 flex items-center gap-1 mt-1">
-                  <TrendingUp className="h-4 w-4" />
-                  +12% from last month
-                </p>
+              <CardContent className="p-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-muted-foreground">Total Expenses</p>
+                    <p className="text-2xl font-bold text-red-600 mt-1">
+                      UGX {(incomeStatement?.totalExpenses || 0).toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                    </p>
+                  </div>
+                  <AlertCircle className="h-8 w-8 text-red-600 opacity-50" />
+                </div>
               </CardContent>
             </Card>
+
             <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Return Rate</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-3xl font-bold">78%</p>
-                <p className="text-sm text-green-600 flex items-center gap-1 mt-1">
-                  <TrendingUp className="h-4 w-4" />
-                  +3% from last month
-                </p>
+              <CardContent className="p-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-muted-foreground">Net Profit</p>
+                    <p className="text-2xl font-bold text-blue-600 mt-1">
+                      UGX {(incomeStatement?.netProfit || 0).toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                    </p>
+                  </div>
+                  <TrendingUp className="h-8 w-8 text-blue-600 opacity-50" />
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardContent className="p-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-muted-foreground">AR Outstanding</p>
+                    <p className="text-2xl font-bold text-orange-600 mt-1">
+                      UGX {(arAging?.totalOutstanding || 0).toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                    </p>
+                  </div>
+                  <FileText className="h-8 w-8 text-orange-600 opacity-50" />
+                </div>
               </CardContent>
             </Card>
           </div>
 
+          {/* Charts Row 1 */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Revenue vs Expenses */}
             <Card>
               <CardHeader>
-                <CardTitle>Age Distribution</CardTitle>
+                <CardTitle>Revenue vs Expenses</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="space-y-3">
-                  {patientAgeDistribution.map((dist) => (
-                    <div key={dist.range}>
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-sm">{dist.range} years</span>
-                        <span className="text-sm font-medium">{dist.value} patients</span>
+                {incomeLoading ? (
+                  <div className="h-64 flex items-center justify-center text-muted-foreground">Loading...</div>
+                ) : (
+                  <ResponsiveContainer width="100%" height={300}>
+                    <BarChart
+                      data={[
+                        {
+                          name: 'Financial Summary',
+                          Revenue: incomeStatement?.totalRevenue || 0,
+                          Expenses: incomeStatement?.totalExpenses || 0,
+                        },
+                      ]}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="name" />
+                      <YAxis />
+                      <Tooltip formatter={(value) => `UGX ${(value as number).toLocaleString()}`} />
+                      <Legend />
+                      <Bar dataKey="Revenue" fill="#10b981" />
+                      <Bar dataKey="Expenses" fill="#ef4444" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* AR Aging Overview */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Accounts Receivable Aging</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {arLoading ? (
+                  <div className="h-64 flex items-center justify-center text-muted-foreground">Loading...</div>
+                ) : (
+                  <div className="space-y-3">
+                    {[
+                      { label: 'Current', value: arAging?.current || { total: 0, count: 0 }, color: 'green' },
+                      { label: '30 Days', value: arAging?.thirtyDays || { total: 0, count: 0 }, color: 'yellow' },
+                      { label: '60 Days', value: arAging?.sixtyDays || { total: 0, count: 0 }, color: 'orange' },
+                      { label: '90 Days', value: arAging?.ninetyDays || { total: 0, count: 0 }, color: 'red' },
+                      { label: '90+ Days', value: arAging?.ninetyPlus || { total: 0, count: 0 }, color: 'red' },
+                    ].map(item => (
+                      <div key={item.label} className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <div className={`h-3 w-3 rounded-full bg-${item.color}-500`} />
+                          <span className="text-sm">{item.label}</span>
+                        </div>
+                        <div className="text-right">
+                          <span className="font-bold text-sm block">
+                            UGX {(item.value.total).toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                          </span>
+                          <span className="text-xs text-muted-foreground">{item.value.count} invoices</span>
+                        </div>
                       </div>
-                      <div className="w-full bg-muted rounded-full h-2">
-                        <div 
-                          className="bg-primary h-2 rounded-full" 
-                          style={{width: `${(dist.value / 450) * 100}%`}}
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Charts Row 2 */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Top Expense Categories */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Top Expense Categories</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {expenseLoading ? (
+                  <div className="h-64 flex items-center justify-center text-muted-foreground">Loading...</div>
+                ) : (
+                  <ResponsiveContainer width="100%" height={300}>
+                    <PieChart>
+                      <Pie
+                        data={expenseAnalysis?.byCategory.slice(0, 5) || []}
+                        dataKey="total"
+                        nameKey="category"
+                        cx="50%"
+                        cy="50%"
+                        outerRadius={100}
+                        label
+                      >
+                        {COLORS.map((color, index) => (
+                          <Cell key={`cell-${index}`} fill={color} />
+                        ))}
+                      </Pie>
+                      <Tooltip formatter={(value) => `UGX ${(value as number).toLocaleString()}`} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Profit Margin Trend */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Profit Margin</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {incomeLoading ? (
+                  <div className="h-64 flex items-center justify-center text-muted-foreground">Loading...</div>
+                ) : (
+                  <div className="space-y-4">
+                    <div>
+                      <div className="flex justify-between mb-2">
+                        <span className="text-sm font-medium">Profit Margin %</span>
+                        <span className="font-bold text-lg">
+                          {((((incomeStatement?.netProfit || 0) / (incomeStatement?.totalRevenue || 1)) * 100)).toFixed(2)}%
+                        </span>
+                      </div>
+                      <div className="w-full bg-gray-200 rounded-full h-3">
+                        <div
+                          className="bg-blue-600 h-3 rounded-full"
+                          style={{
+                            width: `${Math.min(((incomeStatement?.netProfit || 0) / (incomeStatement?.totalRevenue || 1)) * 100, 100)}%`,
+                          }}
                         />
                       </div>
                     </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Gender Distribution</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="h-64">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie
-                        data={genderDistribution}
-                        cx="50%"
-                        cy="50%"
-                        outerRadius={80}
-                        dataKey="value"
-                        label={({name, value}) => `${name} ${value}`}
-                        labelLine={false}
-                      >
-                        {genderDistribution.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                        ))}
-                      </Pie>
-                      <Legend />
-                      <Tooltip />
-                    </PieChart>
-                  </ResponsiveContainer>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        </TabsContent>
-
-        <TabsContent value="appointments" className="space-y-6">
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Total Appointments</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-3xl font-bold">456</p>
-                <p className="text-sm text-green-600 flex items-center gap-1 mt-1">
-                  <TrendingUp className="h-4 w-4" />
-                  +8% from last month
-                </p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Completion Rate</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-3xl font-bold">92%</p>
-                <p className="text-sm text-green-600 flex items-center gap-1 mt-1">
-                  <TrendingUp className="h-4 w-4" />
-                  +1% from last month
-                </p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">No-shows</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-3xl font-bold">8%</p>
-                <p className="text-sm text-red-600 flex items-center gap-1 mt-1">
-                  <TrendingDown className="h-4 w-4" />
-                  +1% from last month
-                </p>
+                    <div className="pt-4 border-t">
+                      <p className="text-sm text-muted-foreground mb-2">Summary</p>
+                      <div className="space-y-2 text-sm">
+                        <div className="flex justify-between">
+                          <span>Revenue:</span>
+                          <span className="font-bold">UGX {(incomeStatement?.totalRevenue || 0).toLocaleString('en-US', { maximumFractionDigits: 0 })}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Expenses:</span>
+                          <span className="font-bold">UGX {(incomeStatement?.totalExpenses || 0).toLocaleString('en-US', { maximumFractionDigits: 0 })}</span>
+                        </div>
+                        <div className="flex justify-between border-t pt-2">
+                          <span>Net Profit:</span>
+                          <span className="font-bold text-green-600">UGX {(incomeStatement?.netProfit || 0).toLocaleString('en-US', { maximumFractionDigits: 0 })}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </CardContent>
             </Card>
           </div>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Department Performance</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="h-80">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={departmentPerformance} layout="vertical">
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                    <XAxis type="number" stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                    <YAxis dataKey="name" width={80} stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                    <Tooltip 
-                      contentStyle={{
-                        backgroundColor: 'hsl(var(--card))',
-                        border: '1px solid hsl(var(--border))',
-                        borderRadius: '8px',
-                      }}
-                    />
-                    <Bar dataKey="appointments" fill="hsl(var(--primary))" />
-                  </BarChart>
-                </ResponsiveContainer>
+          {/* Export Button */}
+          <Card className="bg-blue-50 border-blue-200">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="font-semibold">Export Full Report</p>
+                  <p className="text-sm text-muted-foreground">Download all data in CSV format</p>
+                </div>
+                <Button onClick={() => handleExport('income-statement')} size="sm">
+                  <Download className="h-4 w-4 mr-2" />
+                  Export Dashboard
+                </Button>
               </div>
             </CardContent>
           </Card>
-        </TabsContent>
+        </div>
+      )}
 
-        <TabsContent value="revenue">
-          <Card>
-            <CardHeader>
-              <CardTitle>Revenue Overview</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="h-80">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={monthlyRevenue}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                    <XAxis dataKey="month" stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                    <YAxis 
-                      stroke="hsl(var(--muted-foreground))" 
-                      fontSize={12}
-                      tickFormatter={(value) => `${(value / 1000000).toFixed(0)}M`}
-                    />
-                    <Tooltip 
-                      contentStyle={{
-                        backgroundColor: 'hsl(var(--card))',
-                        border: '1px solid hsl(var(--border))',
-                        borderRadius: '8px',
-                      }}
-                      formatter={(value: number) => `UGX ${(value / 1000000).toFixed(1)}M`}
-                    />
-                    <Line 
-                      type="monotone" 
-                      dataKey="revenue" 
-                      stroke="hsl(var(--primary))" 
-                      dot={{ fill: 'hsl(var(--primary))' }}
-                      name="Revenue"
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
+      {/* Income Statement Tab */}
+      {activeReport === 'income-statement' && (
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between">
+            <div>
+              <CardTitle>Income Statement</CardTitle>
+              <CardDescription>Revenue, expenses, and profit summary</CardDescription>
+            </div>
+            <Button onClick={() => handleExport('income-statement')} size="sm" variant="outline">
+              <Download className="h-4 w-4 mr-2" />
+              Export
+            </Button>
+          </CardHeader>
+          <CardContent>
+            {incomeLoading ? (
+              <div className="py-8 text-center text-muted-foreground">Loading...</div>
+            ) : (
+              <div className="space-y-6">
+                <div>
+                  <h3 className="font-semibold text-lg mb-4">Revenue</h3>
+                  <div className="space-y-2">
+                    {Object.entries(incomeStatement?.incomeByCategory || {}).map(([category, amount]) => (
+                      <div key={category} className="flex justify-between px-4 py-2 border-b">
+                        <span className="text-muted-foreground">{category}</span>
+                        <span className="font-bold text-green-600">
+                          UGX {((amount as number) || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })}
+                        </span>
+                      </div>
+                    ))}
+                    <div className="flex justify-between px-4 py-3 bg-green-50 font-bold text-lg">
+                      <span>Total Revenue</span>
+                      <span className="text-green-600">
+                        UGX {(incomeStatement?.totalRevenue || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <h3 className="font-semibold text-lg mb-4">Expenses</h3>
+                  <div className="space-y-2">
+                    {Object.entries(incomeStatement?.expenseByCategory || {}).map(([category, amount]) => (
+                      <div key={category} className="flex justify-between px-4 py-2 border-b">
+                        <span className="text-muted-foreground">{category}</span>
+                        <span className="font-bold text-red-600">
+                          UGX {((amount as number) || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })}
+                        </span>
+                      </div>
+                    ))}
+                    <div className="flex justify-between px-4 py-3 bg-red-50 font-bold text-lg">
+                      <span>Total Expenses</span>
+                      <span className="text-red-600">
+                        UGX {(incomeStatement?.totalExpenses || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-6">
+                  <div className="flex justify-between items-center">
+                    <span className="text-xl font-bold">Net Profit (Loss)</span>
+                    <span className="text-3xl font-bold text-blue-600">
+                      UGX {(incomeStatement?.netProfit || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                </div>
               </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
-        <TabsContent value="staff" className="space-y-6">
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Total Staff</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-3xl font-bold">156</p>
-                <p className="text-sm text-muted-foreground mt-1">Active staff members</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">On Duty</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-3xl font-bold text-green-600">156</p>
-                <p className="text-sm text-muted-foreground mt-1">Currently working</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Pending Labs</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-3xl font-bold text-yellow-600">12</p>
-                <p className="text-sm text-muted-foreground mt-1">Tests awaiting results</p>
-              </CardContent>
-            </Card>
-          </div>
-        </TabsContent>
+      {/* Budget vs Actual Tab */}
+      {activeReport === 'budget-vs-actual' && (
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between">
+            <div>
+              <CardTitle>Budget vs Actual Analysis</CardTitle>
+              <CardDescription>Compare planned vs actual spending</CardDescription>
+            </div>
+            <Button onClick={() => handleExport('budget-vs-actual')} size="sm" variant="outline">
+              <Download className="h-4 w-4 mr-2" />
+              Export
+            </Button>
+          </CardHeader>
+          <CardContent>
+            {budgetLoading ? (
+              <div className="py-8 text-center text-muted-foreground">Loading...</div>
+            ) : (
+              <div className="space-y-4">
+                {budgetVsActual?.comparison?.map(item => (
+                  <div key={item.category} className="border rounded-lg p-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <div>
+                        <p className="font-semibold">{item.category}</p>
+                        <Badge variant={item.status === 'under' ? 'default' : 'destructive'}>
+                          {item.status === 'under' ? 'Under Budget' : 'Over Budget'}
+                        </Badge>
+                      </div>
+                      <p className="text-2xl font-bold">
+                        {item.variancePercent > 0 ? '+' : ''}{item.variancePercent}%
+                      </p>
+                    </div>
 
-        <TabsContent value="lab" className="space-y-6">
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Total Tests</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-3xl font-bold">189</p>
-                <p className="text-sm text-green-600 flex items-center gap-1 mt-1">
-                  <TrendingUp className="h-4 w-4" />
-                  From last month
-                </p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Completed</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-3xl font-bold">165</p>
-                <p className="text-sm text-muted-foreground mt-1">87% completion rate</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Pending</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-3xl font-bold text-yellow-600">24</p>
-                <p className="text-sm text-muted-foreground mt-1">13% pending</p>
-              </CardContent>
-            </Card>
-          </div>
-        </TabsContent>
-      </Tabs>
+                    <div className="grid grid-cols-3 gap-4 text-sm mb-3">
+                      <div>
+                        <p className="text-muted-foreground">Budgeted</p>
+                        <p className="font-bold">UGX {item.budgeted.toLocaleString('en-US', { maximumFractionDigits: 0 })}</p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground">Actual</p>
+                        <p className="font-bold">UGX {item.actual.toLocaleString('en-US', { maximumFractionDigits: 0 })}</p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground">Variance</p>
+                        <p className={`font-bold ${item.variance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                          UGX {item.variance.toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="w-full bg-gray-200 rounded-full h-2">
+                      <div
+                        className={`h-2 rounded-full ${item.status === 'under' ? 'bg-green-500' : 'bg-red-500'}`}
+                        style={{ width: `${Math.min((item.actual / item.budgeted) * 100, 100)}%` }}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* AR Aging Tab */}
+      {activeReport === 'ar-aging' && (
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between">
+            <div>
+              <CardTitle>Accounts Receivable Aging Report</CardTitle>
+              <CardDescription>Outstanding invoices by age</CardDescription>
+            </div>
+            <Button onClick={() => handleExport('ar-aging')} size="sm" variant="outline">
+              <Download className="h-4 w-4 mr-2" />
+              Export
+            </Button>
+          </CardHeader>
+          <CardContent>
+            {arLoading ? (
+              <div className="py-8 text-center text-muted-foreground">Loading...</div>
+            ) : (
+              <div className="space-y-4">
+                {[
+                  { label: 'Current', data: arAging?.current, color: 'green' },
+                  { label: '1-30 Days Overdue', data: arAging?.thirtyDays, color: 'yellow' },
+                  { label: '31-60 Days Overdue', data: arAging?.sixtyDays, color: 'orange' },
+                  { label: '61-90 Days Overdue', data: arAging?.ninetyDays, color: 'red' },
+                  { label: '90+ Days Overdue', data: arAging?.ninetyPlus, color: 'red' },
+                ].map(bucket => (
+                  <div key={bucket.label} className={`border rounded-lg p-4 border-${bucket.color}-200 bg-${bucket.color}-50`}>
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="font-semibold">{bucket.label}</p>
+                      <Badge variant="outline">{bucket.data?.count || 0} invoices</Badge>
+                    </div>
+                    <p className="text-2xl font-bold">
+                      UGX {(bucket.data?.total || 0).toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                    </p>
+                  </div>
+                ))}
+
+                <div className="bg-red-100 border border-red-300 rounded-lg p-4 mt-6">
+                  <p className="text-muted-foreground mb-1">Total Outstanding</p>
+                  <p className="text-3xl font-bold text-red-600">
+                    UGX {(arAging?.totalOutstanding || 0).toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                  </p>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Expense Analysis Tab */}
+      {activeReport === 'expense-analysis' && (
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between">
+            <div>
+              <CardTitle>Expense Analysis</CardTitle>
+              <CardDescription>Spending breakdown by category</CardDescription>
+            </div>
+            <Button onClick={() => handleExport('expense-analysis')} size="sm" variant="outline">
+              <Download className="h-4 w-4 mr-2" />
+              Export
+            </Button>
+          </CardHeader>
+          <CardContent>
+            {expenseLoading ? (
+              <div className="py-8 text-center text-muted-foreground">Loading...</div>
+            ) : (
+              <div className="space-y-4">
+                {expenseAnalysis?.byCategory?.map(item => (
+                  <div key={item.category} className="border rounded-lg p-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <div>
+                        <p className="font-semibold">{item.category}</p>
+                        <p className="text-xs text-muted-foreground">{item.count} transactions</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-2xl font-bold">
+                          UGX {item.total.toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                        </p>
+                        <p className="text-sm text-muted-foreground">{item.percentage.toFixed(1)}% of total</p>
+                      </div>
+                    </div>
+
+                    <div className="w-full bg-gray-200 rounded-full h-2">
+                      <div
+                        className="bg-blue-500 h-2 rounded-full"
+                        style={{ width: `${item.percentage}%` }}
+                      />
+                    </div>
+
+                    <div className="mt-3 text-xs text-muted-foreground">
+                      Average per transaction: UGX {item.average.toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                    </div>
+                  </div>
+                ))}
+
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mt-6">
+                  <p className="text-muted-foreground mb-1">Total Expenses</p>
+                  <p className="text-3xl font-bold text-blue-600">
+                    UGX {(expenseAnalysis?.totalExpenses || 0).toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                  </p>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 };

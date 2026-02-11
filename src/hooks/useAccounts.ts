@@ -270,30 +270,6 @@ export const useCreateTransaction = () => {
   });
 };
 
-export const useUpdateBudget = () => {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: async (budget: Budget) => {
-      const { data, error } = await supabase
-        .from('budgets')
-        .update({
-          budgeted_amount: budget.budgeted_amount,
-          spent_amount: budget.spent_amount,
-          notes: budget.notes,
-        })
-        .eq('id', budget.id)
-        .select();
-
-      if (error) throw error;
-      return data?.[0];
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['budgets'] });
-    },
-  });
-};
-
 export const useCompleteReconciliation = () => {
   const queryClient = useQueryClient();
   const { user } = useAuth();
@@ -360,6 +336,352 @@ export const useUpdateAccount = () => {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['chart-of-accounts'] });
       queryClient.invalidateQueries({ queryKey: ['financial-summary'] });
+    },
+  });
+};
+export const useDeleteAccount = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (accountId: string) => {
+      const { error } = await supabase
+        .from('chart_of_accounts')
+        .delete()
+        .eq('id', accountId);
+
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['chart-of-accounts'] });
+      queryClient.invalidateQueries({ queryKey: ['financial-summary'] });
+    },
+  });
+};
+
+export const useUpdateTransaction = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (transaction: FinancialTransaction) => {
+      const { data, error } = await supabase
+        .from('financial_transactions')
+        .update({
+          transaction_date: transaction.transaction_date,
+          description: transaction.description,
+          category: transaction.category,
+          amount: transaction.amount,
+          transaction_type: transaction.transaction_type,
+          payment_method: transaction.payment_method,
+          notes: transaction.notes,
+        })
+        .eq('id', transaction.id)
+        .select();
+
+      if (error) throw error;
+      return data?.[0];
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['financial-transactions'] });
+      queryClient.invalidateQueries({ queryKey: ['financial-summary'] });
+    },
+  });
+};
+
+export const useDeleteTransaction = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (transactionId: string) => {
+      const { error } = await supabase
+        .from('financial_transactions')
+        .delete()
+        .eq('id', transactionId);
+
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['financial-transactions'] });
+      queryClient.invalidateQueries({ queryKey: ['financial-summary'] });
+    },
+  });
+};
+
+export const useUpdateBudget = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (budget: Budget) => {
+      const { data, error } = await supabase
+        .from('budgets')
+        .update({
+          budgeted_amount: budget.budgeted_amount,
+          spent_amount: budget.spent_amount,
+          notes: budget.notes,
+        })
+        .eq('id', budget.id)
+        .select();
+
+      if (error) throw error;
+      return data?.[0];
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['budgets'] });
+      queryClient.invalidateQueries({ queryKey: ['financial-summary'] });
+    },
+  });
+};
+
+export const useDeleteBudget = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (budgetId: string) => {
+      const { error } = await supabase
+        .from('budgets')
+        .delete()
+        .eq('id', budgetId);
+
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['budgets'] });
+      queryClient.invalidateQueries({ queryKey: ['financial-summary'] });
+    },
+  });
+};
+
+// Reporting Hooks
+
+export const useIncomeStatement = (filters?: {
+  startDate?: string;
+  endDate?: string;
+}) => {
+  return useQuery({
+    queryKey: ['income-statement', filters],
+    queryFn: async () => {
+      // Get income transactions
+      const { data: incomeData, error: incomeError } = await supabase
+        .from('financial_transactions')
+        .select('amount, transaction_date, category')
+        .eq('transaction_type', 'income');
+
+      if (incomeError) throw incomeError;
+
+      // Get expense transactions
+      const { data: expenseData, error: expenseError } = await supabase
+        .from('financial_transactions')
+        .select('amount, transaction_date, category')
+        .eq('transaction_type', 'expense');
+
+      if (expenseError) throw expenseError;
+
+      const totalRevenue = incomeData?.reduce((sum, t) => sum + t.amount, 0) || 0;
+      const totalExpenses = expenseData?.reduce((sum, t) => sum + t.amount, 0) || 0;
+
+      // Group by category
+      const incomeByCategory: Record<string, number> = {};
+      const expenseByCategory: Record<string, number> = {};
+
+      incomeData?.forEach(t => {
+        incomeByCategory[t.category] = (incomeByCategory[t.category] || 0) + t.amount;
+      });
+
+      expenseData?.forEach(t => {
+        expenseByCategory[t.category] = (expenseByCategory[t.category] || 0) + t.amount;
+      });
+
+      return {
+        totalRevenue,
+        totalExpenses,
+        netProfit: totalRevenue - totalExpenses,
+        incomeByCategory,
+        expenseByCategory,
+        incomeTransactions: incomeData || [],
+        expenseTransactions: expenseData || [],
+      };
+    },
+  });
+};
+
+export const useBudgetVsActual = (filters?: {
+  startDate?: string;
+  endDate?: string;
+  category?: string;
+}) => {
+  return useQuery({
+    queryKey: ['budget-vs-actual', filters],
+    queryFn: async () => {
+      // Get budgets
+      const { data: budgetData, error: budgetError } = await supabase
+        .from('budgets')
+        .select('*');
+
+      if (budgetError) throw budgetError;
+
+      // Get actual expenses
+      const { data: expenses, error: expenseError } = await supabase
+        .from('financial_transactions')
+        .select('amount, category, transaction_type')
+        .eq('transaction_type', 'expense');
+
+      if (expenseError) throw expenseError;
+
+      // Calculate actual by category
+      const actualByCategory: Record<string, number> = {};
+      expenses?.forEach(e => {
+        actualByCategory[e.category] = (actualByCategory[e.category] || 0) + e.amount;
+      });
+
+      // Join budget and actual
+      const comparison = budgetData?.map(budget => {
+        const actual = actualByCategory[budget.category] || 0;
+        const budgeted = budget.budgeted_amount || 0;
+        const variance = budgeted - actual;
+        const variancePercent = budgeted > 0 ? ((variance / budgeted) * 100).toFixed(2) : 0;
+
+        return {
+          category: budget.category,
+          budgeted,
+          actual,
+          variance,
+          variancePercent: parseFloat(String(variancePercent)),
+          status: variance >= 0 ? 'under' : 'over',
+        };
+      }) || [];
+
+      return {
+        comparison,
+        totalBudget: budgetData?.reduce((sum, b) => sum + (b.budgeted_amount || 0), 0) || 0,
+        totalActual: expenses?.reduce((sum, e) => sum + e.amount, 0) || 0,
+      };
+    },
+  });
+};
+
+export const useAccountsReceivableAging = () => {
+  interface InvoiceItem {
+    id: string;
+    created_at: string;
+    amount_paid: number;
+    total_amount: number;
+    due_date: string;
+    outstanding?: number;
+    daysOverdue?: number;
+  }
+
+  return useQuery({
+    queryKey: ['ar-aging'],
+    queryFn: async () => {
+      const { data: invoices, error } = await supabase
+        .from('invoices')
+        .select('id, created_at, amount_paid, total_amount, due_date')
+        .neq('status', 'paid');
+
+      if (error) throw error;
+
+      const today = new Date();
+      const current: InvoiceItem[] = [];
+      const thirtyDays: InvoiceItem[] = [];
+      const sixtyDays: InvoiceItem[] = [];
+      const ninetyDays: InvoiceItem[] = [];
+      const ninetyPlus: InvoiceItem[] = [];
+
+      invoices?.forEach(inv => {
+        const dueDate = new Date(inv.due_date || inv.created_at);
+        const daysOverdue = Math.floor((today.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24));
+        const outstanding = (inv.total_amount || 0) - (inv.amount_paid || 0);
+
+        const item: InvoiceItem = { ...inv, outstanding, daysOverdue };
+
+        if (daysOverdue <= 0) current.push(item);
+        else if (daysOverdue <= 30) thirtyDays.push(item);
+        else if (daysOverdue <= 60) sixtyDays.push(item);
+        else if (daysOverdue <= 90) ninetyDays.push(item);
+        else ninetyPlus.push(item);
+      });
+
+      return {
+        current: {
+          count: current.length,
+          total: current.reduce((sum, i) => sum + (i.outstanding || 0), 0),
+        },
+        thirtyDays: {
+          count: thirtyDays.length,
+          total: thirtyDays.reduce((sum, i) => sum + (i.outstanding || 0), 0),
+        },
+        sixtyDays: {
+          count: sixtyDays.length,
+          total: sixtyDays.reduce((sum, i) => sum + (i.outstanding || 0), 0),
+        },
+        ninetyDays: {
+          count: ninetyDays.length,
+          total: ninetyDays.reduce((sum, i) => sum + (i.outstanding || 0), 0),
+        },
+        ninetyPlus: {
+          count: ninetyPlus.length,
+          total: ninetyPlus.reduce((sum, i) => sum + (i.outstanding || 0), 0),
+        },
+        totalOutstanding: invoices?.reduce((sum, i) => sum + ((i.total_amount || 0) - (i.amount_paid || 0)), 0) || 0,
+      };
+    },
+  });
+};
+
+export const useExpenseAnalysis = (filters?: {
+  startDate?: string;
+  endDate?: string;
+}) => {
+  interface ExpenseItem {
+    amount: number;
+    category: string;
+    transaction_date: string;
+    description: string;
+  }
+
+  interface CategoryData {
+    total: number;
+    count: number;
+    items: ExpenseItem[];
+  }
+
+  return useQuery({
+    queryKey: ['expense-analysis', filters],
+    queryFn: async () => {
+      const { data: expenses, error } = await supabase
+        .from('financial_transactions')
+        .select('amount, category, transaction_date, description')
+        .eq('transaction_type', 'expense')
+        .order('transaction_date', { ascending: false });
+
+      if (error) throw error;
+
+      const byCategory: Record<string, CategoryData> = {};
+      const all = expenses || [];
+
+      all.forEach(exp => {
+        if (!byCategory[exp.category]) {
+          byCategory[exp.category] = { total: 0, count: 0, items: [] };
+        }
+        byCategory[exp.category].total += exp.amount;
+        byCategory[exp.category].count += 1;
+        byCategory[exp.category].items.push(exp);
+      });
+
+      const totalExpenses = all.reduce((sum, e) => sum + e.amount, 0);
+
+      const analysis = Object.entries(byCategory).map(([category, data]) => ({
+        category,
+        total: data.total,
+        count: data.count,
+        average: data.total / data.count,
+        percentage: (data.total / totalExpenses) * 100,
+      }));
+
+      return {
+        byCategory: analysis.sort((a, b) => b.total - a.total),
+        totalExpenses,
+        details: all,
+      };
     },
   });
 };

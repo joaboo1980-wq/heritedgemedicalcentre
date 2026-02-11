@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -21,25 +21,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-  DropdownMenuSeparator,
-} from '@/components/ui/dropdown-menu';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from 'sonner';
-import { Search, Plus, Eye, Edit2, Download, Trash2, MoreVertical } from 'lucide-react';
-import { format } from 'date-fns';
+import { Search, Plus, DollarSign, TrendingUp, AlertCircle, CheckCircle2, Clock } from 'lucide-react';
+import { format, isPast } from 'date-fns';
 
 interface Invoice {
   id: string;
@@ -51,16 +37,6 @@ interface Invoice {
   due_date: string | null;
   created_at: string;
   patients?: { first_name: string; last_name: string; patient_number: string };
-}
-
-interface InvoiceItem {
-  id: string;
-  invoice_id: string;
-  description: string;
-  quantity: number;
-  unit_price: number;
-  total_price: number;
-  item_type: string;
 }
 
 const statusColors: Record<string, string> = {
@@ -75,560 +51,371 @@ const Billing = () => {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedTab, setSelectedTab] = useState('all');
-  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
-  const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
+  const [selectedTab, setSelectedTab] = useState('outstanding');
+  const [isPaymentDialogOpen, setIsPaymentDialogOpen] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
-  const [invoiceItems, setInvoiceItems] = useState<InvoiceItem[]>([]);
-  const [formData, setFormData] = useState({
-    patient_id: '',
-    due_date: '',
-    items: [{ description: '', quantity: 1, unit_price: 0, item_type: 'other' }],
-  });
-
-  // Fetch patients
-  const { data: patients } = useQuery({
-    queryKey: ['patients'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('patients')
-        .select('id, first_name, last_name, patient_number')
-        .order('first_name');
-      if (error) {
-        console.error('Error fetching patients:', error);
-        throw error;
-      }
-      return data;
-    },
-  });
+  const [paymentAmount, setPaymentAmount] = useState('');
 
   // Fetch invoices
-  const { data: invoices, isLoading: isLoadingInvoices, error: invoicesError } = useQuery({
+  const { data: invoices, isLoading: isLoadingInvoices } = useQuery({
     queryKey: ['invoices'],
     queryFn: async () => {
-      try {
-        const { data, error } = await supabase
-          .from('invoices')
-          .select(`*, patients (first_name, last_name, patient_number)`)
-          .order('created_at', { ascending: false });
-        if (error) {
-          console.error('[Billing] Error fetching invoices:', error);
-          throw error;
-        }
-        return data as Invoice[];
-      } catch (err) {
-        console.error('[Billing] Invoices query failed:', err);
-        return [];
-      }
+      const { data, error } = await supabase
+        .from('invoices')
+        .select(`*, patients (first_name, last_name, patient_number)`)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return data as Invoice[];
     },
   });
 
-  // Create invoice
-  const createInvoiceMutation = useMutation({
-    mutationFn: async (data: typeof formData) => {
-      try {
-        if (!data.patient_id) throw new Error('Patient is required');
-        if (data.items.some(item => !item.description || item.quantity <= 0 || item.unit_price <= 0)) {
-          throw new Error('All items must be filled with valid data');
-        }
-
-        const totalAmount = data.items.reduce((sum, item) => sum + (item.quantity * item.unit_price), 0);
-
-        const { data: newInvoice, error: invoiceError } = await supabase
-          .from('invoices')
-          .insert({
-            patient_id: data.patient_id,
-            invoice_number: `INV-${Date.now()}`,
-            status: 'draft',
-            total_amount: totalAmount,
-            amount_paid: 0,
-            due_date: data.due_date || null,
-          })
-          .select()
-          .single();
-
-        if (invoiceError) {
-          console.error('[Billing] Invoice creation error:', invoiceError);
-          throw invoiceError;
-        }
-
-        // Insert line items
-        const items = data.items.map(item => ({
-          invoice_id: newInvoice.id,
-          description: item.description,
-          quantity: item.quantity,
-          unit_price: item.unit_price,
-          total_price: item.quantity * item.unit_price,
-          item_type: item.item_type || 'other',
-        }));
-
-        const { error: itemsError } = await supabase
-          .from('invoice_items')
-          .insert(items);
-
-        if (itemsError) {
-          console.error('[Billing] Invoice items creation error:', itemsError);
-          throw itemsError;
-        }
-
-        return newInvoice;
-      } catch (err) {
-        console.error('[Billing] Create invoice mutation failed:', err);
-        throw err;
-      }
+  // Record payment
+  const recordPaymentMutation = useMutation({
+    mutationFn: async (data: { invoiceId: string; amount: number; paymentDate: string }) => {
+      const invoice = invoices?.find(inv => inv.id === data.invoiceId);
+      if (!invoice) throw new Error('Invoice not found');
+      
+      const newAmountPaid = Math.min(invoice.amount_paid + data.amount, invoice.total_amount);
+      const newStatus = newAmountPaid >= invoice.total_amount ? 'paid' : 'partially_paid';
+      
+      const { error } = await supabase
+        .from('invoices')
+        .update({ 
+          amount_paid: newAmountPaid,
+          status: newStatus
+        })
+        .eq('id', data.invoiceId);
+      
+      if (error) throw error;
+      
+      // Log payment transaction
+      const { error: logError } = await supabase
+        .from('payments')
+        .insert({
+          invoice_id: data.invoiceId,
+          amount: data.amount,
+          payment_date: data.paymentDate,
+          payment_method: 'manual',
+          reference: `Payment for ${invoice.invoice_number}`,
+        });
+      
+      if (logError) console.error('Payment log error:', logError);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['invoices'] });
-      setIsCreateDialogOpen(false);
-      setFormData({ patient_id: '', due_date: '', items: [{ description: '', quantity: 1, unit_price: 0, item_type: 'other' }] });
-      toast.success('Invoice created successfully');
+      setIsPaymentDialogOpen(false);
+      setPaymentAmount('');
+      setSelectedInvoice(null);
+      toast.success('Payment recorded successfully');
     },
     onError: (error: Error) => {
-      console.error('[Billing] Create invoice failed:', error);
-      toast.error(error.message || 'Failed to create invoice');
+      toast.error('Failed to record payment: ' + error.message);
     },
   });
 
-  // Delete invoice
-  const deleteInvoiceMutation = useMutation({
-    mutationFn: async (invoiceId: string) => {
-      try {
-        if (!invoiceId) throw new Error('Invoice ID is required');
-        
-        const { error: itemsError } = await supabase
-          .from('invoice_items')
-          .delete()
-          .eq('invoice_id', invoiceId);
+  // Calculate metrics
+  const totalBilled = invoices?.reduce((sum, inv) => sum + inv.total_amount, 0) || 0;
+  const totalCollected = invoices?.reduce((sum, inv) => sum + inv.amount_paid, 0) || 0;
+  const totalOutstanding = totalBilled - totalCollected;
+  const collectionRate = totalBilled > 0 ? ((totalCollected / totalBilled) * 100).toFixed(1) : '0';
+  
+  const outstandingInvoices = invoices?.filter(inv => inv.total_amount > inv.amount_paid) || [];
+  const overdueInvoices = outstandingInvoices.filter(inv => inv.due_date && isPast(new Date(inv.due_date)));
+  const partiallyPaidInvoices = outstandingInvoices.filter(inv => inv.amount_paid > 0);
+  const unpaidInvoices = outstandingInvoices.filter(inv => inv.amount_paid === 0 && inv.status !== 'draft');
 
-        if (itemsError) {
-          console.error('[Billing] Delete items error:', itemsError);
-          throw itemsError;
-        }
+  // Filter invoices by tab
+  let displayInvoices = outstandingInvoices;
+  if (selectedTab === 'overdue') {
+    displayInvoices = overdueInvoices;
+  } else if (selectedTab === 'partial') {
+    displayInvoices = partiallyPaidInvoices;
+  } else if (selectedTab === 'unpaid') {
+    displayInvoices = unpaidInvoices;
+  }
 
-        const { error } = await supabase
-          .from('invoices')
-          .delete()
-          .eq('id', invoiceId);
-
-        if (error) {
-          console.error('[Billing] Delete invoice error:', error);
-          throw error;
-        }
-      } catch (err) {
-        console.error('[Billing] Delete invoice mutation failed:', err);
-        throw err;
-      }
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['invoices'] });
-      setIsViewDialogOpen(false);
-      toast.success('Invoice deleted successfully');
-    },
-    onError: (error: Error) => {
-      console.error('[Billing] Delete invoice failed:', error);
-      toast.error(error.message || 'Failed to delete invoice');
-    },
-  });
-
-  // View invoice details
-  const handleViewInvoice = async (invoice: Invoice) => {
-    try {
-      setSelectedInvoice(invoice);
-      const { data: items, error } = await supabase
-        .from('invoice_items')
-        .select('*')
-        .eq('invoice_id', invoice.id);
-      
-      if (error) {
-        console.error('[Billing] Error fetching invoice items:', error);
-        toast.error('Failed to load invoice items');
-        return;
-      }
-      
-      setInvoiceItems(items as InvoiceItem[]);
-      setIsViewDialogOpen(true);
-    } catch (err) {
-      console.error('[Billing] Error viewing invoice:', err);
-      toast.error('Failed to load invoice details');
-    }
-  };
-
-  // Filter invoices
-  const filteredInvoices = invoices?.filter(inv => {
-    const matchesSearch = 
+  // Search filter
+  const filteredInvoices = displayInvoices.filter(inv => {
+    return (
       inv.invoice_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
       inv.patients?.first_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      inv.patients?.last_name.toLowerCase().includes(searchTerm.toLowerCase());
-    
-    const matchesTab = selectedTab === 'all' || inv.status === selectedTab;
-    return matchesSearch && matchesTab;
-  }) || [];
+      inv.patients?.last_name.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+  });
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-primary">Billing & Invoices</h1>
-          <p className="text-muted-foreground mt-1">Manage all patient invoices and payments</p>
-        </div>
-        <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
-          <Button onClick={() => setIsCreateDialogOpen(true)} className="gap-2">
-            <Plus className="h-4 w-4" />
-            Create Invoice
-          </Button>
-          <DialogContent className="max-w-2xl">
-            <DialogHeader>
-              <DialogTitle>Create New Invoice</DialogTitle>
-              <DialogDescription>Create a new invoice for a patient</DialogDescription>
-            </DialogHeader>
-            <form 
-              onSubmit={(e) => { 
-                e.preventDefault();
-                
-                // Validate form data
-                if (!formData.patient_id) {
-                  toast.error('Please select a patient');
-                  return;
-                }
-                if (!formData.items || formData.items.length === 0) {
-                  toast.error('Please add at least one invoice item');
-                  return;
-                }
-                if (formData.items.some(item => !item.description?.trim())) {
-                  toast.error('All items must have a description');
-                  return;
-                }
-                if (formData.items.some(item => item.quantity <= 0)) {
-                  toast.error('All items must have a quantity greater than 0');
-                  return;
-                }
-                if (formData.items.some(item => item.unit_price < 0)) {
-                  toast.error('All items must have a valid price');
-                  return;
-                }
-                
-                createInvoiceMutation.mutate(formData); 
-              }} 
-              className="space-y-4"
-            >
-              <div className="space-y-2">
-                <Label>Patient *</Label>
-                <Select value={formData.patient_id} onValueChange={(v) => setFormData({ ...formData, patient_id: v })}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select a patient" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {patients?.map(patient => (
-                      <SelectItem key={patient.id} value={patient.id}>
-                        {patient.first_name} {patient.last_name} ({patient.patient_number})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label>Due Date</Label>
-                <Input 
-                  type="date" 
-                  value={formData.due_date} 
-                  onChange={(e) => setFormData({ ...formData, due_date: e.target.value })} 
-                />
-              </div>
-
-              <div className="space-y-3">
-                <Label>Invoice Items *</Label>
-                {formData.items.map((item, idx) => (
-                  <div key={idx} className="space-y-2 p-3 border rounded-md">
-                    <div className="flex gap-2">
-                      <Input 
-                        placeholder="Description" 
-                        value={item.description} 
-                        onChange={(e) => {
-                          const newItems = [...formData.items];
-                          newItems[idx].description = e.target.value;
-                          setFormData({ ...formData, items: newItems });
-                        }} 
-                        className="flex-1"
-                      />
-                    </div>
-                    <div className="flex gap-2">
-                      <Select 
-                        value={item.item_type || 'other'} 
-                        onValueChange={(value) => {
-                          const newItems = [...formData.items];
-                          newItems[idx].item_type = value;
-                          setFormData({ ...formData, items: newItems });
-                        }}
-                      >
-                        <SelectTrigger className="w-40">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="consultation">Consultation</SelectItem>
-                          <SelectItem value="lab_test">Lab Test</SelectItem>
-                          <SelectItem value="medication">Medication</SelectItem>
-                          <SelectItem value="procedure">Procedure</SelectItem>
-                          <SelectItem value="room">Room</SelectItem>
-                          <SelectItem value="other">Other</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <Input 
-                        type="number" 
-                        placeholder="Qty" 
-                        value={item.quantity} 
-                        onChange={(e) => {
-                          const newItems = [...formData.items];
-                          newItems[idx].quantity = parseFloat(e.target.value) || 0;
-                          setFormData({ ...formData, items: newItems });
-                        }} 
-                        className="w-20"
-                      />
-                      <Input 
-                        type="number" 
-                        placeholder="Price" 
-                        value={item.unit_price} 
-                        onChange={(e) => {
-                          const newItems = [...formData.items];
-                          newItems[idx].unit_price = parseFloat(e.target.value) || 0;
-                          setFormData({ ...formData, items: newItems });
-                        }} 
-                        className="w-24"
-                      />
-                      <Button 
-                        type="button" 
-                        variant="outline" 
-                        onClick={() => {
-                          const newItems = formData.items.filter((_, i) => i !== idx);
-                          setFormData({ ...formData, items: newItems });
-                        }}
-                      >
-                        Remove
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-                <Button 
-                  type="button" 
-                  variant="outline" 
-                  onClick={() => setFormData({
-                    ...formData, 
-                    items: [...formData.items, { description: '', quantity: 1, unit_price: 0, item_type: 'other' }]
-                  })}
-                  className="w-full"
-                >
-                  Add Item
-                </Button>
-              </div>
-
-              <div className="text-right">
-                <p className="text-sm text-muted-foreground">
-                  Total: UGX {formData.items.reduce((sum, item) => sum + (item.quantity * item.unit_price), 0).toLocaleString()}
-                </p>
-              </div>
-
-              <div className="flex gap-2 justify-end">
-                <Button type="button" variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
-                  Cancel
-                </Button>
-                <Button type="submit" disabled={createInvoiceMutation.isPending}>
-                  {createInvoiceMutation.isPending ? 'Creating...' : 'Create Invoice'}
-                </Button>
-              </div>
-            </form>
-          </DialogContent>
-        </Dialog>
+      {/* Header */}
+      <div>
+        <h1 className="text-3xl font-bold text-primary">Billing & Payments</h1>
+        <p className="text-muted-foreground mt-1">Track payments, reconciliation, and cash flow</p>
       </div>
 
-      {/* Tabs */}
+      {/* KPI Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <Card>
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-muted-foreground">Total Billed</p>
+                <p className="text-2xl font-bold mt-1">UGX {(totalBilled / 1000000).toFixed(1)}M</p>
+              </div>
+              <DollarSign className="h-8 w-8 text-blue-600 opacity-50" />
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-muted-foreground">Total Collected</p>
+                <p className="text-2xl font-bold text-green-600 mt-1">UGX {(totalCollected / 1000000).toFixed(1)}M</p>
+              </div>
+              <CheckCircle2 className="h-8 w-8 text-green-600 opacity-50" />
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-muted-foreground">Outstanding</p>
+                <p className="text-2xl font-bold text-red-600 mt-1">UGX {(totalOutstanding / 1000000).toFixed(1)}M</p>
+              </div>
+              <Clock className="h-8 w-8 text-red-600 opacity-50" />
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-muted-foreground">Collection Rate</p>
+                <p className="text-2xl font-bold text-purple-600 mt-1">{collectionRate}%</p>
+              </div>
+              <TrendingUp className="h-8 w-8 text-purple-600 opacity-50" />
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Summary Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <Card className="border-red-200 bg-red-50">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-red-900">Overdue Invoices</p>
+                <p className="text-2xl font-bold text-red-600">{overdueInvoices.length}</p>
+                <p className="text-xs text-red-700 mt-1">UGX {(overdueInvoices.reduce((sum, inv) => sum + (inv.total_amount - inv.amount_paid), 0) / 1000000).toFixed(1)}M due</p>
+              </div>
+              <AlertCircle className="h-8 w-8 text-red-600 opacity-50" />
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border-yellow-200 bg-yellow-50">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-yellow-900">Partially Paid</p>
+                <p className="text-2xl font-bold text-yellow-600">{partiallyPaidInvoices.length}</p>
+                <p className="text-xs text-yellow-700 mt-1">UGX {(partiallyPaidInvoices.reduce((sum, inv) => sum + (inv.total_amount - inv.amount_paid), 0) / 1000000).toFixed(1)}M pending</p>
+              </div>
+              <Clock className="h-8 w-8 text-yellow-600 opacity-50" />
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border-gray-200 bg-gray-50">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-gray-900">Awaiting First Payment</p>
+                <p className="text-2xl font-bold text-gray-600">{unpaidInvoices.length}</p>
+                <p className="text-xs text-gray-700 mt-1">UGX {(unpaidInvoices.reduce((sum, inv) => sum + (inv.total_amount - inv.amount_paid), 0) / 1000000).toFixed(1)}M unpaid</p>
+              </div>
+              <AlertCircle className="h-8 w-8 text-gray-600 opacity-50" />
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Outstanding Invoices Table */}
       <Card>
         <CardHeader>
-          <Tabs value={selectedTab} onValueChange={setSelectedTab}>
+          <CardTitle>Payment Tracking</CardTitle>
+          <CardDescription>Outstanding and partially paid invoices</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {/* Tabs */}
+          <Tabs value={selectedTab} onValueChange={setSelectedTab} className="mb-4">
             <TabsList>
-              <TabsTrigger value="all">All Invoices</TabsTrigger>
-              <TabsTrigger value="pending">Pending</TabsTrigger>
-              <TabsTrigger value="paid">Paid</TabsTrigger>
-              <TabsTrigger value="overdue">Overdue</TabsTrigger>
+              <TabsTrigger value="outstanding">All Outstanding ({outstandingInvoices.length})</TabsTrigger>
+              <TabsTrigger value="overdue">Overdue ({overdueInvoices.length})</TabsTrigger>
+              <TabsTrigger value="partial">Partially Paid ({partiallyPaidInvoices.length})</TabsTrigger>
+              <TabsTrigger value="unpaid">Unpaid ({unpaidInvoices.length})</TabsTrigger>
             </TabsList>
           </Tabs>
-        </CardHeader>
 
-        <CardContent>
-          <div className="flex items-center justify-between mb-4">
-            <div className="relative flex-1 max-w-sm">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input 
-                placeholder="Search invoices..." 
-                value={searchTerm} 
-                onChange={(e) => setSearchTerm(e.target.value)} 
-                className="pl-9" 
-              />
-            </div>
+          {/* Search */}
+          <div className="relative mb-4">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input 
+              placeholder="Search by invoice number or patient name..." 
+              value={searchTerm} 
+              onChange={(e) => setSearchTerm(e.target.value)} 
+              className="pl-9" 
+            />
           </div>
 
+          {/* Table */}
           {isLoadingInvoices ? (
             <div className="flex justify-center py-8">
               <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" />
             </div>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Invoice #</TableHead>
-                  <TableHead>Patient</TableHead>
-                  <TableHead>Date</TableHead>
-                  <TableHead>Amount</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredInvoices.map((invoice) => (
-                  <TableRow key={invoice.id}>
-                    <TableCell className="font-mono font-semibold">{invoice.invoice_number}</TableCell>
-                    <TableCell>
-                      {invoice.patients?.first_name} {invoice.patients?.last_name}
-                    </TableCell>
-                    <TableCell>{format(new Date(invoice.created_at), 'MMM d, yyyy')}</TableCell>
-                    <TableCell className="font-medium">UGX {invoice.total_amount.toLocaleString()}</TableCell>
-                    <TableCell>
-                      <Badge className={statusColors[invoice.status] || 'bg-gray-100 text-gray-800'}>
-                        {invoice.status.charAt(0).toUpperCase() + invoice.status.slice(1).replace('_', ' ')}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="sm">
-                            <MoreVertical className="h-4 w-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => handleViewInvoice(invoice)}>
-                            <Eye className="h-4 w-4 mr-2" />
-                            View Details
-                          </DropdownMenuItem>
-                          <DropdownMenuItem>
-                            <Edit2 className="h-4 w-4 mr-2" />
-                            Edit Invoice
-                          </DropdownMenuItem>
-                          <DropdownMenuItem>
-                            <Download className="h-4 w-4 mr-2" />
-                            Download PDF
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem 
-                            onClick={() => {
-                              if (confirm('Are you sure you want to delete this invoice?')) {
-                                deleteInvoiceMutation.mutate(invoice.id);
-                              }
-                            }}
-                            className="text-red-600"
-                          >
-                            <Trash2 className="h-4 w-4 mr-2" />
-                            Delete Invoice
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </TableCell>
-                  </TableRow>
-                ))}
-                {filteredInvoices.length === 0 && (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
-                      No invoices found
-                    </TableCell>
+                    <TableHead>Invoice #</TableHead>
+                    <TableHead>Patient</TableHead>
+                    <TableHead>Issue Date</TableHead>
+                    <TableHead>Due Date</TableHead>
+                    <TableHead className="text-right">Total Amount</TableHead>
+                    <TableHead className="text-right">Paid</TableHead>
+                    <TableHead className="text-right">Balance Due</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="text-right">Days Overdue</TableHead>
+                    <TableHead>Action</TableHead>
                   </TableRow>
-                )}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {filteredInvoices.map((invoice) => {
+                    const daysOverdue = invoice.due_date ? Math.max(0, Math.floor((Date.now() - new Date(invoice.due_date).getTime()) / (1000 * 60 * 60 * 24))) : 0;
+                    const balanceDue = invoice.total_amount - invoice.amount_paid;
+                    
+                    return (
+                      <TableRow key={invoice.id} className={invoice.status === 'overdue' ? 'bg-red-50' : ''}>
+                        <TableCell className="font-mono font-semibold">{invoice.invoice_number}</TableCell>
+                        <TableCell>{invoice.patients?.first_name} {invoice.patients?.last_name}</TableCell>
+                        <TableCell>{format(new Date(invoice.created_at), 'MMM d, yyyy')}</TableCell>
+                        <TableCell>{invoice.due_date ? format(new Date(invoice.due_date), 'MMM d, yyyy') : '-'}</TableCell>
+                        <TableCell className="text-right font-medium">UGX {invoice.total_amount.toLocaleString()}</TableCell>
+                        <TableCell className="text-right text-green-600 font-medium">UGX {invoice.amount_paid.toLocaleString()}</TableCell>
+                        <TableCell className="text-right font-bold">UGX {balanceDue.toLocaleString()}</TableCell>
+                        <TableCell>
+                          <Badge className={statusColors[invoice.status] || 'bg-gray-100 text-gray-800'}>
+                            {invoice.status.replace('_', ' ')}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {daysOverdue > 0 ? (
+                            <span className="text-red-600 font-bold">{daysOverdue} days</span>
+                          ) : (
+                            <span className="text-muted-foreground">-</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <Button 
+                            size="sm" 
+                            onClick={() => {
+                              setSelectedInvoice(invoice);
+                              setIsPaymentDialogOpen(true);
+                            }}
+                          >
+                            Record Payment
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                  {filteredInvoices.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
+                        No outstanding invoices
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
           )}
         </CardContent>
       </Card>
 
-      {/* View Invoice Dialog */}
-      <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
-        <DialogContent className="max-w-2xl">
+      {/* Payment Dialog */}
+      <Dialog open={isPaymentDialogOpen} onOpenChange={setIsPaymentDialogOpen}>
+        <DialogContent>
           <DialogHeader>
-            <DialogTitle>Invoice Details</DialogTitle>
+            <DialogTitle>Record Payment</DialogTitle>
+            <DialogDescription>
+              Invoice: {selectedInvoice?.invoice_number} | Patient: {selectedInvoice?.patients?.first_name} {selectedInvoice?.patients?.last_name}
+            </DialogDescription>
           </DialogHeader>
           {selectedInvoice && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
+            <form 
+              onSubmit={(e) => {
+                e.preventDefault();
+                const amount = parseFloat(paymentAmount);
+                if (!amount || amount <= 0) {
+                  toast.error('Please enter a valid payment amount');
+                  return;
+                }
+                const balanceDue = selectedInvoice.total_amount - selectedInvoice.amount_paid;
+                if (amount > balanceDue) {
+                  toast.error(`Payment amount cannot exceed balance due (UGX ${balanceDue.toLocaleString()})`);
+                  return;
+                }
+                recordPaymentMutation.mutate({
+                  invoiceId: selectedInvoice.id,
+                  amount,
+                  paymentDate: new Date().toISOString().split('T')[0]
+                });
+              }}
+              className="space-y-4"
+            >
+              <div className="grid grid-cols-2 gap-4 p-4 bg-muted rounded">
                 <div>
-                  <p className="text-sm text-muted-foreground">Invoice Number</p>
-                  <p className="font-semibold">{selectedInvoice.invoice_number}</p>
+                  <p className="text-xs text-muted-foreground">Total Amount</p>
+                  <p className="font-bold">UGX {selectedInvoice.total_amount.toLocaleString()}</p>
                 </div>
                 <div>
-                  <p className="text-sm text-muted-foreground">Patient</p>
-                  <p className="font-semibold">{selectedInvoice.patients?.first_name} {selectedInvoice.patients?.last_name}</p>
+                  <p className="text-xs text-muted-foreground">Already Paid</p>
+                  <p className="font-bold text-green-600">UGX {selectedInvoice.amount_paid.toLocaleString()}</p>
                 </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">Date</p>
-                  <p className="font-semibold">{format(new Date(selectedInvoice.created_at), 'MMM d, yyyy')}</p>
-                </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">Status</p>
-                  <Badge className={statusColors[selectedInvoice.status]}>
-                    {selectedInvoice.status.charAt(0).toUpperCase() + selectedInvoice.status.slice(1).replace('_', ' ')}
-                  </Badge>
+                <div className="col-span-2">
+                  <p className="text-xs text-muted-foreground">Balance Due</p>
+                  <p className="text-lg font-bold text-red-600">UGX {(selectedInvoice.total_amount - selectedInvoice.amount_paid).toLocaleString()}</p>
                 </div>
               </div>
 
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Description</TableHead>
-                    <TableHead className="text-right">Quantity</TableHead>
-                    <TableHead className="text-right">Unit Price</TableHead>
-                    <TableHead className="text-right">Total</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {invoiceItems.map(item => (
-                    <TableRow key={item.id}>
-                      <TableCell>{item.description}</TableCell>
-                      <TableCell className="text-right">{item.quantity}</TableCell>
-                      <TableCell className="text-right">UGX {item.unit_price.toLocaleString()}</TableCell>
-                      <TableCell className="text-right">UGX {item.total_price.toLocaleString()}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-
-              <div className="border-t pt-4">
-                <div className="flex justify-end mb-2">
-                  <div className="w-64">
-                    <div className="flex justify-between mb-2">
-                      <span>Subtotal:</span>
-                      <span>UGX {selectedInvoice.total_amount.toLocaleString()}</span>
-                    </div>
-                    <div className="flex justify-between mb-2">
-                      <span>Tax:</span>
-                      <span>UGX 0</span>
-                    </div>
-                    <div className="flex justify-between font-bold text-lg border-t pt-2">
-                      <span>Total:</span>
-                      <span>UGX {selectedInvoice.total_amount.toLocaleString()}</span>
-                    </div>
-                    <div className="flex justify-between mt-2 text-green-600">
-                      <span>Paid:</span>
-                      <span>UGX {selectedInvoice.amount_paid.toLocaleString()}</span>
-                    </div>
-                    <div className="flex justify-between mt-2 text-red-600 font-semibold">
-                      <span>Balance Due:</span>
-                      <span>UGX {(selectedInvoice.total_amount - selectedInvoice.amount_paid).toLocaleString()}</span>
-                    </div>
-                  </div>
-                </div>
+              <div className="space-y-2">
+                <Label>Payment Amount *</Label>
+                <Input 
+                  type="number" 
+                  placeholder="Enter payment amount"
+                  value={paymentAmount}
+                  onChange={(e) => setPaymentAmount(e.target.value)}
+                  max={selectedInvoice.total_amount - selectedInvoice.amount_paid}
+                  step="0.01"
+                  required
+                />
               </div>
 
-              <div className="flex justify-end gap-2">
-                <Button variant="outline" onClick={() => setIsViewDialogOpen(false)}>
-                  Close
+              <div className="flex gap-2 justify-end">
+                <Button type="button" variant="outline" onClick={() => setIsPaymentDialogOpen(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={recordPaymentMutation.isPending}>
+                  {recordPaymentMutation.isPending ? 'Recording...' : 'Record Payment'}
                 </Button>
               </div>
-            </div>
+            </form>
           )}
         </DialogContent>
       </Dialog>

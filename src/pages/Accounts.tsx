@@ -60,6 +60,15 @@ import {
   useCompleteReconciliation,
   useCreateAccount,
   useUpdateAccount,
+  useDeleteAccount,
+  useUpdateTransaction,
+  useDeleteTransaction,
+  useUpdateBudget,
+  useDeleteBudget,
+  useIncomeStatement,
+  useBudgetVsActual,
+  useAccountsReceivableAging,
+  useExpenseAnalysis,
 } from '@/hooks/useAccounts';
 
 // Sample data for Chart of Accounts
@@ -205,6 +214,7 @@ const Accounts = () => {
   const [isEditAccountOpen, setIsEditAccountOpen] = useState(false);
   const [isCreateAccountOpen, setIsCreateAccountOpen] = useState(false);
   const [isEditBudgetOpen, setIsEditBudgetOpen] = useState(false);
+  const [isCreateBudgetOpen, setIsCreateBudgetOpen] = useState(false);
   
   const [selectedTransaction, setSelectedTransaction] = useState<any>(null);
   const [selectedAccount, setSelectedAccount] = useState<any>(null);
@@ -250,11 +260,53 @@ const Accounts = () => {
     balance: '0',
   });
 
+  const [newBudgetForm, setNewBudgetForm] = useState({
+    category: '',
+    budgeted_amount: '',
+    spent_amount: '0',
+    notes: '',
+  });
+
+  const [reconciliationForm, setReconciliationForm] = useState({
+    selected_account_id: '',
+    bank_statement_balance: '',
+    book_balance: '',
+    reconciliation_date: new Date().toISOString().split('T')[0],
+    notes: '',
+    outstanding_deposits: [] as Array<{ description: string; amount: string; item_date: string; transaction_id?: string }>,
+    outstanding_checks: [] as Array<{ description: string; reference_number: string; amount: string; transaction_id?: string }>,
+  });
+
+  const [accountTransactions, setAccountTransactions] = useState<any[]>([]);
+
+  const [newDepositForm, setNewDepositForm] = useState({
+    description: '',
+    amount: '',
+    item_date: new Date().toISOString().split('T')[0],
+  });
+
+  const [newCheckForm, setNewCheckForm] = useState({
+    description: '',
+    reference_number: '',
+    amount: '',
+  });
+
+  // Reporting hooks
+  const { data: incomeStatement } = useIncomeStatement();
+  const { data: budgetVsActual } = useBudgetVsActual();
+  const { data: arAging } = useAccountsReceivableAging();
+  const { data: expenseAnalysis } = useExpenseAnalysis();
+
   // Mutations
   const createTransactionMutation = useCreateTransaction();
   const completeReconciliationMutation = useCompleteReconciliation();
   const createAccountMutation = useCreateAccount();
   const updateAccountMutation = useUpdateAccount();
+  const deleteAccountMutation = useDeleteAccount();
+  const updateTransactionMutation = useUpdateTransaction();
+  const deleteTransactionMutation = useDeleteTransaction();
+  const updateBudgetMutation = useUpdateBudget();
+  const deleteBudgetMutation = useDeleteBudget();
 
   // Fetch data from Supabase
   const { data: summary, isLoading: summaryLoading } = useFinancialSummary();
@@ -271,9 +323,12 @@ const Accounts = () => {
   const totalRevenue = summary?.totalRevenue ?? 124780;
   const totalExpenses = summary?.totalExpenses ?? 78450;
   const netProfit = summary?.netProfit ?? 46330;
-  const outstanding = summary?.outstanding ?? 12450;
 
   const displayAccounts = accounts && accounts.length > 0 ? accounts : chartOfAccountsData;
+  
+  // Get AR from Chart of Accounts instead of invoices
+  const arAccount = displayAccounts?.find(a => (a.account_name || a.name)?.toLowerCase().includes('receivable'));
+  const outstanding = arAccount?.balance ?? 12450;
   const displayTransactions = transactions && transactions.length > 0 ? transactions : transactionsData;
   const displayBudgets = budgets && budgets.length > 0 ? budgets : budgetData;
 
@@ -397,11 +452,22 @@ const Accounts = () => {
   };
 
   const confirmDeleteTransaction = async () => {
-    toast({
-      title: 'Delete Transaction',
-      description: 'Delete functionality coming soon',
-    });
-    setIsDeleteTransactionOpen(false);
+    if (!selectedTransaction) return;
+    
+    try {
+      await deleteTransactionMutation.mutateAsync(selectedTransaction.id);
+      toast({
+        title: 'Success',
+        description: 'Transaction deleted successfully',
+      });
+      setIsDeleteTransactionOpen(false);
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to delete transaction',
+        variant: 'destructive',
+      });
+    }
   };
 
   const handleSaveEditTransaction = async () => {
@@ -414,7 +480,20 @@ const Accounts = () => {
       return;
     }
 
+    if (!selectedTransaction) return;
+
     try {
+      await updateTransactionMutation.mutateAsync({
+        ...selectedTransaction,
+        transaction_date: editTransactionForm.date,
+        description: editTransactionForm.description,
+        category: editTransactionForm.category,
+        amount: parseFloat(editTransactionForm.amount),
+        transaction_type: editTransactionForm.type as 'income' | 'expense',
+        payment_method: null,
+        notes: editTransactionForm.notes || null,
+      });
+
       toast({
         title: 'Success',
         description: 'Transaction updated successfully',
@@ -454,7 +533,16 @@ const Accounts = () => {
       return;
     }
 
+    if (!selectedAccount) return;
+
     try {
+      await updateAccountMutation.mutateAsync({
+        ...selectedAccount,
+        account_name: editAccountForm.account_name,
+        description: editAccountForm.description || null,
+        balance: parseFloat(editAccountForm.balance) || 0,
+      });
+
       toast({
         title: 'Success',
         description: 'Account updated successfully',
@@ -490,7 +578,16 @@ const Accounts = () => {
       return;
     }
 
+    if (!selectedBudget) return;
+
     try {
+      await updateBudgetMutation.mutateAsync({
+        ...selectedBudget,
+        budgeted_amount: parseFloat(editBudgetForm.budgeted_amount),
+        spent_amount: parseFloat(editBudgetForm.spent_amount) || 0,
+        notes: editBudgetForm.notes || null,
+      });
+
       toast({
         title: 'Success',
         description: 'Budget updated successfully',
@@ -528,6 +625,158 @@ const Accounts = () => {
       toast({
         title: 'Error',
         description: error.message || 'Failed to complete reconciliation',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleDeleteAccount = async (account: any) => {
+    if (!confirm(`Are you sure you want to delete account "${account.account_name}"?`)) {
+      return;
+    }
+
+    try {
+      await deleteAccountMutation.mutateAsync(account.id);
+      toast({
+        title: 'Success',
+        description: 'Account deleted successfully',
+      });
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to delete account',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleCreateBudget = async () => {
+    if (!newBudgetForm.category || !newBudgetForm.budgeted_amount) {
+      toast({
+        title: 'Validation Error',
+        description: 'Please fill in category and budgeted amount',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    try {
+      const budgetYear = new Date().getFullYear();
+      await createAccountMutation.mutateAsync({
+        budget_year: budgetYear,
+        category: newBudgetForm.category,
+        budgeted_amount: parseFloat(newBudgetForm.budgeted_amount),
+        spent_amount: parseFloat(newBudgetForm.spent_amount) || 0,
+        notes: newBudgetForm.notes,
+        is_active: true,
+      });
+
+      setNewBudgetForm({
+        category: '',
+        budgeted_amount: '',
+        spent_amount: '0',
+        notes: '',
+      });
+      setIsCreateBudgetOpen(false);
+
+      toast({
+        title: 'Success',
+        description: 'Budget created successfully',
+      });
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to create budget',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleDeleteBudget = async (budget: any) => {
+    if (!confirm(`Are you sure you want to delete budget for "${budget.category}"?`)) {
+      return;
+    }
+
+    try {
+      await deleteBudgetMutation.mutateAsync(budget.id);
+      toast({
+        title: 'Success',
+        description: 'Budget deleted successfully',
+      });
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to delete budget',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleGenerateReport = async (type: 'account' | 'budget') => {
+    try {
+      if (type === 'account' && selectedAccount) {
+        // Generate account report
+        const reportData = `
+Account Report
+======================
+Account Code: ${selectedAccount.account_code}
+Account Name: ${selectedAccount.account_name}
+Account Type: ${selectedAccount.account_type}
+Balance: UGX ${selectedAccount.balance.toLocaleString('en-UG')}
+Description: ${selectedAccount.description || 'N/A'}
+Active: ${selectedAccount.is_active ? 'Yes' : 'No'}
+Created: ${new Date(selectedAccount.created_at).toLocaleDateString('en-UG')}
+        `;
+
+        // Create and download file
+        const element = document.createElement('a');
+        element.setAttribute('href', 'data:text/plain;charset=utf-8,' + encodeURIComponent(reportData));
+        element.setAttribute('download', `account-${selectedAccount.account_code}-report.txt`);
+        element.style.display = 'none';
+        document.body.appendChild(element);
+        element.click();
+        document.body.removeChild(element);
+
+        toast({
+          title: 'Success',
+          description: 'Account report generated and downloaded',
+        });
+      } else if (type === 'budget' && selectedBudget) {
+        // Generate budget report
+        const variance = selectedBudget.budgeted_amount - (selectedBudget.spent_amount || 0);
+        const variancePercent = (variance / selectedBudget.budgeted_amount * 100).toFixed(2);
+
+        const reportData = `
+Budget Report
+======================
+Category: ${selectedBudget.category}
+Year: ${selectedBudget.budget_year}
+Budgeted Amount: UGX ${selectedBudget.budgeted_amount.toLocaleString('en-UG')}
+Spent Amount: UGX ${(selectedBudget.spent_amount || 0).toLocaleString('en-UG')}
+Remaining: UGX ${variance.toLocaleString('en-UG')}
+Variance %: ${variancePercent}%
+Status: ${selectedBudget.is_active ? 'Active' : 'Inactive'}
+Notes: ${selectedBudget.notes || 'N/A'}
+        `;
+
+        // Create and download file
+        const element = document.createElement('a');
+        element.setAttribute('href', 'data:text/plain;charset=utf-8,' + encodeURIComponent(reportData));
+        element.setAttribute('download', `budget-${selectedBudget.category}-${selectedBudget.budget_year}-report.txt`);
+        element.style.display = 'none';
+        document.body.appendChild(element);
+        element.click();
+        document.body.removeChild(element);
+
+        toast({
+          title: 'Success',
+          description: 'Budget report generated and downloaded',
+        });
+      }
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to generate report',
         variant: 'destructive',
       });
     }
@@ -573,6 +822,186 @@ const Accounts = () => {
       toast({
         title: 'Error',
         description: error.message || 'Failed to create account',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleAddOutstandingDeposit = () => {
+    if (!newDepositForm.description || !newDepositForm.amount) {
+      toast({
+        title: 'Validation Error',
+        description: 'Please fill in all required fields',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setReconciliationForm({
+      ...reconciliationForm,
+      outstanding_deposits: [
+        ...reconciliationForm.outstanding_deposits,
+        {
+          description: newDepositForm.description,
+          amount: newDepositForm.amount,
+          item_date: newDepositForm.item_date,
+        },
+      ],
+    });
+
+    setNewDepositForm({
+      description: '',
+      amount: '',
+      item_date: new Date().toISOString().split('T')[0],
+    });
+
+    toast({
+      title: 'Success',
+      description: 'Outstanding deposit added',
+    });
+  };
+
+  const handleRemoveOutstandingDeposit = (index: number) => {
+    setReconciliationForm({
+      ...reconciliationForm,
+      outstanding_deposits: reconciliationForm.outstanding_deposits.filter((_, i) => i !== index),
+    });
+  };
+
+  const handleAddOutstandingCheck = () => {
+    if (!newCheckForm.description || !newCheckForm.amount || !newCheckForm.reference_number) {
+      toast({
+        title: 'Validation Error',
+        description: 'Please fill in all required fields',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setReconciliationForm({
+      ...reconciliationForm,
+      outstanding_checks: [
+        ...reconciliationForm.outstanding_checks,
+        {
+          description: newCheckForm.description,
+          reference_number: newCheckForm.reference_number,
+          amount: newCheckForm.amount,
+        },
+      ],
+    });
+
+    setNewCheckForm({
+      description: '',
+      reference_number: '',
+      amount: '',
+    });
+
+    toast({
+      title: 'Success',
+      description: 'Outstanding check added',
+    });
+  };
+
+  const handleRemoveOutstandingCheck = (index: number) => {
+    setReconciliationForm({
+      ...reconciliationForm,
+      outstanding_checks: reconciliationForm.outstanding_checks.filter((_, i) => i !== index),
+    });
+  };
+
+  const calculateReconciledBalance = () => {
+    const bankBalance = parseFloat(reconciliationForm.bank_statement_balance) || 0;
+    const deposits = reconciliationForm.outstanding_deposits.reduce((sum, d) => sum + (parseFloat(d.amount) || 0), 0);
+    const checks = reconciliationForm.outstanding_checks.reduce((sum, c) => sum + (parseFloat(c.amount) || 0), 0);
+    return bankBalance - checks + deposits;
+  };
+
+  const bookBalance = parseFloat(reconciliationForm.book_balance) || 0;
+  const reconciledBalance = calculateReconciledBalance();
+  const isReconciled = Math.abs(reconciledBalance - bookBalance) < 0.01;
+
+  const handleSelectAccountForReconciliation = (accountId: string) => {
+    const selectedAccount = displayAccounts.find(a => a.id === accountId);
+    
+    setReconciliationForm({
+      ...reconciliationForm,
+      selected_account_id: accountId,
+      book_balance: (selectedAccount?.balance || 0).toString(),
+    });
+
+    // Load transactions for this account
+    const accountTransactions = displayTransactions.filter(
+      t => t.account_code_id === accountId || (selectedAccount && t.description?.includes(selectedAccount.account_name))
+    );
+    
+    setAccountTransactions(accountTransactions);
+
+    toast({
+      title: 'Account Selected',
+      description: `Loading transactions for ${selectedAccount?.account_name}...`,
+    });
+  };
+
+  const handleCompleteReconciliationIntegrated = async () => {
+    if (!reconciliationForm.selected_account_id) {
+      toast({
+        title: 'Error',
+        description: 'Please select a bank account',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    if (!isReconciled) {
+      toast({
+        title: 'Error',
+        description: 'Accounts must be reconciled before completion',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    try {
+      // Get the selected account
+      const selectedAccount = displayAccounts.find(a => a.id === reconciliationForm.selected_account_id);
+      if (!selectedAccount) return;
+
+      // Update the account balance to the reconciled balance
+      await updateAccountMutation.mutateAsync({
+        ...selectedAccount,
+        balance: reconciledBalance,
+      });
+
+      // Complete the reconciliation record
+      await completeReconciliationMutation.mutateAsync({
+        id: latestReconciliation?.id || '',
+        reconciliation_date: reconciliationForm.reconciliation_date,
+        bank_statement_balance: parseFloat(reconciliationForm.bank_statement_balance) || 0,
+        book_balance: bookBalance,
+        reconciliation_status: 'reconciled',
+        notes: reconciliationForm.notes || null,
+      });
+
+      toast({
+        title: 'Success',
+        description: `Reconciliation complete for ${selectedAccount.account_name}. Account balance updated.`,
+      });
+
+      // Reset reconciliation form
+      setReconciliationForm({
+        selected_account_id: '',
+        bank_statement_balance: '',
+        book_balance: '',
+        reconciliation_date: new Date().toISOString().split('T')[0],
+        notes: '',
+        outstanding_deposits: [],
+        outstanding_checks: [],
+      });
+      setAccountTransactions([]);
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to complete reconciliation',
         variant: 'destructive',
       });
     }
@@ -884,14 +1313,17 @@ const Accounts = () => {
                               Edit Account
                             </DropdownMenuItem>
                             <DropdownMenuSeparator />
-                            <DropdownMenuItem onClick={() => {
-                              toast({
-                                title: 'Report Generation',
-                                description: `Report generation for ${account.account_name || account.name} is coming soon`,
-                              });
-                            }}>
-                              <TrendingUp className="h-4 w-4 mr-2" />
+                            <DropdownMenuItem onClick={() => handleGenerateReport('account')}>
+                              <Download className="h-4 w-4 mr-2" />
                               Generate Report
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem 
+                              className="text-red-600"
+                              onClick={() => handleDeleteAccount(account)}
+                            >
+                              <Trash2 className="h-4 w-4 mr-2" />
+                              Delete Account
                             </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
@@ -910,186 +1342,318 @@ const Accounts = () => {
           <CardHeader>
             <CardTitle>Bank Reconciliation</CardTitle>
             <p className="text-sm text-muted-foreground mt-1">
-              Reconcile your bank statements with recorded transactions.
+              Reconcile your bank statements with recorded transactions for accurate financial reporting.
             </p>
           </CardHeader>
           <CardContent className="space-y-6">
-            {reconciliationsLoading ? (
-              <div className="flex items-center justify-center py-8">
-                <Loader2 className="h-5 w-5 animate-spin text-primary" />
-              </div>
-            ) : (
-              <>
-                {/* Reconciliation Summary Cards */}
-                <div className="grid grid-cols-3 gap-4">
-                  <Card>
-                    <CardContent className="p-4">
-                      <p className="text-sm text-muted-foreground mb-1">Bank Statement Balance</p>
-                      <p className="text-2xl font-bold">
-                        UGX{' '}
-                        {(latestReconciliation?.bank_statement_balance ?? reconciliationData.bankStatementBalance).toLocaleString(
-                          'en-US',
-                          { minimumFractionDigits: 2, maximumFractionDigits: 2 }
-                        )}
-                      </p>
-                    </CardContent>
-                  </Card>
-                  <Card>
-                    <CardContent className="p-4">
-                      <p className="text-sm text-muted-foreground mb-1">Book Balance</p>
-                      <p className="text-2xl font-bold">
-                        UGX{' '}
-                        {(latestReconciliation?.book_balance ?? reconciliationData.bookBalance).toLocaleString(
-                          'en-US',
-                          { minimumFractionDigits: 2, maximumFractionDigits: 2 }
-                        )}
-                      </p>
-                    </CardContent>
-                  </Card>
-                  <Card>
-                    <CardContent className="p-4">
-                      <p className="text-sm text-muted-foreground mb-1">Difference</p>
-                      <p
-                        className={`text-2xl font-bold ${
-                          reconciliationAdjustment >= 0 ? 'text-orange-600' : 'text-red-600'
-                        }`}
-                      >
-                        UGX{' '}
-                        {Math.abs(reconciliationAdjustment).toLocaleString('en-US', {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        })}
-                      </p>
-                    </CardContent>
-                  </Card>
-                </div>
+            {/* Account Selection */}
+            <Card className="border-blue-200 bg-blue-50">
+              <CardContent className="p-4">
+                <label className="text-sm font-medium mb-3 block">Select Bank Account to Reconcile</label>
+                <Select value={reconciliationForm.selected_account_id} onValueChange={handleSelectAccountForReconciliation}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Choose a bank account..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {displayAccounts
+                      .filter(a => a.account_type === 'Asset') // Typically Cash accounts are assets
+                      .map(account => (
+                        <SelectItem key={account.id} value={account.id || ''}>
+                          {account.account_code} - {account.account_name} (UGX {account.balance.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})})
+                        </SelectItem>
+                      ))
+                    }
+                  </SelectContent>
+                </Select>
+                {reconciliationForm.selected_account_id && (
+                  <div className="mt-3 p-3 bg-white rounded border border-blue-200">
+                    <p className="text-sm"><span className="font-medium">Account Transactions:</span> {accountTransactions.length} transactions loaded</p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
 
-                {/* Outstanding Items */}
-                <div className="grid grid-cols-2 gap-6">
+            {/* Transactions List for Selected Account */}
+            {reconciliationForm.selected_account_id && accountTransactions.length > 0 && (
+              <Card>
+                <CardContent className="p-4">
+                  <h3 className="font-semibold mb-3">Recent Transactions for Selected Account</h3>
+                  <div className="max-h-40 overflow-y-auto space-y-2">
+                    {accountTransactions.slice(0, 10).map((txn, idx) => (
+                      <div key={idx} className="flex justify-between items-center p-2 bg-gray-50 rounded text-sm border">
+                        <div className="flex-1">
+                          <p className="font-medium">{txn.description}</p>
+                          <p className="text-xs text-muted-foreground">{txn.transaction_date || txn.date}</p>
+                        </div>
+                        <p className={`font-bold ${txn.transaction_type === 'income' || txn.type === 'income' ? 'text-green-600' : 'text-red-600'}`}>
+                          {txn.transaction_type === 'income' || txn.type === 'income' ? '+' : '-'} UGX {Math.abs(txn.amount).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Reconciliation Form Section */}
+            <div className="grid grid-cols-2 gap-6">
+              {/* Left: Bank & Book Balances */}
+              <Card className="border">
+                <CardContent className="p-4 space-y-4">
+                  <h3 className="font-semibold">Balance Information</h3>
+                  
                   <div>
-                    <h3 className="font-semibold mb-4">Outstanding Deposits</h3>
-                    <div className="space-y-3">
-                      {(reconciliationItems?.filter(i => i.item_type === 'deposit') ?? reconciliationData.outstandingDeposits).map(
-                        (deposit, idx) => (
-                          <div
-                            key={idx}
-                            className="flex items-center justify-between p-3 bg-green-50 border border-green-200 rounded-lg"
-                          >
-                            <div>
-                              <p className="font-medium">{deposit.description}</p>
-                              <p className="text-xs text-muted-foreground">
-                                {deposit.item_date || deposit.date}
-                              </p>
-                            </div>
-                            <p className="font-bold text-green-600">
-                              +UGX{' '}
-                              {deposit.amount.toLocaleString('en-US', {
-                                minimumFractionDigits: 2,
-                                maximumFractionDigits: 2,
-                              })}
-                            </p>
-                          </div>
-                        )
-                      )}
-                    </div>
+                    <label className="text-sm font-medium mb-2 block">Reconciliation Date</label>
+                    <Input
+                      type="date"
+                      value={reconciliationForm.reconciliation_date}
+                      onChange={(e) => setReconciliationForm({...reconciliationForm, reconciliation_date: e.target.value})}
+                    />
                   </div>
 
                   <div>
-                    <h3 className="font-semibold mb-4">Outstanding Checks</h3>
-                    <div className="space-y-3">
-                      {(reconciliationItems?.filter(i => i.item_type === 'check') ?? reconciliationData.outstandingChecks).map(
-                        (check, idx) => (
-                          <div
-                            key={idx}
-                            className="flex items-center justify-between p-3 bg-red-50 border border-red-200 rounded-lg"
-                          >
-                            <div>
-                              <p className="font-medium">{check.description}</p>
-                              <p className="text-xs text-muted-foreground">
-                                {check.reference_number || check.checkNum}
-                              </p>
-                            </div>
-                            <p className="font-bold text-red-600">
-                              -UGX{' '}
-                              {Math.abs(check.amount).toLocaleString('en-US', {
-                                minimumFractionDigits: 2,
-                                maximumFractionDigits: 2,
-                              })}
-                            </p>
-                          </div>
-                        )
-                      )}
+                    <label className="text-sm font-medium mb-2 block">Bank Statement Balance</label>
+                    <Input
+                      type="number"
+                      placeholder="Enter bank statement balance"
+                      value={reconciliationForm.bank_statement_balance}
+                      onChange={(e) => setReconciliationForm({...reconciliationForm, bank_statement_balance: e.target.value})}
+                      step="0.01"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-sm font-medium mb-2 block">Book Balance</label>
+                    <Input
+                      type="number"
+                      placeholder="Enter book balance"
+                      value={reconciliationForm.book_balance}
+                      onChange={(e) => setReconciliationForm({...reconciliationForm, book_balance: e.target.value})}
+                      step="0.01"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-sm font-medium mb-2 block">Notes (Optional)</label>
+                    <textarea
+                      className="w-full px-3 py-2 border border-input rounded-md text-sm"
+                      placeholder="Add any reconciliation notes..."
+                      value={reconciliationForm.notes}
+                      onChange={(e) => setReconciliationForm({...reconciliationForm, notes: e.target.value})}
+                      rows={3}
+                    />
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Right: Summary */}
+              <Card className={`border ${isReconciled ? 'border-green-300 bg-green-50' : 'border-orange-300 bg-orange-50'}`}>
+                <CardContent className="p-4 space-y-4">
+                  <h3 className="font-semibold flex items-center gap-2">
+                    <span className={`h-3 w-3 rounded-full ${isReconciled ? 'bg-green-500' : 'bg-orange-500'}`}></span>
+                    Reconciliation Status
+                  </h3>
+
+                  <div className="space-y-3 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Bank Balance:</span>
+                      <span className="font-bold">
+                        UGX {parseFloat(reconciliationForm.bank_statement_balance || '0').toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                      </span>
+                    </div>
+                    
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Outstanding Checks:</span>
+                      <span className="font-bold text-red-600">
+                        -UGX {reconciliationForm.outstanding_checks.reduce((sum, c) => sum + (parseFloat(c.amount) || 0), 0).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                      </span>
+                    </div>
+                    
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Outstanding Deposits:</span>
+                      <span className="font-bold text-green-600">
+                        +UGX {reconciliationForm.outstanding_deposits.reduce((sum, d) => sum + (parseFloat(d.amount) || 0), 0).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                      </span>
+                    </div>
+
+                    <div className="border-t border-gray-300 pt-3 flex justify-between font-bold text-base">
+                      <span>Reconciled Balance:</span>
+                      <span className={isReconciled ? 'text-green-600' : 'text-orange-600'}>
+                        UGX {reconciledBalance.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                      </span>
+                    </div>
+
+                    <div className="flex justify-between font-bold text-base">
+                      <span>Book Balance:</span>
+                      <span>
+                        UGX {bookBalance.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                      </span>
+                    </div>
+
+                    <div className="border-t border-gray-300 pt-3">
+                      <div className={`text-center py-2 rounded font-bold ${isReconciled ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>
+                        {isReconciled ? '✓ Reconciled' : `Difference: UGX ${Math.abs(reconciledBalance - bookBalance).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`}
+                      </div>
                     </div>
                   </div>
-                </div>
+                </CardContent>
+              </Card>
+            </div>
 
-                {/* Reconciliation Summary */}
-                <Card className="bg-blue-50 border-blue-200">
-                  <CardContent className="p-6">
-                    <div className="flex items-start gap-3 mb-4">
-                      <div className="p-2 bg-blue-200 rounded-lg">
-                        <DollarSign className="h-5 w-5 text-blue-600" />
-                      </div>
-                      <h3 className="font-semibold text-lg">Reconciliation Summary</h3>
+            {/* Outstanding Items */}
+            <div className="grid grid-cols-2 gap-6">
+              {/* Outstanding Deposits */}
+              <div>
+                <h3 className="font-semibold mb-4">Outstanding Deposits</h3>
+                <Card className="mb-4 border-green-200 bg-green-50">
+                  <CardContent className="p-4 space-y-3">
+                    <div>
+                      <label className="text-sm font-medium mb-2 block">Description</label>
+                      <Input
+                        placeholder="e.g., Insurance Reimbursement"
+                        value={newDepositForm.description}
+                        onChange={(e) => setNewDepositForm({...newDepositForm, description: e.target.value})}
+                      />
                     </div>
-                    <div className="space-y-3 text-sm">
-                      <div className="flex justify-between">
-                        <span>Bank Statement Balance:</span>
-                        <span className="font-bold">
-                          UGX{' '}
-                          {(latestReconciliation?.bank_statement_balance ?? reconciliationData.bankStatementBalance).toLocaleString(
-                            'en-US',
-                            { minimumFractionDigits: 2, maximumFractionDigits: 2 }
-                          )}
-                        </span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span>Less: Outstanding Checks</span>
-                        <span className="font-bold">
-                          (UGX{' '}
-                          {Math.abs(
-                            (reconciliationItems?.filter(i => i.item_type === 'check').reduce((sum, check) => sum + check.amount, 0) ??
-                              reconciliationData.outstandingChecks.reduce((sum, check) => sum + check.amount, 0))
-                          ).toLocaleString('en-US', {
-                            minimumFractionDigits: 2,
-                            maximumFractionDigits: 2,
-                          })})
-                        </span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span>Add: Outstanding Deposits</span>
-                        <span className="font-bold">
-                          UGX{' '}
-                          {(
-                            reconciliationItems?.filter(i => i.item_type === 'deposit').reduce((sum, dep) => sum + dep.amount, 0) ??
-                            reconciliationData.outstandingDeposits.reduce((sum, dep) => sum + dep.amount, 0)
-                          ).toLocaleString('en-US', {
-                            minimumFractionDigits: 2,
-                            maximumFractionDigits: 2,
-                          })}
-                        </span>
-                      </div>
-                      <div className="border-t border-blue-300 pt-3 flex justify-between font-bold">
-                        <span>Adjusted Bank Balance:</span>
-                        <span>
-                          UGX{' '}
-                          {adjustedBalance.toLocaleString('en-US', {
-                            minimumFractionDigits: 2,
-                            maximumFractionDigits: 2,
-                          })}
-                        </span>
-                      </div>
+                    <div>
+                      <label className="text-sm font-medium mb-2 block">Amount</label>
+                      <Input
+                        type="number"
+                        placeholder="Enter amount"
+                        value={newDepositForm.amount}
+                        onChange={(e) => setNewDepositForm({...newDepositForm, amount: e.target.value})}
+                        step="0.01"
+                      />
                     </div>
+                    <div>
+                      <label className="text-sm font-medium mb-2 block">Date</label>
+                      <Input
+                        type="date"
+                        value={newDepositForm.item_date}
+                        onChange={(e) => setNewDepositForm({...newDepositForm, item_date: e.target.value})}
+                      />
+                    </div>
+                    <Button onClick={handleAddOutstandingDeposit} className="w-full" size="sm">
+                      <Plus className="h-4 w-4 mr-2" />
+                      Add Deposit
+                    </Button>
                   </CardContent>
                 </Card>
 
-                <PermissionGuard module="accounts" action="update">
-                  <Button onClick={() => setIsReconciliationOpen(true)} className="w-full" size="lg">
-                    Complete Reconciliation
-                  </Button>
-                </PermissionGuard>
-              </>
-            )}
+                <div className="space-y-2">
+                  {reconciliationForm.outstanding_deposits.map((deposit, idx) => (
+                    <div key={idx} className="flex items-center justify-between p-3 bg-green-50 border border-green-200 rounded-lg">
+                      <div className="flex-1">
+                        <p className="font-medium text-sm">{deposit.description}</p>
+                        <p className="text-xs text-muted-foreground">{deposit.item_date}</p>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <p className="font-bold text-green-600">+UGX {parseFloat(deposit.amount).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</p>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleRemoveOutstandingDeposit(idx)}
+                          className="text-red-600 hover:text-red-700"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Outstanding Checks */}
+              <div>
+                <h3 className="font-semibold mb-4">Outstanding Checks</h3>
+                <Card className="mb-4 border-red-200 bg-red-50">
+                  <CardContent className="p-4 space-y-3">
+                    <div>
+                      <label className="text-sm font-medium mb-2 block">Description</label>
+                      <Input
+                        placeholder="e.g., Medical Supplies Payment"
+                        value={newCheckForm.description}
+                        onChange={(e) => setNewCheckForm({...newCheckForm, description: e.target.value})}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium mb-2 block">Check #</label>
+                      <Input
+                        placeholder="e.g., 1001"
+                        value={newCheckForm.reference_number}
+                        onChange={(e) => setNewCheckForm({...newCheckForm, reference_number: e.target.value})}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium mb-2 block">Amount</label>
+                      <Input
+                        type="number"
+                        placeholder="Enter amount"
+                        value={newCheckForm.amount}
+                        onChange={(e) => setNewCheckForm({...newCheckForm, amount: e.target.value})}
+                        step="0.01"
+                      />
+                    </div>
+                    <Button onClick={handleAddOutstandingCheck} className="w-full" size="sm">
+                      <Plus className="h-4 w-4 mr-2" />
+                      Add Check
+                    </Button>
+                  </CardContent>
+                </Card>
+
+                <div className="space-y-2">
+                  {reconciliationForm.outstanding_checks.map((check, idx) => (
+                    <div key={idx} className="flex items-center justify-between p-3 bg-red-50 border border-red-200 rounded-lg">
+                      <div className="flex-1">
+                        <p className="font-medium text-sm">{check.description}</p>
+                        <p className="text-xs text-muted-foreground">Check #{check.reference_number}</p>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <p className="font-bold text-red-600">-UGX {parseFloat(check.amount).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</p>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleRemoveOutstandingCheck(idx)}
+                          className="text-red-600 hover:text-red-700"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex gap-3">
+              <Button 
+                onClick={handleCompleteReconciliationIntegrated}
+                disabled={!isReconciled || !reconciliationForm.bank_statement_balance || !reconciliationForm.book_balance || !reconciliationForm.selected_account_id}
+                className="flex-1"
+              >
+                {isReconciled && reconciliationForm.selected_account_id ? '✓ Mark as Reconciled' : 'Complete Reconciliation'}
+              </Button>
+              <Button 
+                variant="outline"
+                onClick={() => {
+                  setReconciliationForm({
+                    selected_account_id: '',
+                    bank_statement_balance: '',
+                    book_balance: '',
+                    reconciliation_date: new Date().toISOString().split('T')[0],
+                    notes: '',
+                    outstanding_deposits: [],
+                    outstanding_checks: [],
+                  });
+                  setAccountTransactions([]);
+                  setNewDepositForm({ description: '', amount: '', item_date: new Date().toISOString().split('T')[0] });
+                  setNewCheckForm({ description: '', reference_number: '', amount: '' });
+                }}
+              >
+                Reset
+              </Button>
+            </div>
           </CardContent>
         </Card>
       )}
@@ -1097,10 +1661,20 @@ const Accounts = () => {
       {activeTab === 'budgets' && (
         <Card>
           <CardHeader>
-            <CardTitle>Budget Management</CardTitle>
-            <p className="text-sm text-muted-foreground mt-1">
-              {budgetsLoading ? 'Loading...' : `Showing ${displayBudgets.length} budgets`}
-            </p>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle>Budget Management</CardTitle>
+                <p className="text-sm text-muted-foreground mt-1">
+                  {budgetsLoading ? 'Loading...' : `Showing ${displayBudgets.length} budgets for ${new Date().getFullYear()}`}
+                </p>
+              </div>
+              <PermissionGuard module="accounts" action="create">
+                <Button onClick={() => setIsCreateBudgetOpen(true)}>
+                  <Plus className="h-4 w-4 mr-2" />
+                  New Budget
+                </Button>
+              </PermissionGuard>
+            </div>
           </CardHeader>
           <CardContent>
             {budgetsLoading ? (
@@ -1112,58 +1686,29 @@ const Accounts = () => {
             ) : (
               <div className="space-y-6">
                 {displayBudgets.map((budget) => {
-                  const spent = budget.spent_amount ?? budget.spent;
-                  const budgeted = budget.budgeted_amount ?? budget.budget;
+                  const spent = budget.spent_amount ?? budget.spent ?? 0;
+                  const budgeted = budget.budgeted_amount ?? budget.budget ?? 0;
                   const progress = getBudgetProgress(spent, budgeted);
                   const remaining = budgeted - spent;
+                  const variance = remaining >= 0 ? remaining : -Math.abs(remaining);
+                  const variancePercent = budgeted > 0 ? ((variance / budgeted) * 100).toFixed(1) : 0;
+                  
+                  // Budget Health: Green (under), Yellow (80-100%), Red (over)
+                  const budgetHealth = progress <= 80 ? 'green' : progress <= 100 ? 'yellow' : 'red';
+                  const healthColor = budgetHealth === 'green' ? 'bg-green-50 border-green-200' : budgetHealth === 'yellow' ? 'bg-yellow-50 border-yellow-200' : 'bg-red-50 border-red-200';
 
                   return (
-                    <div key={budget.id || budget.category} className="border-b border-border pb-6 last:border-0 last:pb-0">
-                      <div className="flex items-center justify-between mb-3">
-                        <div>
-                          <p className="font-semibold">{budget.category}</p>
-                        </div>
-                        <div className="flex gap-8 text-sm">
+                    <div key={budget.id || budget.category} className={`border rounded-lg p-4 ${healthColor}`}>
+                      <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center gap-3">
                           <div>
-                            <p className="text-muted-foreground">Budget</p>
-                            <p className="font-bold">
-                              UGX{' '}
-                              {budgeted.toLocaleString('en-US', {
-                                minimumFractionDigits: 2,
-                                maximumFractionDigits: 2,
-                              })}
-                            </p>
+                            <p className="font-semibold text-base">{budget.category}</p>
+                            <p className="text-xs text-muted-foreground">Budget ID: {budget.id || 'N/A'}</p>
                           </div>
-                          <div>
-                            <p className="text-muted-foreground">Spent</p>
-                            <p className="font-bold text-red-600">
-                              UGX{' '}
-                              {spent.toLocaleString('en-US', {
-                                minimumFractionDigits: 2,
-                                maximumFractionDigits: 2,
-                              })}
-                            </p>
-                          </div>
-                          <div>
-                            <p className="text-muted-foreground">Remaining</p>
-                            <p className={`font-bold ${remaining >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                              UGX{' '}
-                              {remaining.toLocaleString('en-US', {
-                                minimumFractionDigits: 2,
-                                maximumFractionDigits: 2,
-                              })}
-                            </p>
-                          </div>
+                          <Badge variant={budgetHealth === 'green' ? 'default' : budgetHealth === 'yellow' ? 'secondary' : 'destructive'}>
+                            {progress}% Spent
+                          </Badge>
                         </div>
-                      </div>
-                      <div className="flex items-center gap-4">
-                        <div className="flex-1 bg-gray-200 rounded-full h-2 overflow-hidden">
-                          <div
-                            className={`h-full ${getBudgetProgressColor(progress)}`}
-                            style={{ width: `${Math.min(progress, 100)}%` }}
-                          />
-                        </div>
-                        <span className="text-sm font-semibold w-12 text-right">{progress}%</span>
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
                             <Button variant="ghost" size="sm">
@@ -1176,28 +1721,68 @@ const Accounts = () => {
                               Edit Budget
                             </DropdownMenuItem>
                             <DropdownMenuSeparator />
-                            <DropdownMenuItem onClick={() => {
-                              setSelectedBudget(budget);
-                              toast({
-                                title: 'Budget Details',
-                                description: `${budget.category} - ${progress}% spent`,
-                              });
-                            }}>
-                              <Eye className="h-4 w-4 mr-2" />
-                              View Details
-                            </DropdownMenuItem>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem onClick={() => {
-                              toast({
-                                title: 'Report Generation',
-                                description: `Report generation for ${budget.category} is coming soon`,
-                              });
-                            }}>
-                              <TrendingUp className="h-4 w-4 mr-2" />
-                              Generate Report
+                            <DropdownMenuItem className="text-red-600" onClick={() => handleDeleteBudget(budget)}>
+                              <Trash2 className="h-4 w-4 mr-2" />
+                              Delete Budget
                             </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
+                      </div>
+
+                      {/* Progress Bar */}
+                      <div className="mb-4">
+                        <div className="flex-1 bg-gray-300 rounded-full h-2 overflow-hidden">
+                          <div
+                            className={`h-full ${budgetHealth === 'green' ? 'bg-green-500' : budgetHealth === 'yellow' ? 'bg-yellow-500' : 'bg-red-500'}`}
+                            style={{ width: `${Math.min(progress, 100)}%` }}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Budget Details Grid */}
+                      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-sm">
+                        <div>
+                          <p className="text-muted-foreground text-xs">Budget</p>
+                          <p className="font-bold">
+                            UGX{' '}
+                            {budgeted.toLocaleString('en-US', {
+                              minimumFractionDigits: 0,
+                              maximumFractionDigits: 0,
+                            })}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-muted-foreground text-xs">Spent</p>
+                          <p className="font-bold text-red-600">
+                            UGX{' '}
+                            {spent.toLocaleString('en-US', {
+                              minimumFractionDigits: 0,
+                              maximumFractionDigits: 0,
+                            })}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-muted-foreground text-xs">Remaining</p>
+                          <p className={`font-bold ${remaining >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                            UGX{' '}
+                            {Math.abs(remaining).toLocaleString('en-US', {
+                              minimumFractionDigits: 0,
+                              maximumFractionDigits: 0,
+                            })}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-muted-foreground text-xs">Variance</p>
+                          <p className={`font-bold ${variance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                            {variance >= 0 ? '+' : '-'}{Math.abs(variancePercent)}%
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-muted-foreground text-xs">Health</p>
+                          <p className={`font-bold text-sm ${budgetHealth === 'green' ? 'text-green-600' : budgetHealth === 'yellow' ? 'text-yellow-600' : 'text-red-600'}`}>
+                            {budgetHealth === 'green' ? '✓ Good' : budgetHealth === 'yellow' ? '⚠ Warning' : '✗ Alert'}
+                          </p>
+                        </div>
                       </div>
                     </div>
                   );
@@ -1689,6 +2274,82 @@ const Accounts = () => {
               Cancel
             </Button>
             <Button onClick={handleSaveEditBudget}>Save Changes</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Create Budget Modal */}
+      <Dialog open={isCreateBudgetOpen} onOpenChange={setIsCreateBudgetOpen}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Create New Budget</DialogTitle>
+            <DialogDescription>Set up a new budget for fiscal year {new Date().getFullYear()}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div>
+              <label className="text-sm font-medium mb-2 block">Category</label>
+              <Select value={newBudgetForm.category} onValueChange={(value) => setNewBudgetForm({...newBudgetForm, category: value})}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select category" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Medical Supplies">Medical Supplies</SelectItem>
+                  <SelectItem value="Staff Salaries">Staff Salaries</SelectItem>
+                  <SelectItem value="Equipment">Equipment</SelectItem>
+                  <SelectItem value="Utilities">Utilities</SelectItem>
+                  <SelectItem value="Maintenance">Maintenance</SelectItem>
+                  <SelectItem value="Insurance">Insurance</SelectItem>
+                  <SelectItem value="Marketing">Marketing</SelectItem>
+                  <SelectItem value="Training">Training</SelectItem>
+                  <SelectItem value="Other">Other</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="text-sm font-medium mb-2 block">Budgeted Amount (UGX) *</label>
+                <Input 
+                  type="number"
+                  placeholder="0.00"
+                  value={newBudgetForm.budgeted_amount}
+                  onChange={(e) => setNewBudgetForm({...newBudgetForm, budgeted_amount: e.target.value})}
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium mb-2 block">Initial Spent Amount (UGX)</label>
+                <Input 
+                  type="number"
+                  placeholder="0.00"
+                  value={newBudgetForm.spent_amount}
+                  onChange={(e) => setNewBudgetForm({...newBudgetForm, spent_amount: e.target.value})}
+                />
+              </div>
+            </div>
+            <div>
+              <label className="text-sm font-medium mb-2 block">Notes (Optional)</label>
+              <textarea
+                className="w-full px-3 py-2 border border-input rounded-md text-sm"
+                placeholder="Budget notes or remarks..."
+                value={newBudgetForm.notes}
+                onChange={(e) => setNewBudgetForm({...newBudgetForm, notes: e.target.value})}
+                rows={3}
+              />
+            </div>
+          </div>
+          <div className="flex gap-3">
+            <Button variant="outline" onClick={() => setIsCreateBudgetOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleCreateBudget} disabled={createAccountMutation.isPending}>
+              {createAccountMutation.isPending ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Creating...
+                </>
+              ) : (
+                'Create Budget'
+              )}
+            </Button>
           </div>
         </DialogContent>
       </Dialog>
