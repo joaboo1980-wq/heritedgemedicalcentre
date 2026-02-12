@@ -16,6 +16,8 @@ import ReceptionDashboard from "./pages/ReceptionDashboard";
 import DoctorDashboard from "./pages/DoctorDashboard";
 import LaboratoryDashboard from "./pages/LaboratoryDashboard";
 import NursingDashboard from "./pages/NursingDashboard";
+import NurseTaskProgress from "./pages/NurseTaskProgress";
+import GenerateNurseReport from "./pages/GenerateNurseReport";
 import PharmacyDashboard from "./pages/PharmacyDashboard";
 import Patients from "./pages/Patients";
 import DoctorExamination from "./pages/DoctorExamination";
@@ -126,6 +128,16 @@ const App = () => (
               <Route path="/nursing-dashboard" element={
                 <ProtectedRoute module="dashboard" requiredRole="nurse">
                   <NursingDashboard />
+                </ProtectedRoute>
+              } />
+              <Route path="/nurse-task-progress" element={
+                <ProtectedRoute module="dashboard" requiredRole="nurse">
+                  <NurseTaskProgress />
+                </ProtectedRoute>
+              } />
+              <Route path="/generate-nurse-report" element={
+                <ProtectedRoute module="dashboard" requiredRole="nurse">
+                  <GenerateNurseReport />
                 </ProtectedRoute>
               } />
               <Route path="/pharmacy-dashboard" element={

@@ -90,16 +90,21 @@ const itemTypes = ['consultation', 'lab_test', 'medication', 'procedure', 'room'
 const Invoices = () => {
   const { user } = useAuth();
   const queryClient = useQueryClient();
+  const invoiceTemplateRef = useRef<HTMLDivElement>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState<'all' | 'pending' | 'paid' | 'overdue'>('all');
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
+  const [isProofOfPayment, setIsProofOfPayment] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
+  const [selectedInvoiceItems, setSelectedInvoiceItems] = useState<InvoiceItem[]>([]);
   const [newInvoice, setNewInvoice] = useState({
     patient_id: '',
     due_date: '',
     items: [{ description: '', item_type: 'consultation', quantity: 1, unit_price: 0 }],
   });
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [isSendingEmail, setIsSendingEmail] = useState(false);
 
   // Fetch invoices
   const { data: invoices, isLoading } = useQuery({
@@ -124,6 +129,7 @@ const Invoices = () => {
         .select('*')
         .eq('invoice_id', selectedInvoice.id);
       if (error) throw error;
+      setSelectedInvoiceItems(data as InvoiceItem[]);
       return data as InvoiceItem[];
     },
     enabled: !!selectedInvoice,
@@ -551,9 +557,9 @@ const Invoices = () => {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => { setSelectedInvoice(invoice); setIsViewDialogOpen(true); }}>
+                          <DropdownMenuItem onClick={() => { setSelectedInvoice(invoice); setIsProofOfPayment(false); setIsViewDialogOpen(true); }}>
                             <Eye className="h-4 w-4 mr-2" />
-                            View Details
+                            View Invoice
                           </DropdownMenuItem>
                           
                           {invoice.status === 'draft' && (
@@ -585,10 +591,43 @@ const Invoices = () => {
                           )}
                           
                           <DropdownMenuSeparator />
-                          <DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => {
+                            setSelectedInvoice(invoice);
+                            setIsProofOfPayment(false);
+                            setTimeout(() => {
+                              if (invoiceTemplateRef.current) {
+                                generatePDF(invoiceTemplateRef.current, generateInvoiceFilename(invoice.invoice_number, `${invoice.patients?.first_name} ${invoice.patients?.last_name}`, invoice.status))
+                                  .catch(() => toast.error('Failed to generate PDF'));
+                              }
+                            }, 100);
+                          }}>
                             <Download className="h-4 w-4 mr-2" />
                             Download PDF
                           </DropdownMenuItem>
+
+                          <DropdownMenuItem onClick={() => {
+                            setSelectedInvoice(invoice);
+                            setIsProofOfPayment(false);
+                            setTimeout(() => {
+                              if (invoiceTemplateRef.current) {
+                                printInvoice(invoiceTemplateRef.current);
+                              }
+                            }, 100);
+                          }}>
+                            <Printer className="h-4 w-4 mr-2" />
+                            Print Invoice
+                          </DropdownMenuItem>
+
+                          {invoice.patients?.email && (
+                            <DropdownMenuItem onClick={() => {
+                              setIsSendingEmail(true);
+                              toast.info('Email functionality coming soon. For now, please download and send manually.');
+                              setIsSendingEmail(false);
+                            }}>
+                              <Mail className="h-4 w-4 mr-2" />
+                              Email Invoice
+                            </DropdownMenuItem>
+                          )}
                           
                           {invoice.status === 'draft' && (
                             <DropdownMenuItem>
@@ -625,47 +664,70 @@ const Invoices = () => {
 
       {/* View Invoice Dialog */}
       <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="sm:max-w-5xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Invoice Details</DialogTitle>
-            <DialogDescription>View complete invoice information.</DialogDescription>
+            <DialogTitle>Invoice - {selectedInvoice?.invoice_number}</DialogTitle>
+            <DialogDescription>Professional invoice template with download and print options</DialogDescription>
           </DialogHeader>
           {selectedInvoice && (
             <div className="space-y-4">
-              <div className="flex justify-between items-start">
-                <div>
-                  <p className="text-lg font-bold">{selectedInvoice.invoice_number}</p>
-                  <p className="text-sm text-muted-foreground">{selectedInvoice.patients?.first_name} {selectedInvoice.patients?.last_name}</p>
-                </div>
-                <Badge className={statusColors[selectedInvoice.status]}>{selectedInvoice.status}</Badge>
+              {/* Invoice Template Preview */}
+              <div ref={invoiceTemplateRef} className="bg-white border rounded-lg p-4 shadow-sm">
+                <InvoiceTemplate 
+                  invoice={selectedInvoice} 
+                  invoiceItems={selectedInvoiceItems}
+                  isProofOfPayment={isProofOfPayment}
+                />
               </div>
-              <div className="border-t pt-4">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Description</TableHead>
-                      <TableHead>Qty</TableHead>
-                      <TableHead>Price</TableHead>
-                      <TableHead>Total</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {invoiceItems?.map((item) => (
-                      <TableRow key={item.id}>
-                        <TableCell>{item.description}</TableCell>
-                        <TableCell>{item.quantity}</TableCell>
-                        <TableCell>UGX {item.unit_price.toLocaleString()}</TableCell>
-                        <TableCell>UGX {item.total_price.toLocaleString()}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-              <div className="border-t pt-4 space-y-2">
-                <div className="flex justify-between"><span>Subtotal:</span><span>UGX {selectedInvoice.subtotal.toLocaleString()}</span></div>
-                <div className="flex justify-between font-bold text-lg"><span>Total:</span><span>UGX {selectedInvoice.total_amount.toLocaleString()}</span></div>
-                <div className="flex justify-between text-green-600"><span>Paid:</span><span>UGX {selectedInvoice.amount_paid.toLocaleString()}</span></div>
-                <div className="flex justify-between text-red-600 font-medium"><span>Balance:</span><span>UGX {(selectedInvoice.total_amount - selectedInvoice.amount_paid).toLocaleString()}</span></div>
+
+              {/* Action Buttons */}
+              <div className="flex gap-2 justify-end border-t pt-4">
+                <Button 
+                  variant="outline"
+                  onClick={() => printInvoice(invoiceTemplateRef.current)}
+                  disabled={!invoiceTemplateRef.current}
+                >
+                  <Printer className="h-4 w-4 mr-2" />
+                  Print
+                </Button>
+                <Button 
+                  variant="outline"
+                  onClick={() => {
+                    if (invoiceTemplateRef.current) {
+                      setIsDownloading(true);
+                      generatePDF(
+                        invoiceTemplateRef.current, 
+                        generateInvoiceFilename(
+                          selectedInvoice.invoice_number, 
+                          `${selectedInvoice.patients?.first_name} ${selectedInvoice.patients?.last_name}`,
+                          isProofOfPayment ? 'proof-of-payment' : selectedInvoice.status
+                        )
+                      ).finally(() => setIsDownloading(false));
+                    }
+                  }}
+                  disabled={isDownloading || !invoiceTemplateRef.current}
+                >
+                  <Download className="h-4 w-4 mr-2" />
+                  {isDownloading ? 'Generating PDF...' : 'Download PDF'}
+                </Button>
+                {selectedInvoice.status === 'paid' && (
+                  <Button 
+                    variant="outline"
+                    onClick={() => {
+                      setIsProofOfPayment(true);
+                      toast.info('Switched to Proof of Payment view. Download this version as your payment receipt.');
+                    }}
+                  >
+                    <FileText className="h-4 w-4 mr-2" />
+                    Proof of Payment
+                  </Button>
+                )}
+                <Button 
+                  variant="outline"
+                  onClick={() => setIsViewDialogOpen(false)}
+                >
+                  Close
+                </Button>
               </div>
             </div>
           )}

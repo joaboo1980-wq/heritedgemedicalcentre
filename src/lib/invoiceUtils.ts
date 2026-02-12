@@ -36,7 +36,7 @@ export const generatePDF = async (
     const imgWidth = pageWidth - 20;
     const imgHeight = (canvas.height * imgWidth) / canvas.width;
 
-    let y = 10;
+    const y = 10;
     pdf.addImage(imgData, 'PNG', 10, y, imgWidth, imgHeight);
 
     // Handle multi-page PDFs

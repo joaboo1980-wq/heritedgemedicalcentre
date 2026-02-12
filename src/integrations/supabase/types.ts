@@ -907,6 +907,147 @@ export type Database = {
         }
         Relationships: []
       }
+      nursing_tasks: {
+        Row: {
+          assigned_by_id: string
+          assigned_nurse_id: string
+          completed_at: string | null
+          completed_notes: string | null
+          created_at: string
+          description: string | null
+          due_time: string | null
+          id: string
+          patient_id: string
+          priority: string
+          status: string
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          assigned_by_id: string
+          assigned_nurse_id: string
+          completed_at?: string | null
+          completed_notes?: string | null
+          created_at?: string
+          description?: string | null
+          due_time?: string | null
+          id?: string
+          patient_id: string
+          priority?: string
+          status?: string
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          assigned_by_id?: string
+          assigned_nurse_id?: string
+          completed_at?: string | null
+          completed_notes?: string | null
+          created_at?: string
+          description?: string | null
+          due_time?: string | null
+          id?: string
+          patient_id?: string
+          priority?: string
+          status?: string
+          title?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "nursing_tasks_assigned_by_id_fkey"
+            columns: ["assigned_by_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "nursing_tasks_assigned_nurse_id_fkey"
+            columns: ["assigned_nurse_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "nursing_tasks_patient_id_fkey"
+            columns: ["patient_id"]
+            isOneToOne: false
+            referencedRelation: "patients"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
+      patient_assignments: {
+        Row: {
+          assigned_by_id: string
+          created_at: string
+          id: string
+          is_primary_nurse: boolean
+          nurse_id: string
+          patient_id: string
+          priority: string
+          reassigned_from_id: string | null
+          reassignment_reason: string | null
+          shift_date: string
+          updated_at: string
+        }
+        Insert: {
+          assigned_by_id: string
+          created_at?: string
+          id?: string
+          is_primary_nurse?: boolean
+          nurse_id: string
+          patient_id: string
+          priority?: string
+          reassigned_from_id?: string | null
+          reassignment_reason?: string | null
+          shift_date: string
+          updated_at?: string
+        }
+        Update: {
+          assigned_by_id?: string
+          created_at?: string
+          id?: string
+          is_primary_nurse?: boolean
+          nurse_id?: string
+          patient_id?: string
+          priority?: string
+          reassigned_from_id?: string | null
+          reassignment_reason?: string | null
+          shift_date?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "patient_assignments_assigned_by_id_fkey"
+            columns: ["assigned_by_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "patient_assignments_nurse_id_fkey"
+            columns: ["nurse_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "patient_assignments_patient_id_fkey"
+            columns: ["patient_id"]
+            isOneToOne: false
+            referencedRelation: "patients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "patient_assignments_reassigned_from_id_fkey"
+            columns: ["reassigned_from_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
     }
     Views: {
       [_ in never]: never

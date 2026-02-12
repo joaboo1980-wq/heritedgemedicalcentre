@@ -19,7 +19,8 @@ import {
   ChevronRight,
   DollarSign,
   Stethoscope,
-  Clock
+  Clock,
+  TrendingUp
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/hooks/useAuth';
@@ -60,6 +61,8 @@ const navItems: NavItem[] = [
   { icon: FileText, label: 'Invoices', href: '/invoices', module: 'billing' },
   { icon: DollarSign, label: 'Accounts', href: '/accounts', module: 'accounts' },
   { icon: BarChart3, label: 'Reports', href: '/reports', module: 'reports' },
+  { icon: TrendingUp, label: 'Task Progress', href: '/nurse-task-progress', module: 'dashboard' },
+  { icon: FileText, label: 'Generate Report', href: '/generate-nurse-report', module: 'dashboard' },
 ];
 
 const adminItems = [
@@ -153,7 +156,8 @@ const Sidebar = () => {
                  location.pathname === '/nursing-dashboard' ||
                  location.pathname === '/pharmacy-dashboard' ||
                  location.pathname === '/admin-dashboard' ||
-                 location.pathname === '/dashboard')
+                 location.pathname === '/dashboard' ||
+                 location.pathname === '/nurse-task-progress')
                   ? 'bg-blue-600 text-white font-medium' 
                   : 'hover:bg-white/10 text-white'
               )}

@@ -1,7 +1,16 @@
 import React, { useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/hooks/useAuth';
 import { useDashboardStats } from '@/hooks/useDashboard';
-import { useQuery } from '@tanstack/react-query';
+import {
+  useNursingTasksForNurse,
+  usePatientAssignmentsForToday,
+  useUpdateTask,
+  useNursingTasksWithPatients,
+  usePatientAssignmentsWithPatients,
+  useCarePlans,
+} from '@/hooks/useNursingAssignments';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { format, startOfDay, endOfDay } from 'date-fns';
 import { AlertCircle, CheckCircle, Clock, Eye, Pill, Heart, FileText, X } from 'lucide-react';
 
@@ -629,15 +638,21 @@ interface CarePlanModalProps {
   isOpen: boolean;
   onClose: () => void;
   patient: AssignedPatient | null;
-  onSave: (data: any) => void;
+  onClose: () => void;
 }
 
-const CreateCarePlanModal: React.FC<CarePlanModalProps> = ({ isOpen, onClose, patient, onSave }) => {
+const CarePlanManagerModal: React.FC<CarePlanManagerModalProps> = ({ isOpen, onClose, patient }) => {
+  const { user } = useAuth();
+  const { data: carePlans = [] } = useCarePlans(patient?.id);
+  const queryClient = useQueryClient();
+  
+  const [activeTab, setActiveTab] = useState<'view' | 'create'>('view');
   const [formData, setFormData] = useState({
     goals: '',
     interventions: '',
     criteria: '',
   });
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -656,21 +671,48 @@ const CreateCarePlanModal: React.FC<CarePlanModalProps> = ({ isOpen, onClose, pa
         throw new Error('Nursing Interventions are required');
       }
 
-      // Save care plan to Supabase
-      const { error: insertError } = await supabase.from('care_plans').insert({
-        patient_id: patient.id,
-        care_goals: formData.goals,
-        nursing_interventions: formData.interventions,
-        evaluation_criteria: formData.criteria,
-        created_at: new Date().toISOString(),
+      if (editingId) {
+        // Update existing care plan
+        // @ts-expect-error - care_plans table exists
+        const { error: updateError } = await supabase
+          .from('care_plans')
+          .update({
+            care_goals: formData.goals,
+            nursing_interventions: formData.interventions,
+            evaluation_criteria: formData.criteria,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', editingId);
+
+        if (updateError) throw updateError;
+        console.log('[CarePlanManagerModal] Care plan updated:', editingId);
+      } else {
+        // Create new care plan
+        // @ts-expect-error - care_plans table exists
+        const { error: insertError } = await supabase.from('care_plans').insert({
+          patient_id: patient.id,
+          care_goals: formData.goals,
+          nursing_interventions: formData.interventions,
+          evaluation_criteria: formData.criteria,
+          created_by: user?.id,
+          status: 'active',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        });
+
+        if (insertError) throw insertError;
+        console.log('[CarePlanManagerModal] Care plan created for patient:', patient.name);
+      }
+
+      // Refresh care plans
+      await queryClient.invalidateQueries({
+        queryKey: ['care-plans', patient.id],
+        exact: true,
       });
 
-      if (insertError) throw insertError;
-
-      console.log('Care plan saved for patient:', patient.name);
       setFormData({ goals: '', interventions: '', criteria: '' });
-      onSave(formData);
-      onClose();
+      setEditingId(null);
+      setActiveTab('view');
     } catch (err: any) {
       console.error('Error saving care plan:', err);
       setError(err.message || 'Failed to save care plan');
@@ -679,87 +721,231 @@ const CreateCarePlanModal: React.FC<CarePlanModalProps> = ({ isOpen, onClose, pa
     }
   };
 
+  const handleDelete = async (carePlanId: string) => {
+    if (!confirm('Are you sure you want to delete this care plan?')) return;
+
+    try {
+      setLoading(true);
+      // @ts-expect-error - care_plans table exists
+      const { error: deleteError } = await supabase
+        .from('care_plans')
+        .delete()
+        .eq('id', carePlanId);
+
+      if (deleteError) throw deleteError;
+      console.log('[CarePlanManagerModal] Care plan deleted:', carePlanId);
+
+      await queryClient.invalidateQueries({
+        queryKey: ['care-plans', patient.id],
+        exact: true,
+      });
+    } catch (err: any) {
+      setError(err.message || 'Failed to delete care plan');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleEdit = (plan: any) => {
+    setFormData({
+      goals: plan.care_goals,
+      interventions: plan.nursing_interventions,
+      criteria: plan.evaluation_criteria || '',
+    });
+    setEditingId(plan.id);
+    setActiveTab('create');
+    setError('');
+  };
+
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg shadow-lg p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
-        <div className="flex justify-between items-center mb-1">
-          <h3 className="text-lg font-bold text-gray-800">Create Care Plan</h3>
+      <div className="bg-white rounded-lg shadow-lg w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
+        {/* Header */}
+        <div className="flex justify-between items-center p-6 border-b border-gray-200">
+          <h3 className="text-xl font-bold text-gray-800">Care Plans for {patient.name}</h3>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
             <X size={24} />
           </button>
         </div>
-        <p className="text-sm text-gray-600 mb-4">Create a care plan for {patient.name}</p>
 
-        {error && (
-          <div className="mb-4 p-3 bg-red-100 border border-red-400 text-red-700 rounded text-sm">
-            {error}
-          </div>
-        )}
+        {/* Tabs */}
+        <div className="flex border-b border-gray-200 bg-gray-50 px-6">
+          <button
+            onClick={() => { setActiveTab('view'); setEditingId(null); setError(''); }}
+            className={`px-4 py-3 font-medium text-sm border-b-2 transition-colors ${
+              activeTab === 'view'
+                ? 'border-blue-500 text-blue-600'
+                : 'border-transparent text-gray-600 hover:text-gray-800'
+            }`}
+          >
+            View & Manage {carePlans.length > 0 && `(${carePlans.length})`}
+          </button>
+          <button
+            onClick={() => { setActiveTab('create'); setEditingId(null); setFormData({ goals: '', interventions: '', criteria: '' }); setError(''); }}
+            className={`px-4 py-3 font-medium text-sm border-b-2 transition-colors ${
+              activeTab === 'create'
+                ? 'border-blue-500 text-blue-600'
+                : 'border-transparent text-gray-600 hover:text-gray-800'
+            }`}
+          >
+            {editingId ? 'Edit Plan' : 'Create New'}
+          </button>
+        </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-2">
-              Care Goals *
-            </label>
-            <textarea
-              value={formData.goals}
-              onChange={(e) => setFormData({ ...formData, goals: e.target.value })}
-              placeholder="Define patient care goals..."
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
-              rows={3}
-              required
-            />
-          </div>
+        {/* Content */}
+        <div className="flex-1 overflow-y-auto p-6">
+          {error && (
+            <div className="mb-4 p-3 bg-red-100 border border-red-400 text-red-700 rounded text-sm">
+              {error}
+            </div>
+          )}
 
-          <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-2">
-              Nursing Interventions *
-            </label>
-            <textarea
-              value={formData.interventions}
-              onChange={(e) => setFormData({ ...formData, interventions: e.target.value })}
-              placeholder="List nursing interventions..."
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
-              rows={3}
-              required
-            />
-          </div>
+          {activeTab === 'view' ? (
+            // View & Manage Tab
+            <div className="space-y-3">
+              {carePlans.length === 0 ? (
+                <div className="text-center py-8">
+                  <p className="text-gray-500 text-sm">No care plans created yet</p>
+                  <button
+                    onClick={() => setActiveTab('create')}
+                    className="text-blue-600 hover:text-blue-800 text-sm font-semibold mt-2"
+                  >
+                    Create first care plan
+                  </button>
+                </div>
+              ) : (
+                (carePlans as any[]).map((plan) => (
+                  <div key={plan.id} className="border border-gray-200 rounded-lg p-4 bg-gray-50 hover:bg-gray-100 transition-colors">
+                    <div className="flex justify-between items-start mb-3">
+                      <div>
+                        <span className={`inline-block px-2 py-1 rounded text-xs font-semibold ${
+                          plan.status === 'active'
+                            ? 'bg-green-100 text-green-800'
+                            : 'bg-gray-100 text-gray-800'
+                        }`}>
+                          {plan.status || 'Active'}
+                        </span>
+                        <p className="text-xs text-gray-500 mt-2">
+                          Created: {new Date(plan.created_at).toLocaleDateString()}
+                        </p>
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => handleEdit(plan)}
+                          className="text-blue-600 hover:text-blue-800 text-xs font-semibold px-2 py-1 bg-blue-50 rounded"
+                          disabled={loading}
+                        >
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => handleDelete(plan.id)}
+                          className="text-red-600 hover:text-red-800 text-xs font-semibold px-2 py-1 bg-red-50 rounded"
+                          disabled={loading}
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </div>
 
-          <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-2">
-              Evaluation Criteria
-            </label>
-            <textarea
-              value={formData.criteria}
-              onChange={(e) => setFormData({ ...formData, criteria: e.target.value })}
-              placeholder="How will progress be evaluated..."
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
-              rows={3}
-            />
-          </div>
+                    {plan.care_goals && (
+                      <div className="mb-2">
+                        <h4 className="text-xs font-semibold text-gray-700 mb-1">Care Goals:</h4>
+                        <p className="text-xs text-gray-600 line-clamp-2">{plan.care_goals}</p>
+                      </div>
+                    )}
 
-          <div className="flex gap-2 justify-end pt-4 border-t border-gray-200">
+                    {plan.nursing_interventions && (
+                      <div className="mb-2">
+                        <h4 className="text-xs font-semibold text-gray-700 mb-1">Interventions:</h4>
+                        <p className="text-xs text-gray-600 line-clamp-2">{plan.nursing_interventions}</p>
+                      </div>
+                    )}
+
+                    {plan.evaluation_criteria && (
+                      <div>
+                        <h4 className="text-xs font-semibold text-gray-700 mb-1">Evaluation:</h4>
+                        <p className="text-xs text-gray-600 line-clamp-2">{plan.evaluation_criteria}</p>
+                      </div>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+          ) : (
+            // Create/Edit Tab
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  Care Goals *
+                </label>
+                <textarea
+                  value={formData.goals}
+                  onChange={(e) => setFormData({ ...formData, goals: e.target.value })}
+                  placeholder="Define patient care goals..."
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                  rows={3}
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  Nursing Interventions *
+                </label>
+                <textarea
+                  value={formData.interventions}
+                  onChange={(e) => setFormData({ ...formData, interventions: e.target.value })}
+                  placeholder="List nursing interventions..."
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                  rows={3}
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  Evaluation Criteria
+                </label>
+                <textarea
+                  value={formData.criteria}
+                  onChange={(e) => setFormData({ ...formData, criteria: e.target.value })}
+                  placeholder="How will progress be evaluated..."
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                  rows={3}
+                />
+              </div>
+            </form>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="border-t border-gray-200 bg-gray-50 px-6 py-4 flex gap-2 justify-end">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 bg-white text-gray-700 border border-gray-300 rounded hover:bg-gray-50 font-medium"
+          >
+            Close
+          </button>
+          {activeTab === 'create' && (
             <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 bg-white text-gray-700 border border-gray-300 rounded hover:bg-gray-50 font-medium"
-              disabled={loading}
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
+              onClick={(e) => handleSubmit(e as any)}
               className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 font-medium disabled:opacity-50"
               disabled={loading}
             >
-              {loading ? 'Saving...' : 'Save Care Plan'}
+              {loading ? 'Saving...' : editingId ? 'Update' : 'Create'}
             </button>
-          </div>
-        </form>
+          )}
+        </div>
       </div>
     </div>
   );
 };
+
+interface CarePlanManagerModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  patient: AssignedPatient | null;
+}
 
 interface MedicationAdminModalProps {
   isOpen: boolean;
@@ -768,19 +954,200 @@ interface MedicationAdminModalProps {
   onSave: (data: any) => void;
 }
 
-const AdministerMedicationModal: React.FC<MedicationAdminModalProps> = ({
+const TaskDetailModal: React.FC<{
+  isOpen: boolean;
+  onClose: () => void;
+  task: NursingTask | null;
+  onStatusChange: (taskId: string, status: 'completed' | 'pending', notes: string) => void;
+  loading?: boolean;
+}> = ({ isOpen, onClose, task, onStatusChange, loading }) => {
+  const [reason, setReason] = useState('');
+  const [updating, setUpdating] = useState(false);
+
+  if (!isOpen || !task) return null;
+
+  const handleMarkDone = async () => {
+    setUpdating(true);
+    try {
+      await onStatusChange(task.id, 'completed', reason);
+    } finally {
+      setUpdating(false);
+    }
+  };
+
+  const handleMarkNotDone = async () => {
+    setUpdating(true);
+    try {
+      await onStatusChange(task.id, 'pending', reason);
+    } finally {
+      setUpdating(false);
+    }
+  };
+
+  const handleReopen = async () => {
+    setUpdating(true);
+    try {
+      await onStatusChange(task.id, 'pending', reason);
+    } finally {
+      setUpdating(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div className="bg-white rounded-lg shadow-lg w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+        {/* Header */}
+        <div className="flex justify-between items-center p-6 border-b border-gray-200">
+          <h3 className="text-xl font-bold text-gray-800">Task Details</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+            <X size={24} />
+          </button>
+        </div>
+
+        {/* Content */}
+        <div className="p-6 space-y-6">
+          {/* Task Info Grid */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">TASK TITLE</label>
+              <p className="text-sm text-gray-800 font-medium">{task.title}</p>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">PATIENT</label>
+              <p className="text-sm text-gray-800 font-medium">{task.patient}</p>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">PRIORITY</label>
+              <span className={`inline-block px-3 py-1 rounded-full text-xs font-semibold ${
+                task.priority === 'High' || task.priority === 'Critical' ? 'bg-red-100 text-red-800' :
+                task.priority === 'Medium' ? 'bg-blue-100 text-blue-800' :
+                'bg-gray-100 text-gray-800'
+              }`}>
+                {task.priority}
+              </span>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">DUE TIME</label>
+              <p className="text-sm text-gray-800 font-medium">{task.dueTime}</p>
+            </div>
+            <div className="col-span-2">
+              <label className="block text-xs font-semibold text-gray-600 mb-1">CURRENT STATUS</label>
+              <span className={`inline-block px-3 py-1 rounded-full text-xs font-semibold ${
+                task.status === 'Completed' ? 'bg-green-100 text-green-800' :
+                'bg-red-100 text-red-800'
+              }`}>
+                {task.status}
+              </span>
+            </div>
+          </div>
+
+          {/* Description if available */}
+          <div className="border-t pt-4">
+            <label className="block text-xs font-semibold text-gray-600 mb-2">DESCRIPTION</label>
+            <div className="bg-gray-50 p-3 rounded text-sm text-gray-700">
+              <p>Task details and instructions for completion of this nursing task.</p>
+            </div>
+          </div>
+
+          {/* Reason/Notes Input */}
+          <div className="border-t pt-4">
+            <label className="block text-sm font-semibold text-gray-700 mb-2">
+              Notes/Reason for Status Change
+            </label>
+            <textarea
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="Explain the  task completion status, any issues, or relevant notes..."
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+              rows={4}
+            />
+            <p className="text-xs text-gray-500 mt-1">This note will be recorded with the status update</p>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="border-t border-gray-200 bg-gray-50 px-6 py-4 flex gap-2 justify-end">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 bg-white text-gray-700 border border-gray-300 rounded hover:bg-gray-50 font-medium"
+            disabled={updating || loading}
+          >
+            Close
+          </button>
+          {task.status === 'Pending' && (
+            <>
+              <button
+                onClick={handleMarkNotDone}
+                className="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600 font-medium disabled:opacity-50"
+                disabled={updating || loading}
+              >
+                {updating ? 'Saving...' : 'Mark Not Done'}
+              </button>
+              <button
+                onClick={handleMarkDone}
+                className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 font-medium disabled:opacity-50"
+                disabled={updating || loading}
+              >
+                {updating ? 'Saving...' : 'Mark Done'}
+              </button>
+            </>
+          )}
+          {task.status === 'Completed' && (
+            <button
+              onClick={handleMarkNotDone}
+              className="px-4 py-2 bg-orange-500 text-white rounded hover:bg-orange-600 font-medium disabled:opacity-50"
+              disabled={updating || loading}
+            >
+              {updating ? 'Saving...' : 'Reopen Task'}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const AdministerMedicationModal: React.FC<{
+  isOpen: boolean;
+  onClose: () => void;
+  patient: AssignedPatient | null;
+  onSave: (data: any) => void;
+}> = ({
   isOpen,
   onClose,
-  medicationDue,
+  patient,
   onSave,
 }) => {
+  const [prescriptions, setPrescriptions] = useState<any[]>([]);
+  const [selectedMedication, setSelectedMedication] = useState('');
   const [formData, setFormData] = useState({
     route: '',
     dosage: '',
     notes: '',
   });
+  const [loading, setLoading] = useState(false);
 
-  if (!isOpen || !medicationDue) return null;
+  // Fetch prescriptions for the selected patient
+  React.useEffect(() => {
+    if (isOpen && patient?.id) {
+      setLoading(true);
+      supabase
+        .from('prescriptions')
+        .select('id, medicine, dosage, route, frequency')
+        .eq('patient_id', patient.id)
+        .eq('status', 'active')
+        .then(({ data, error }) => {
+          if (error) {
+            console.error('Error fetching prescriptions:', error);
+          } else {
+            setPrescriptions(data || []);
+          }
+          setLoading(false);
+        });
+    }
+  }, [isOpen, patient?.id]);
+
+  if (!isOpen || !patient) return null;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -800,95 +1167,116 @@ const AdministerMedicationModal: React.FC<MedicationAdminModalProps> = ({
         </div>
         <div className="mb-4 p-3 bg-blue-50 rounded border border-blue-200">
           <p className="text-sm text-gray-700">
-            <span className="font-semibold">Patient:</span> {medicationDue.patient}
+            <span className="font-semibold">Patient:</span> {patient.name}
           </p>
-          <p className="text-sm text-gray-700">
-            <span className="font-semibold">Medication:</span> {medicationDue.medication}
-          </p>
+          <p className="text-sm text-gray-600 mt-2">{prescriptions.length} active prescription(s)</p>
         </div>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm font-semibold mb-2">Medication *</label>
-            <select
-              value={formData.route}
-              onChange={(e) => setFormData({ ...formData, route: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-              required
-            >
-              <option value="">Select medication</option>
-              <option value="med1">{medicationDue.medication}</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-semibold mb-2">Dosage *</label>
-            <input
-              type="text"
-              value={formData.dosage}
-              onChange={(e) => setFormData({ ...formData, dosage: e.target.value })}
-              placeholder={medicationDue.dosage}
-              defaultValue={medicationDue.dosage}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-              required
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-semibold mb-2">Route *</label>
-            <select
-              value={formData.route}
-              onChange={(e) => setFormData({ ...formData, route: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-              required
-            >
-              <option value="">Select route</option>
-              <option value="oral">Oral</option>
-              <option value="iv">IV</option>
-              <option value="im">IM</option>
-              <option value="sc">Subcutaneous</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-semibold mb-2">Administration Notes</label>
-            <textarea
-              value={formData.notes}
-              onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-              placeholder="Patient response, side effects, etc..."
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-              rows={3}
-            />
-          </div>
-          <div className="flex gap-2 justify-end pt-4">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 bg-gray-300 text-gray-700 rounded hover:bg-gray-400"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
-            >
-              Confirm Administration
-            </button>
-          </div>
-        </form>
+        {loading ? (
+          <p className="text-center py-4 text-gray-600">Loading prescriptions...</p>
+        ) : prescriptions.length === 0 ? (
+          <p className="text-center py-4 text-gray-600">No active prescriptions for this patient</p>
+        ) : (
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <label className="block text-sm font-semibold mb-2">Medication *</label>
+              <select
+                value={selectedMedication}
+                onChange={(e) => {
+                  setSelectedMedication(e.target.value);
+                  const med = prescriptions.find(p => p.id === e.target.value);
+                  if (med) {
+                    setFormData({
+                      dosage: med.dosage || '',
+                      route: med.route || '',
+                      notes: '',
+                    });
+                  }
+                }}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                required
+              >
+                <option value="">Select medication</option>
+                {prescriptions.map(med => (
+                  <option key={med.id} value={med.id}>
+                    {med.medicine} - {med.dosage}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-semibold mb-2">Dosage *</label>
+              <input
+                type="text"
+                value={formData.dosage}
+                onChange={(e) => setFormData({ ...formData, dosage: e.target.value })}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-semibold mb-2">Route *</label>
+              <select
+                value={formData.route}
+                onChange={(e) => setFormData({ ...formData, route: e.target.value })}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                required
+              >
+                <option value="">Select route</option>
+                <option value="oral">Oral</option>
+                <option value="iv">IV</option>
+                <option value="im">IM</option>
+                <option value="sc">Subcutaneous</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-semibold mb-2">Administration Notes</label>
+              <textarea
+                value={formData.notes}
+                onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                placeholder="Patient response, side effects, etc..."
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                rows={3}
+              />
+            </div>
+            <div className="flex gap-2 justify-end pt-4">
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-4 py-2 bg-gray-300 text-gray-700 rounded hover:bg-gray-400"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+              >
+                Confirm Administration
+              </button>
+            </div>
+          </form>
+        )}
       </div>
     </div>
   );
 };
 
 const NursingDashboard = () => {
+  const { user } = useAuth();
+  
   // Queries
   const { data: patientQueue, isLoading: queueLoading, error: queueError, refetch } = usePatientQueue();
   const { data: medicationsDueCount, isLoading: medicationsLoading } = useMedicationsDue();
   const { data: vitalsCount, isLoading: vitalsLoading } = useVitalsRecorded();
   const { data: alertsCount, isLoading: alertsLoading } = useCriticalAlerts();
 
-  // New queries for dashboard features
-  const { data: nursingTasks = [] } = useNursingTasks();
-  const { data: assignedPatients = [] } = useAssignedPatients();
+  // Real query hooks for task and patient assignments
+  const { data: nursingTasksRaw = [], refetch: refetchTasks } = useNursingTasksWithPatients({ nurse_id: user?.id });
+  const { data: assignedPatientsRaw = [], refetch: refetchPatients } = usePatientAssignmentsWithPatients({ nurse_id: user?.id });
   const { data: medicationsList = [] } = useMedicationsDueList();
   const { data: criticalAlerts = [] } = useCriticalAlerts2();
+  
+  const updateTaskMutation = useUpdateTask();
+  const queryClient = useQueryClient();
 
   // State management
   const [selectedTask, setSelectedTask] = useState<NursingTask | null>(null);
@@ -902,18 +1290,65 @@ const NursingDashboard = () => {
   const [showRecordVitalsModal, setShowRecordVitalsModal] = useState(false);
   const [showCarePlanModal, setShowCarePlanModal] = useState(false);
   const [showMedicationModal, setShowMedicationModal] = useState(false);
+  const [showTaskDetailModal, setShowTaskDetailModal] = useState(false);
+
+  // Fetch care plans for selected patient (modal handles its own refresh)
+  const { data: carePlansData = [] } = useCarePlans(selectedPatient?.id);
+
+
+  // Format nursing tasks for display
+  const nursingTasks = nursingTasksRaw.map((task: any) => ({
+    ...task,
+    patient: `${task.patient_first_name} ${task.patient_last_name}`.trim() || 'Unknown Patient',
+    priority: task.priority?.charAt(0).toUpperCase() + task.priority?.slice(1).toLowerCase() || 'Normal',
+    dueTime: task.due_time ? format(new Date(task.due_time), 'h:mm a') : 'N/A',
+    status: task.status?.charAt(0).toUpperCase() + task.status?.slice(1).toLowerCase() || 'Pending',
+  }));
+
+  // Format patient assignments for display  
+  const assignedPatients = assignedPatientsRaw.map((assignment: any) => ({
+    id: assignment.patient_id,  // Use patient_id, not assignment.id
+    name: `${assignment.patient_first_name} ${assignment.patient_last_name}`.trim() || 'Unknown Patient',
+    room: 'Room TBD',
+    priority: assignment.priority?.charAt(0).toUpperCase() + assignment.priority?.slice(1).toLowerCase() || 'Normal',
+  }));
 
   // Task actions
-  const handleMarkTaskComplete = async (taskId: string) => {
-    setProcessing(true);
+  const handleTaskStatusChange = async (taskId: string, status: 'completed' | 'pending', notes: string) => {
     try {
-      console.log('Marking task complete:', taskId);
-      // Update task status
-      setProcessing(false);
+      console.log('[TASK UPDATE] Starting update for taskId:', taskId, 'status:', status, 'notes:', notes);
+      
+      const result = await updateTaskMutation.mutateAsync({
+        taskId,
+        data: {
+          status,
+          completed_notes: notes,
+        },
+      });
+
+      console.log('[TASK UPDATE] Successfully updated task:', result);
+      
+      // Wait a moment for UI to update, then close modal
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      setShowTaskDetailModal(false);
+      setSelectedTask(null);
     } catch (err) {
-      console.error('Error marking task complete:', err);
-      setProcessing(false);
+      console.error('[TASK UPDATE] Error updating task status:', err);
+      setShowTaskDetailModal(false);
+      setSelectedTask(null);
     }
+  };
+
+  const handleViewTask = (task: any) => {
+    const formattedTask: NursingTask = {
+      ...task,
+      patient: `${task.patient_first_name} ${task.patient_last_name}`.trim() || 'Unknown Patient',
+      priority: task.priority?.charAt(0).toUpperCase() + task.priority?.slice(1).toLowerCase() || 'Normal',
+      dueTime: task.due_time ? format(new Date(task.due_time), 'h:mm a') : 'N/A',
+      status: task.status?.charAt(0).toUpperCase() + task.status?.slice(1).toLowerCase() || 'Pending',
+    };
+    setSelectedTask(formattedTask);
+    setShowTaskDetailModal(true);
   };
 
   // Patient actions
@@ -948,19 +1383,7 @@ const NursingDashboard = () => {
     }
   };
 
-  const handleSaveCarePlan = async (data: any) => {
-    setProcessing(true);
-    try {
-      console.log('Care plan saved:', data);
-      // Save to database
-      setShowCarePlanModal(false);
-      setSelectedPatient(null);
-      setProcessing(false);
-    } catch (err) {
-      console.error('Error saving care plan:', err);
-      setProcessing(false);
-    }
-  };
+
 
   const getPriorityBadgeColor = (priority: string) => {
     switch (priority) {
@@ -1089,18 +1512,13 @@ const NursingDashboard = () => {
                     </span>
                   </td>
                   <td className="px-4 py-3 text-sm">
-                    {task.status === 'Pending' && (
-                      <button
-                        onClick={() => handleMarkTaskComplete(task.id)}
-                        disabled={processing}
-                        className="text-blue-600 hover:text-blue-800 font-medium disabled:opacity-50"
-                      >
-                        Mark Complete
-                      </button>
-                    )}
-                    {task.status === 'Completed' && (
-                      <span className="text-gray-500">Done</span>
-                    )}
+                    <button
+                      onClick={() => handleViewTask(task)}
+                      disabled={updateTaskMutation.isPending}
+                      className="text-blue-600 hover:text-blue-800 font-medium disabled:opacity-50"
+                    >
+                      View
+                    </button>
                   </td>
                 </tr>
               ))}
@@ -1113,14 +1531,9 @@ const NursingDashboard = () => {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Assigned Patients */}
         <div className="bg-white rounded-lg shadow">
-          <div className="p-4 border-b border-gray-200 flex justify-between items-center">
-            <div>
-              <h2 className="text-xl font-semibold text-gray-800">Assigned Patients</h2>
-              <p className="text-sm text-gray-600 mt-1">Patients under your care today</p>
-            </div>
-            <button className="bg-blue-100 text-blue-700 px-3 py-1 rounded text-sm hover:bg-blue-200">
-              Export
-            </button>
+          <div className="p-4 border-b border-gray-200">
+            <h2 className="text-xl font-semibold text-gray-800">Assigned Patients</h2>
+            <p className="text-sm text-gray-600 mt-1">Patients under your care today</p>
           </div>
           <div className="space-y-3 p-4">
             {assignedPatients.map((patient) => (
@@ -1215,6 +1628,8 @@ const NursingDashboard = () => {
         </div>
       </div>
 
+
+
       {/* Modals */}
       <VitalsHistoryModal
         isOpen={showVitalsHistoryModal}
@@ -1233,18 +1648,25 @@ const NursingDashboard = () => {
         }}
       />
 
-      <CreateCarePlanModal
+      <CarePlanManagerModal
         isOpen={showCarePlanModal}
-        onClose={() => (setShowCarePlanModal(false), setSelectedPatient(null))}
+        onClose={() => setShowCarePlanModal(false)}
         patient={selectedPatient}
-        onSave={handleSaveCarePlan}
       />
 
       <AdministerMedicationModal
         isOpen={showMedicationModal}
-        onClose={() => (setShowMedicationModal(false), setSelectedMedication(null))}
-        medicationDue={selectedMedication}
+        onClose={() => (setShowMedicationModal(false), setSelectedPatient(null))}
+        patient={selectedPatient}
         onSave={handleSaveMedication}
+      />
+
+      <TaskDetailModal
+        isOpen={showTaskDetailModal}
+        onClose={() => (setShowTaskDetailModal(false), setSelectedTask(null))}
+        task={selectedTask}
+        onStatusChange={handleTaskStatusChange}
+        loading={updateTaskMutation.isPending}
       />
     </div>
   );

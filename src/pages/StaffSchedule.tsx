@@ -2,6 +2,12 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
+import {
+  useNursingTasksWithPatients,
+  usePatientAssignmentsWithPatients,
+  useDeleteTask,
+  useDeletePatientAssignment,
+} from '@/hooks/useNursingAssignments';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -30,9 +36,11 @@ import {
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
-import { Plus, Calendar, Clock, MapPin, AlertCircle, CheckCircle } from 'lucide-react';
+import { Plus, Calendar, Clock, MapPin, AlertCircle, CheckCircle, Trash2 } from 'lucide-react';
 import { format, addDays } from 'date-fns';
 import PermissionGuard from '@/components/layout/PermissionGuard';
+import { AssignTaskModal } from '@/components/nursing/AssignTaskModal';
+import { AssignPatientModal } from '@/components/nursing/AssignPatientModal';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -79,13 +87,15 @@ const statusColors: Record<string, string> = {
 const shiftTypes = ['morning', 'afternoon', 'night', 'on-call'];
 
 const StaffSchedule = () => {
-  const { user } = useAuth();
+  const { user, isAdmin } = useAuth();
   const queryClient = useQueryClient();
   const [selectedDate, setSelectedDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [isCreateRosterDialogOpen, setIsCreateRosterDialogOpen] = useState(false);
   const [isUpdateAvailabilityDialogOpen, setIsUpdateAvailabilityDialogOpen] = useState(false);
+  const [isAssignTasksDialogOpen, setIsAssignTasksDialogOpen] = useState(false);
+  const [isAssignPatientDialogOpen, setIsAssignPatientDialogOpen] = useState(false);
   const [selectedStaffId, setSelectedStaffId] = useState('');
-  const [viewMode, setViewMode] = useState<'roster' | 'availability'>('roster');
+  const [viewMode, setViewMode] = useState<'roster' | 'availability' | 'task_assignments' | 'patient_assignments'>('roster');
 
   const [newRoster, setNewRoster] = useState({
     staff_id: '',
@@ -146,6 +156,12 @@ const StaffSchedule = () => {
       return (data || []) as unknown as StaffAvailability[];
     },
   });
+
+  // Fetch nursing tasks for selected date
+  const { data: nursingTasksRaw = [], refetch: refetchTasks } = useNursingTasksWithPatients();
+
+  // Fetch patient assignments for selected date
+  const { data: patientAssignmentsRaw = [], refetch: refetchPatientAssignments } = usePatientAssignmentsWithPatients({ shift_date: selectedDate });
 
   // Create roster mutation
   const createRosterMutation = useMutation({
@@ -265,6 +281,54 @@ const StaffSchedule = () => {
     },
   });
 
+  // Delete task mutation
+  const deleteTaskMutation = useMutation({
+    mutationFn: async (taskId: string) => {
+      const { error } = await supabase
+        .from('nursing_tasks')
+        .delete()
+        .eq('id', taskId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      refetchTasks();
+      toast.success('Task deleted successfully');
+    },
+    onError: (error: Error) => {
+      toast.error(`Failed to delete task: ${error.message}`);
+    },
+  });
+
+  // Delete patient assignment mutation
+  const deleteAssignmentMutation = useMutation({
+    mutationFn: async (assignmentId: string) => {
+      const { error } = await supabase
+        .from('patient_assignments')
+        .delete()
+        .eq('id', assignmentId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      refetchPatientAssignments();
+      toast.success('Assignment deleted successfully');
+    },
+    onError: (error: Error) => {
+      toast.error(`Failed to delete assignment: ${error.message}`);
+    },
+  });
+
+  // Format nursing tasks for display
+  const nursingTasks = nursingTasksRaw.map((task: any) => ({
+    ...task,
+    patient_name: `${task.patient_first_name} ${task.patient_last_name}`.trim() || 'Unknown Patient',
+  }));
+
+  // Format patient assignments for display
+  const patientAssignments = patientAssignmentsRaw.map((assignment: any) => ({
+    ...assignment,
+    patient_name: `${assignment.patient_first_name} ${assignment.patient_last_name}`.trim() || 'Unknown Patient',
+  }));
+
   const handleDateChange = (days: number) => {
     const newDate = addDays(new Date(selectedDate), days);
     setSelectedDate(format(newDate, 'yyyy-MM-dd'));
@@ -311,7 +375,7 @@ const StaffSchedule = () => {
       </Card>
 
       {/* View Toggle */}
-      <div className="flex gap-2">
+      <div className="flex gap-2 flex-wrap">
         <Button
           variant={viewMode === 'roster' ? 'default' : 'outline'}
           onClick={() => setViewMode('roster')}
@@ -326,6 +390,24 @@ const StaffSchedule = () => {
           <Clock className="mr-2 h-4 w-4" />
           Staff Availability
         </Button>
+        {(isAdmin || user?.role === 'doctor') && (
+          <>
+            <Button
+              variant={viewMode === 'task_assignments' ? 'default' : 'outline'}
+              onClick={() => setViewMode('task_assignments')}
+            >
+              <CheckCircle className="mr-2 h-4 w-4" />
+              Task Assignments
+            </Button>
+            <Button
+              variant={viewMode === 'patient_assignments' ? 'default' : 'outline'}
+              onClick={() => setViewMode('patient_assignments')}
+            >
+              <AlertCircle className="mr-2 h-4 w-4" />
+              Patient Assignments
+            </Button>
+          </>
+        )}
       </div>
 
       {/* Duty Rosters View */}
@@ -452,6 +534,147 @@ const StaffSchedule = () => {
             ) : (
               <div className="text-center py-8 text-muted-foreground">
                 No availability updates for this date
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Task Assignments View */}
+      {(isAdmin || user?.role === 'doctor') && viewMode === 'task_assignments' && (
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between">
+            <CardTitle>Task Assignments - {format(new Date(selectedDate), 'MMM d, yyyy')}</CardTitle>
+            <Button
+              onClick={() => setIsAssignTasksDialogOpen(true)}
+              className="gap-2"
+            >
+              <Plus className="h-4 w-4" />
+              Assign Task
+            </Button>
+          </CardHeader>
+          <CardContent>
+            {nursingTasks && nursingTasks.length > 0 ? (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Task</TableHead>
+                      <TableHead>Patient</TableHead>
+                      <TableHead>Assigned Nurse</TableHead>
+                      <TableHead>Priority</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Due Time</TableHead>
+                      <TableHead>Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {nursingTasks.map((task: any) => (
+                      <TableRow key={task.id}>
+                        <TableCell>
+                          <p className="font-medium">{task.title}</p>
+                          <p className="text-sm text-muted-foreground">{task.description}</p>
+                        </TableCell>
+                        <TableCell>{task.patient_name}</TableCell>
+                        <TableCell>{task.assigned_nurse_id}</TableCell>
+                        <TableCell>
+                          <Badge variant="secondary" className="capitalize">
+                            {task.priority}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <Badge className="capitalize">
+                            {task.status}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>{task.due_time ? format(new Date(task.due_time), 'HH:mm') : '-'}</TableCell>
+                        <TableCell>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => deleteTaskMutation.mutate(task.id)}
+                          >
+                            <Trash2 className="h-4 w-4 text-red-500" />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            ) : (
+              <div className="text-center py-8 text-muted-foreground">
+                No task assignments for this date
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Patient Assignments View */}
+      {(isAdmin || user?.role === 'doctor') && viewMode === 'patient_assignments' && (
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between">
+            <CardTitle>Patient Assignments - {format(new Date(selectedDate), 'MMM d, yyyy')}</CardTitle>
+            <Button
+              onClick={() => setIsAssignPatientDialogOpen(true)}
+              className="gap-2"
+            >
+              <Plus className="h-4 w-4" />
+              Assign Patient
+            </Button>
+          </CardHeader>
+          <CardContent>
+            {patientAssignments && patientAssignments.length > 0 ? (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Patient</TableHead>
+                      <TableHead>Assigned Nurse</TableHead>
+                      <TableHead>Primary Nurse</TableHead>
+                      <TableHead>Priority</TableHead>
+                      <TableHead>Shift Date</TableHead>
+                      <TableHead>Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {patientAssignments.map((assignment: any) => (
+                      <TableRow key={assignment.id}>
+                        <TableCell>
+                          <p className="font-medium">{assignment.patient_name}</p>
+                        </TableCell>
+                        <TableCell>{assignment.nurse_id}</TableCell>
+                        <TableCell>
+                          {assignment.is_primary_nurse ? (
+                            <Badge className="bg-blue-100 text-blue-800">Primary</Badge>
+                          ) : (
+                            <Badge variant="secondary">Secondary</Badge>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="secondary" className="capitalize">
+                            {assignment.priority}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>{assignment.shift_date}</TableCell>
+                        <TableCell>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => deleteAssignmentMutation.mutate(assignment.id)}
+                          >
+                            <Trash2 className="h-4 w-4 text-red-500" />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            ) : (
+              <div className="text-center py-8 text-muted-foreground">
+                No patient assignments for this date
               </div>
             )}
           </CardContent>
@@ -724,6 +947,26 @@ const StaffSchedule = () => {
           </form>
         </DialogContent>
       </Dialog>
+
+      {/* Assign Task Modal */}
+      <AssignTaskModal
+        isOpen={isAssignTasksDialogOpen}
+        onClose={() => setIsAssignTasksDialogOpen(false)}
+        onSuccess={() => {
+          refetchTasks();
+          setIsAssignTasksDialogOpen(false);
+        }}
+      />
+
+      {/* Assign Patient Modal */}
+      <AssignPatientModal
+        isOpen={isAssignPatientDialogOpen}
+        onClose={() => setIsAssignPatientDialogOpen(false)}
+        onSuccess={() => {
+          refetchPatientAssignments();
+          setIsAssignPatientDialogOpen(false);
+        }}
+      />
     </div>
   );
 };
