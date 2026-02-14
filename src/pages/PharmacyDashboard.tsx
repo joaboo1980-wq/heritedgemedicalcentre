@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import {
   Table,
   TableBody,
@@ -13,7 +14,7 @@ import {
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { AlertTriangle, Pill, ShoppingCart, Clock, RefreshCw } from 'lucide-react';
+import { AlertTriangle, Pill, ShoppingCart, Clock, RefreshCw, Search } from 'lucide-react';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
 
@@ -42,6 +43,32 @@ interface ExpiredMedication {
   name: string;
   expiry_date: string;
   stock_quantity: number;
+}
+
+interface InventoryMedication {
+  id: string;
+  medication_code: string;
+  name: string;
+  generic_name: string | null;
+  category: string;
+  form: string;
+  strength: string | null;
+  unit_price: number;
+  stock_quantity: number;
+  reorder_level: number;
+  expiry_date: string | null;
+  requires_prescription: boolean;
+}
+
+interface DispensingRecord {
+  id: string;
+  prescription_number: string;
+  patient_name: string;
+  medication: string;
+  quantity: string;
+  doctor: string;
+  dispensed_date: string;
+  status: string;
 }
 
 const usePharmacyStats = () => {
@@ -177,13 +204,79 @@ const usePrescriptions = () => {
   });
 };
 
+const useInventoryMedications = () => {
+  return useQuery({
+    queryKey: ['inventory-medications'],
+    queryFn: async () => {
+      try {
+        const { data, error } = await supabase
+          .from('medications')
+          .select('*')
+          .order('name', { ascending: true });
+
+        if (error) throw error;
+        return (data || []) as InventoryMedication[];
+      } catch (err) {
+        console.error('[Pharmacy] Inventory medications error:', err);
+        return [];
+      }
+    },
+    refetchInterval: 60000,
+  });
+};
+
+const useDispensingRecords = () => {
+  return useQuery({
+    queryKey: ['dispensing-records'],
+    queryFn: async () => {
+      try {
+        const { data, error } = await supabase
+          .from('prescriptions')
+          .select(`
+            id,
+            prescription_number,
+            status,
+            updated_at,
+            patients (first_name, last_name),
+            doctors (first_name, last_name),
+            prescription_items (medication_id, quantity, medications (name))
+          `)
+          .eq('status', 'dispensed')
+          .order('updated_at', { ascending: false })
+          .limit(50);
+
+        if (error) throw error;
+
+        return (data || []).map((rx: any) => ({
+          id: rx.id,
+          prescription_number: rx.prescription_number,
+          patient_name: rx.patients ? `${rx.patients.first_name} ${rx.patients.last_name}` : 'Unknown',
+          medication: rx.prescription_items?.map((item: any) => item.medications?.name).filter(Boolean).join(', ') || 'N/A',
+          quantity: rx.prescription_items?.map((item: any) => item.quantity).join(', ') || 'N/A',
+          doctor: rx.doctors ? `Dr. ${rx.doctors.first_name} ${rx.doctors.last_name}` : 'Unknown',
+          dispensed_date: format(new Date(rx.updated_at), 'MMM dd, yyyy hh:mm a'),
+          status: rx.status,
+        })) as DispensingRecord[];
+      } catch (err) {
+        console.error('[Pharmacy] Dispensing records error:', err);
+        return [];
+      }
+    },
+    refetchInterval: 60000,
+  });
+};
+
 const PharmacyDashboard = () => {
   const queryClient = useQueryClient();
   const { data: stats, isLoading: statsLoading } = usePharmacyStats();
   const { data: lowStockMeds, isLoading: lowStockLoading } = useLowStockMedications();
   const { data: expiredMeds, isLoading: expiredLoading } = useExpiredMedications();
   const { data: prescriptions, isLoading: prescriptionsLoading, refetch: refetchPrescriptions } = usePrescriptions();
+  const { data: inventoryMeds, isLoading: inventoryLoading } = useInventoryMedications();
+  const { data: dispensingRecords, isLoading: dispensingLoading } = useDispensingRecords();
   const [activeTab, setActiveTab] = useState('prescriptions');
+  const [inventorySearch, setInventorySearch] = useState('');
+  const [dispensingSearch, setDispensingSearch] = useState('');
 
   // Dispense mutation
   const dispenseMutation = useMutation({
@@ -479,11 +572,166 @@ const PharmacyDashboard = () => {
             </TabsContent>
 
             <TabsContent value="inventory">
-              <p className="text-muted-foreground">Inventory management coming soon...</p>
+              <div className="space-y-4">
+                <div className="flex gap-2">
+                  <div className="flex-1 relative">
+                    <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Search medications..."
+                      value={inventorySearch}
+                      onChange={(e) => setInventorySearch(e.target.value.toLowerCase())}
+                      className="pl-8"
+                    />
+                  </div>
+                </div>
+
+                {inventoryLoading ? (
+                  <div className="flex justify-center py-8">
+                    <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+                  </div>
+                ) : inventoryMeds && inventoryMeds.length > 0 ? (
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Code</TableHead>
+                          <TableHead>Medication Name</TableHead>
+                          <TableHead>Generic Name</TableHead>
+                          <TableHead>Category</TableHead>
+                          <TableHead>Form/Strength</TableHead>
+                          <TableHead>Current Stock</TableHead>
+                          <TableHead>Reorder Level</TableHead>
+                          <TableHead>Unit Price (UGX)</TableHead>
+                          <TableHead>Expiry Date</TableHead>
+                          <TableHead>Status</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {inventoryMeds
+                          .filter(
+                            (med) =>
+                              med.name.toLowerCase().includes(inventorySearch) ||
+                              med.generic_name?.toLowerCase().includes(inventorySearch) ||
+                              med.medication_code.toLowerCase().includes(inventorySearch)
+                          )
+                          .map((med) => {
+                            const isLowStock = med.stock_quantity < med.reorder_level;
+                            const isExpired = med.expiry_date && new Date(med.expiry_date) < new Date();
+                            const isExpiringSoon = med.expiry_date && 
+                              new Date(med.expiry_date) < new Date(Date.now() + 90 * 24 * 60 * 60 * 1000) &&
+                              new Date(med.expiry_date) > new Date();
+
+                            return (
+                              <TableRow key={med.id}>
+                                <TableCell className="font-mono text-sm">{med.medication_code}</TableCell>
+                                <TableCell className="font-medium">{med.name}</TableCell>
+                                <TableCell className="text-sm text-muted-foreground">{med.generic_name || '-'}</TableCell>
+                                <TableCell>{med.category}</TableCell>
+                                <TableCell>{med.form}{med.strength ? ` / ${med.strength}` : ''}</TableCell>
+                                <TableCell className="font-semibold">{med.stock_quantity} units</TableCell>
+                                <TableCell className="text-orange-600">{med.reorder_level} units</TableCell>
+                                <TableCell>{(med.unit_price || 0).toLocaleString()}</TableCell>
+                                <TableCell>
+                                  {med.expiry_date ? format(new Date(med.expiry_date), 'MMM dd, yyyy') : '-'}
+                                </TableCell>
+                                <TableCell>
+                                  <div className="flex gap-2 flex-wrap">
+                                    {isExpired && (
+                                      <Badge className="bg-red-500 text-white">Expired</Badge>
+                                    )}
+                                    {isExpiringSoon && !isExpired && (
+                                      <Badge className="bg-yellow-500 text-white">Expiring Soon</Badge>
+                                    )}
+                                    {isLowStock && (
+                                      <Badge className="bg-orange-500 text-white">Low Stock</Badge>
+                                    )}
+                                    {!isExpired && !isExpiringSoon && !isLowStock && (
+                                      <Badge className="bg-green-500 text-white">In Stock</Badge>
+                                    )}
+                                  </div>
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
+                      </TableBody>
+                    </Table>
+                  </div>
+                ) : (
+                  <div className="text-center py-12">
+                    <Pill className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                    <p className="text-muted-foreground">No medications found</p>
+                  </div>
+                )}
+              </div>
             </TabsContent>
 
             <TabsContent value="dispensing">
-              <p className="text-muted-foreground">Dispensing records coming soon...</p>
+              <div className="space-y-4">
+                <div className="flex gap-2">
+                  <div className="flex-1 relative">
+                    <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Search by patient, medication, or prescription #..."
+                      value={dispensingSearch}
+                      onChange={(e) => setDispensingSearch(e.target.value.toLowerCase())}
+                      className="pl-8"
+                    />
+                  </div>
+                </div>
+
+                {dispensingLoading ? (
+                  <div className="flex justify-center py-8">
+                    <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+                  </div>
+                ) : dispensingRecords && dispensingRecords.length > 0 ? (
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Prescription #</TableHead>
+                          <TableHead>Patient Name</TableHead>
+                          <TableHead>Medication(s)</TableHead>
+                          <TableHead>Quantity</TableHead>
+                          <TableHead>Prescribed By</TableHead>
+                          <TableHead>Dispensed Date</TableHead>
+                          <TableHead>Status</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {dispensingRecords
+                          .filter(
+                            (record) =>
+                              record.patient_name.toLowerCase().includes(dispensingSearch) ||
+                              record.medication.toLowerCase().includes(dispensingSearch) ||
+                              record.prescription_number.toLowerCase().includes(dispensingSearch)
+                          )
+                          .map((record) => (
+                            <TableRow key={record.id}>
+                              <TableCell className="font-mono text-sm font-semibold">
+                                <Badge variant="outline">{record.prescription_number}</Badge>
+                              </TableCell>
+                              <TableCell className="font-medium">{record.patient_name}</TableCell>
+                              <TableCell className="max-w-xs">{record.medication}</TableCell>
+                              <TableCell>{record.quantity}</TableCell>
+                              <TableCell>{record.doctor}</TableCell>
+                              <TableCell className="text-sm">{record.dispensed_date}</TableCell>
+                              <TableCell>
+                                <Badge className="bg-green-500 text-white">
+                                  {record.status}
+                                </Badge>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                ) : (
+                  <div className="text-center py-12">
+                    <ShoppingCart className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                    <p className="text-muted-foreground">No dispensing records found</p>
+                  </div>
+                )}
+              </div>
             </TabsContent>
           </Tabs>
         </CardContent>

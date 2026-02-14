@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { useDashboardStats } from '@/hooks/useDashboard';
@@ -9,10 +9,29 @@ import {
   useNursingTasksWithPatients,
   usePatientAssignmentsWithPatients,
   useCarePlans,
+  useCompletedTasks,
+  useTaskStatistics,
 } from '@/hooks/useNursingAssignments';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { format, startOfDay, endOfDay } from 'date-fns';
-import { AlertCircle, CheckCircle, Clock, Eye, Pill, Heart, FileText, X } from 'lucide-react';
+import { format, startOfDay, endOfDay, parseISO } from 'date-fns';
+import { AlertCircle, CheckCircle, Clock, Eye, Pill, Heart, FileText, X, TrendingUp, Calendar, Search, Filter, CheckCircle2 } from 'lucide-react';
+import {
+  BarChart,
+  Bar,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell,
+} from 'recharts';
+import { MedicationScheduleWidget } from '@/components/dashboard/MedicationScheduleWidget';
+import { MedicationAuditTrail } from '@/components/dashboard/MedicationAuditTrail';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -125,40 +144,6 @@ const useAssignedPatients = () => {
   });
 };
 
-const useMedicationsDueList = () => {
-  return useQuery({
-    queryKey: ['medications-due-list'],
-    queryFn: async () => {
-      const medications: MedicationDue[] = [
-        {
-          id: '1',
-          patient: 'Emma Thompson',
-          medication: 'Morphine - 5mg',
-          dosage: '5mg',
-          dueTime: '2:00 PM',
-          status: 'Pending',
-        },
-        {
-          id: '2',
-          patient: 'James Wilson',
-          medication: 'Amoxicillin - 500mg',
-          dosage: '500mg',
-          dueTime: '2:30 PM',
-          status: 'Pending',
-        },
-        {
-          id: '3',
-          patient: 'Maria Garcia',
-          medication: 'Metoprolol - 25mg',
-          dosage: '25mg',
-          dueTime: '3:00 PM',
-          status: 'Done',
-        },
-      ];
-      return medications;
-    },
-  });
-};
 
 const useCriticalAlerts2 = () => {
   return useQuery({
@@ -1272,7 +1257,6 @@ const NursingDashboard = () => {
   // Real query hooks for task and patient assignments
   const { data: nursingTasksRaw = [], refetch: refetchTasks } = useNursingTasksWithPatients({ nurse_id: user?.id });
   const { data: assignedPatientsRaw = [], refetch: refetchPatients } = usePatientAssignmentsWithPatients({ nurse_id: user?.id });
-  const { data: medicationsList = [] } = useMedicationsDueList();
   const { data: criticalAlerts = [] } = useCriticalAlerts2();
   
   const updateTaskMutation = useUpdateTask();
@@ -1292,8 +1276,19 @@ const NursingDashboard = () => {
   const [showMedicationModal, setShowMedicationModal] = useState(false);
   const [showTaskDetailModal, setShowTaskDetailModal] = useState(false);
 
+  // Task progress filter states
+  const [showTaskProgress, setShowTaskProgress] = useState(true);
+  const [filterStatus, setFilterStatus] = useState<'all' | 'completed' | 'pending' | 'in_progress'>('all');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [dateFilter, setDateFilter] = useState<'today' | 'week' | 'month' | 'all'>('all');
+
   // Fetch care plans for selected patient (modal handles its own refresh)
   const { data: carePlansData = [] } = useCarePlans(selectedPatient?.id);
+
+  // Fetch task progress data
+  const { data: allTasksData = [] } = useNursingTasksForNurse(user?.id);
+  const { data: completedTasksData = [] } = useCompletedTasks(user?.id);
+  const { data: statsData } = useTaskStatistics(user?.id);
 
 
   // Format nursing tasks for display
@@ -1312,6 +1307,125 @@ const NursingDashboard = () => {
     room: 'Room TBD',
     priority: assignment.priority?.charAt(0).toUpperCase() + assignment.priority?.slice(1).toLowerCase() || 'Normal',
   }));
+
+  // Filter tasks based on task progress filters
+  const filteredTasks = useMemo(() => {
+    let filtered = filterStatus === 'completed' ? completedTasksData : allTasksData;
+
+    if (filterStatus !== 'all' && filterStatus !== 'completed') {
+      filtered = filtered.filter((task: any) => task.status === filterStatus);
+    }
+
+    if (searchTerm) {
+      filtered = filtered.filter(
+        (task: any) =>
+          task.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          task.description?.toLowerCase().includes(searchTerm.toLowerCase())
+      );
+    }
+
+    // Date filtering
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const weekAgo = new Date(today);
+    weekAgo.setDate(weekAgo.getDate() - 7);
+    const monthAgo = new Date(today);
+    monthAgo.setMonth(monthAgo.getMonth() - 1);
+
+    if (dateFilter !== 'all') {
+      filtered = filtered.filter((task: any) => {
+        const taskDate = task.completed_at || task.created_at;
+        if (!taskDate) return false;
+        const date = new Date(taskDate);
+        const dateOnly = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+
+        switch (dateFilter) {
+          case 'today':
+            return dateOnly.getTime() === today.getTime();
+          case 'week':
+            return dateOnly >= weekAgo;
+          case 'month':
+            return dateOnly >= monthAgo;
+          default:
+            return true;
+        }
+      });
+    }
+
+    return filtered;
+  }, [allTasksData, completedTasksData, filterStatus, searchTerm, dateFilter]);
+
+  // Prepare chart data  
+  const tasksByStatusData = useMemo(() => {
+    if (!statsData)
+      return [
+        { name: 'Completed', value: 0 },
+        { name: 'Pending', value: 0 },
+        { name: 'In Progress', value: 0 },
+      ];
+
+    return [
+      { name: 'Completed', value: statsData.completed, fill: '#10b981' },
+      { name: 'Pending', value: statsData.pending, fill: '#ef4444' },
+      { name: 'In Progress', value: statsData.inProgress, fill: '#f59e0b' },
+    ].filter((item) => item.value > 0);
+  }, [statsData]);
+
+  // Prepare completion trend data (last 7 days)
+  const completionTrendData = useMemo(() => {
+    if (completedTasksData.length === 0) return [];
+
+    const dayData: Record<string, number> = {};
+    const today = new Date();
+
+    for (let i = 6; i >= 0; i--) {
+      const date = new Date(today);
+      date.setDate(date.getDate() - i);
+      const dateStr = format(date, 'MMM dd');
+      dayData[dateStr] = 0;
+    }
+
+    completedTasksData.forEach((task: any) => {
+      if (task.completed_at) {
+        const dateStr = format(parseISO(task.completed_at), 'MMM dd');
+        if (dateStr in dayData) {
+          dayData[dateStr]++;
+        }
+      }
+    });
+
+    return Object.entries(dayData).map(([date, count]) => ({ date, tasks: count }));
+  }, [completedTasksData]);
+
+  const getStatusBadgeColorProgress = (status: string) => {
+    switch (status) {
+      case 'completed':
+        return 'bg-green-100 text-green-800';
+      case 'in_progress':
+        return 'bg-blue-100 text-blue-800';
+      case 'pending':
+        return 'bg-red-100 text-red-800';
+      case 'acknowledged':
+        return 'bg-yellow-100 text-yellow-800';
+      default:
+        return 'bg-gray-100 text-gray-800';
+    }
+  };
+
+  const getPriorityBadgeColorProgress = (priority: string) => {
+    switch (priority?.toLowerCase()) {
+      case 'critical':
+        return 'bg-red-100 text-red-800';
+      case 'high':
+        return 'bg-orange-100 text-orange-800';
+      case 'normal':
+        return 'bg-blue-100 text-blue-800';
+      case 'low':
+        return 'bg-gray-100 text-gray-800';
+      default:
+        return 'bg-gray-100 text-gray-800';
+    }
+  };
 
   // Task actions
   const handleTaskStatusChange = async (taskId: string, status: 'completed' | 'pending', notes: string) => {
@@ -1433,7 +1547,7 @@ const NursingDashboard = () => {
         <div className="bg-green-50 border border-green-200 rounded-lg p-4">
           <div className="text-sm text-gray-600 font-semibold">Medications Due</div>
           <div className="text-3xl font-bold text-green-600 mt-1">
-            {medicationsLoading ? '...' : medicationsList.length}
+            {medicationsLoading ? '...' : medicationsDueCount ?? 0}
           </div>
           <div className="text-xs text-gray-500 mt-1">To administer</div>
         </div>
@@ -1578,57 +1692,227 @@ const NursingDashboard = () => {
             ))}
           </div>
         </div>
-
-        {/* Medication Schedule */}
-        <div className="bg-white rounded-lg shadow">
-          <div className="p-4 border-b border-gray-200 flex justify-between items-center">
-            <div>
-              <h2 className="text-xl font-semibold text-gray-800">Medication Schedule</h2>
-              <p className="text-sm text-gray-600 mt-1">Medications due for administration</p>
-            </div>
-            <button className="bg-blue-100 text-blue-700 px-3 py-1 rounded text-sm hover:bg-blue-200">
-              Export
-            </button>
-          </div>
-          <div className="space-y-3 p-4">
-            {medicationsList.map((med) => (
-              <div key={med.id} className="border border-gray-200 rounded-lg p-4 hover:bg-blue-50">
-                <div className="mb-3">
-                  <h3 className="font-semibold text-gray-800">{med.patient}</h3>
-                  <p className="text-sm text-gray-600">{med.medication}</p>
-                  <p className="text-xs text-gray-500 mt-1">Due: {med.dueTime}</p>
-                </div>
-                <div className="flex gap-2">
-                  {med.status === 'Pending' && (
-                    <>
-                      <span className="inline-block px-2 py-1 bg-red-100 text-red-700 rounded text-xs font-semibold">
-                        Urgent
-                      </span>
-                      <button
-                        onClick={() => handleAdministerMedication(med)}
-                        className="px-3 py-1 bg-blue-500 text-white rounded text-xs hover:bg-blue-600 font-medium"
-                      >
-                        Administer
-                      </button>
-                      <button className="px-3 py-1 bg-red-100 text-red-700 rounded text-xs hover:bg-red-200 font-medium">
-                        Cancel
-                      </button>
-                    </>
-                  )}
-                  {med.status === 'Done' && (
-                    <span className="flex items-center gap-1 text-green-600 text-xs font-semibold">
-                      <CheckCircle size={14} />
-                      Done
-                    </span>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
       </div>
 
 
+
+      {/* Task Progress Section */}
+      {showTaskProgress && (
+        <div className="space-y-6">
+          {/* Task Progress Header */}
+          <div>
+            <h2 className="text-2xl font-bold text-gray-800">Task Progress</h2>
+            <p className="text-gray-600 mt-1">Track your completed tasks and overall progress</p>
+          </div>
+
+          {/* Statistics Cards */}
+          {statsData && (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+              <div className="bg-white rounded-lg p-4 shadow border border-gray-200">
+                <div className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <h3 className="text-sm font-medium text-gray-600">Total Tasks</h3>
+                  <TrendingUp className="h-4 w-4 text-gray-500" />
+                </div>
+                <div className="text-2xl font-bold">{statsData.total}</div>
+                <p className="text-xs text-gray-500 mt-1">All time</p>
+              </div>
+
+              <div className="bg-white rounded-lg p-4 shadow border border-gray-200">
+                <div className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <h3 className="text-sm font-medium text-gray-600">Completed</h3>
+                  <CheckCircle2 className="h-4 w-4 text-green-500" />
+                </div>
+                <div className="text-2xl font-bold">{statsData.completed}</div>
+                <p className="text-xs text-gray-500 mt-1">{statsData.completionRate}% complete</p>
+              </div>
+
+              <div className="bg-white rounded-lg p-4 shadow border border-gray-200">
+                <div className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <h3 className="text-sm font-medium text-gray-600">Completed Today</h3>
+                  <Calendar className="h-4 w-4 text-blue-500" />
+                </div>
+                <div className="text-2xl font-bold">{statsData.completedToday}</div>
+                <p className="text-xs text-gray-500 mt-1">Today only</p>
+              </div>
+
+              <div className="bg-white rounded-lg p-4 shadow border border-gray-200">
+                <div className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <h3 className="text-sm font-medium text-gray-600">In Progress</h3>
+                  <Clock className="h-4 w-4 text-blue-500" />
+                </div>
+                <div className="text-2xl font-bold">{statsData.inProgress}</div>
+                <p className="text-xs text-gray-500 mt-1">Active tasks</p>
+              </div>
+
+              <div className="bg-white rounded-lg p-4 shadow border border-gray-200">
+                <div className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <h3 className="text-sm font-medium text-gray-600">Pending</h3>
+                  <AlertCircle className="h-4 w-4 text-red-500" />
+                </div>
+                <div className="text-2xl font-bold">{statsData.pending}</div>
+                <p className="text-xs text-gray-500 mt-1">Awaiting action</p>
+              </div>
+            </div>
+          )}
+
+          {/* Charts */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Task Distribution */}
+            {tasksByStatusData.length > 0 && (
+              <div className="bg-white rounded-lg shadow border border-gray-200">
+                <div className="p-4 border-b border-gray-200">
+                  <h3 className="font-semibold text-gray-800">Task Distribution</h3>
+                  <p className="text-sm text-gray-600 mt-1">Distribution by status</p>
+                </div>
+                <div className="p-4">
+                  <ResponsiveContainer width="100%" height={300}>
+                    <PieChart>
+                      <Pie
+                        data={tasksByStatusData}
+                        cx="50%"
+                        cy="50%"
+                        labelLine={false}
+                        label={({ name, value }) => `${name}: ${value}`}
+                        outerRadius={100}
+                        fill="#8884d8"
+                        dataKey="value"
+                      >
+                        {tasksByStatusData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.fill} />
+                        ))}
+                      </Pie>
+                      <Tooltip />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            )}
+
+            {/* Completion Trend */}
+            {completionTrendData.length > 0 && (
+              <div className="bg-white rounded-lg shadow border border-gray-200">
+                <div className="p-4 border-b border-gray-200">
+                  <h3 className="font-semibold text-gray-800">Completion Trend</h3>
+                  <p className="text-sm text-gray-600 mt-1">Tasks completed in last 7 days</p>
+                </div>
+                <div className="p-4">
+                  <ResponsiveContainer width="100%" height={300}>
+                    <BarChart data={completionTrendData}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="date" />
+                      <YAxis />
+                      <Tooltip />
+                      <Bar dataKey="tasks" fill="#3b82f6" name="Tasks Completed" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Filters */}
+          <div className="bg-white rounded-lg p-4 shadow border border-gray-200">
+            <div className="flex flex-wrap gap-4 items-center">
+              <div className="flex-1 min-w-[200px]">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+                  <input
+                    type="text"
+                    placeholder="Search tasks..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+
+              <select
+                value={filterStatus}
+                onChange={(e) => setFilterStatus(e.target.value as 'all' | 'completed' | 'pending' | 'in_progress')}
+                className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+              >
+                <option value="all">All Tasks</option>
+                <option value="completed">Completed</option>
+                <option value="pending">Pending</option>
+                <option value="in_progress">In Progress</option>
+              </select>
+
+              <select
+                value={dateFilter}
+                onChange={(e) => setDateFilter(e.target.value as 'today' | 'week' | 'month' | 'all')}
+                className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+              >
+                <option value="all">All Time</option>
+                <option value="today">Today</option>
+                <option value="week">Last 7 Days</option>
+                <option value="month">Last Month</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Tasks Table */}
+          <div className="bg-white rounded-lg shadow border border-gray-200">
+            <div className="p-4 border-b border-gray-200">
+              <h3 className="font-semibold text-gray-800">Task List</h3>
+              <p className="text-sm text-gray-600 mt-1">
+                Showing {filteredTasks.length} of {allTasksData.length} tasks
+              </p>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className="bg-gray-50 border-b border-gray-200">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Task</th>
+                    <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Status</th>
+                    <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Priority</th>
+                    <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Date</th>
+                    <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Notes</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  {filteredTasks.length > 0 ? (
+                    filteredTasks.map((task: any) => (
+                      <tr key={task.id} className="hover:bg-gray-50">
+                        <td className="px-4 py-3 text-sm text-gray-800 font-medium">{task.title}</td>
+                        <td className="px-4 py-3">
+                          <span className={`inline-block px-2 py-1 rounded text-xs font-semibold ${getStatusBadgeColorProgress(task.status)}`}>
+                            {task.status?.charAt(0).toUpperCase() + task.status?.slice(1).toLowerCase()}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className={`inline-block px-2 py-1 rounded text-xs font-semibold ${getPriorityBadgeColorProgress(task.priority)}`}>
+                            {task.priority?.charAt(0).toUpperCase() + task.priority?.slice(1).toLowerCase()}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-600">
+                          {task.completed_at
+                            ? format(parseISO(task.completed_at), 'MMM dd, yyyy h:mm a')
+                            : format(parseISO(task.created_at), 'MMM dd, yyyy')}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-600 max-w-xs truncate">
+                          {task.completed_notes || '-'}
+                        </td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan={5} className="px-4 py-8 text-center text-gray-500">
+                        No tasks found matching your filters
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Medication Scheduling & Management */}
+      <div className="space-y-6">
+        <MedicationScheduleWidget />
+        <MedicationAuditTrail />
+      </div>
 
       {/* Modals */}
       <VitalsHistoryModal

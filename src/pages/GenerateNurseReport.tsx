@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { useNursingTasksForNurse, useNurseReports, useCreateNurseReport, useDeleteNurseReport } from '@/hooks/useNursingAssignments';
+import type { NursingTask } from '@/types/nursing';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -19,10 +20,12 @@ import {
   Plus,
   Calendar,
   Package,
+  AlertCircle,
 } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import jsPDF from 'jspdf';
-import 'jspdf-autotable';
+import autoTable from 'jspdf-autotable';
+import { toast } from 'sonner';
 
 const GenerateNurseReport = () => {
   const { user, profile } = useAuth();
@@ -44,7 +47,7 @@ const GenerateNurseReport = () => {
   const filteredTasks = useMemo(() => {
     if (!dateFrom && !dateTo) return allTasks;
 
-    return allTasks.filter((task: any) => {
+    return allTasks.filter((task: NursingTask) => {
       const taskDate = task.completed_at || task.created_at;
       if (!taskDate) return false;
       const date = new Date(taskDate);
@@ -58,9 +61,9 @@ const GenerateNurseReport = () => {
 
   // Calculate statistics
   const stats = useMemo(() => {
-    const completed = filteredTasks.filter((t: any) => t.status === 'completed').length;
-    const pending = filteredTasks.filter((t: any) => t.status === 'pending').length;
-    const inProgress = filteredTasks.filter((t: any) => t.status === 'in_progress').length;
+    const completed = filteredTasks.filter((t: NursingTask) => t.status === 'completed').length;
+    const pending = filteredTasks.filter((t: NursingTask) => t.status === 'pending').length;
+    const inProgress = filteredTasks.filter((t: NursingTask) => t.status === 'in_progress').length;
     const total = filteredTasks.length;
 
     return {
@@ -74,7 +77,7 @@ const GenerateNurseReport = () => {
 
   const generateAndSubmitReport = async () => {
     if (!reportTitle.trim()) {
-      alert('Please enter a report title');
+      toast.error('Please enter a report title');
       return;
     }
 
@@ -82,7 +85,7 @@ const GenerateNurseReport = () => {
     try {
       const reportData = {
         title: reportTitle,
-        description: reportDescription,
+        description: reportDescription || '',
         report_type: reportType,
         date_from: dateFrom || undefined,
         date_to: dateTo || undefined,
@@ -100,7 +103,9 @@ const GenerateNurseReport = () => {
         status: 'submitted' as const,
       };
 
-      await createReportMutation.mutateAsync(reportData as any);
+      console.log('[GenerateNurseReport] Submitting report:', reportData);
+
+      await createReportMutation.mutateAsync(reportData as unknown as Parameters<typeof createReportMutation.mutateAsync>[0]);
 
       // Reset form
       setReportTitle('');
@@ -109,118 +114,128 @@ const GenerateNurseReport = () => {
       setDateFrom('');
       setDateTo('');
       setShowSubmitForm(false);
+    } catch (err) {
+      console.error('[GenerateNurseReport] Error submitting report:', err);
+      toast.error('Failed to submit report. Please try again.');
     } finally {
       setIsGenerating(false);
     }
   };
 
   const generatePDF = () => {
-    const doc = new jsPDF();
-    const pageWidth = doc.internal.pageSize.getWidth();
-    const pageHeight = doc.internal.pageSize.getHeight();
-    let yPosition = 20;
+    try {
+      const doc = new jsPDF();
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const pageHeight = doc.internal.pageSize.getHeight();
+      let yPosition = 20;
 
-    // Header
-    doc.setFontSize(16);
-    doc.setFont(undefined, 'bold');
-    doc.text('Heritage Medical Centre', pageWidth / 2, yPosition, { align: 'center' });
-
-    yPosition += 10;
-    doc.setFontSize(12);
-    doc.setFont(undefined, 'bold');
-    doc.text('Nursing Task Report', pageWidth / 2, yPosition, { align: 'center' });
-
-    yPosition += 15;
-    doc.setFontSize(10);
-    doc.setFont(undefined, 'normal');
-
-    // Report details
-    const details = [
-      [`Nurse: ${profile?.full_name || 'Unknown'}`, `Generated: ${format(new Date(), 'MMM dd, yyyy HH:mm')}`],
-      [`Report Type: ${reportType.charAt(0).toUpperCase() + reportType.slice(1)}`, `Title: ${reportTitle}`],
-      ...(dateFrom || dateTo
-        ? [
-            [
-              `Period: ${dateFrom ? format(new Date(dateFrom), 'MMM dd, yyyy') : 'N/A'} to ${dateTo ? format(new Date(dateTo), 'MMM dd, yyyy') : 'N/A'}`,
-              '',
-            ],
-          ]
-        : []),
-    ];
-
-    details.forEach((row) => {
-      doc.text(row[0], 20, yPosition);
-      if (row[1]) doc.text(row[1], pageWidth / 2, yPosition);
-      yPosition += 8;
-    });
-
-    yPosition += 10;
-
-    // Statistics section
-    doc.setFont(undefined, 'bold');
-    doc.text('Summary Statistics', 20, yPosition);
-    yPosition += 10;
-
-    const statsTable = [
-      ['Metric', 'Count'],
-      ['Total Tasks', stats.total.toString()],
-      ['Completed', stats.completed.toString()],
-      ['Pending', stats.pending.toString()],
-      ['In Progress', stats.inProgress.toString()],
-      ['Completion Rate', `${stats.completionRate}%`],
-    ];
-
-    (doc as any).autoTable({
-      startY: yPosition,
-      head: [statsTable[0]],
-      body: statsTable.slice(1),
-      margin: { left: 20, right: 20 },
-      styles: { fontSize: 9 },
-      headStyles: { fillColor: [59, 130, 246], textColor: 255 },
-    });
-
-    yPosition = (doc as any).lastAutoTable.finalY + 15;
-
-    // Tasks section (if detailed)
-    if (reportType === 'detailed' && filteredTasks.length > 0) {
-      if (yPosition + 50 > pageHeight) {
-        doc.addPage();
-        yPosition = 20;
-      }
-
+      // Header
+      doc.setFontSize(16);
       doc.setFont(undefined, 'bold');
-      doc.text('Task Details', 20, yPosition);
-      yPosition += 10;
+      doc.text('Heritage Medical Centre', pageWidth / 2, yPosition, { align: 'center' });
 
-      const tasksTable = [
-        ['Task', 'Status', 'Priority', 'Date'],
-        ...filteredTasks.map((task: any) => [
-          task.title || 'N/A',
-          task.status?.charAt(0).toUpperCase() + task.status?.slice(1) || 'N/A',
-          task.priority?.charAt(0).toUpperCase() + task.priority?.slice(1) || 'N/A',
-          task.completed_at ? format(parseISO(task.completed_at), 'MMM dd') : format(parseISO(task.created_at), 'MMM dd'),
-        ]),
+      yPosition += 10;
+      doc.setFontSize(12);
+      doc.setFont(undefined, 'bold');
+      doc.text('Nursing Task Report', pageWidth / 2, yPosition, { align: 'center' });
+
+      yPosition += 15;
+      doc.setFontSize(10);
+      doc.setFont(undefined, 'normal');
+
+      // Report details
+      const details = [
+        [`Nurse: ${profile?.full_name || 'Unknown'}`, `Generated: ${format(new Date(), 'MMM dd, yyyy HH:mm')}`],
+        [`Report Type: ${reportType.charAt(0).toUpperCase() + reportType.slice(1)}`, `Title: ${reportTitle}`],
+        ...(dateFrom || dateTo
+          ? [
+              [
+                `Period: ${dateFrom ? format(new Date(dateFrom), 'MMM dd, yyyy') : 'N/A'} to ${dateTo ? format(new Date(dateTo), 'MMM dd, yyyy') : 'N/A'}`,
+                '',
+              ],
+            ]
+          : []),
       ];
 
-      (doc as any).autoTable({
+      details.forEach((row) => {
+        doc.text(row[0], 20, yPosition);
+        if (row[1]) doc.text(row[1], pageWidth / 2, yPosition);
+        yPosition += 8;
+      });
+
+      yPosition += 10;
+
+      // Statistics section
+      doc.setFont(undefined, 'bold');
+      doc.text('Summary Statistics', 20, yPosition);
+      yPosition += 10;
+
+      const statsTable = [
+        ['Metric', 'Count'],
+        ['Total Tasks', stats.total.toString()],
+        ['Completed', stats.completed.toString()],
+        ['Pending', stats.pending.toString()],
+        ['In Progress', stats.inProgress.toString()],
+        ['Completion Rate', `${stats.completionRate}%`],
+      ];
+
+      autoTable(doc, {
         startY: yPosition,
-        head: [tasksTable[0]],
-        body: tasksTable.slice(1),
+        head: [statsTable[0]],
+        body: statsTable.slice(1),
         margin: { left: 20, right: 20 },
-        styles: { fontSize: 8 },
+        styles: { fontSize: 9 },
         headStyles: { fillColor: [59, 130, 246], textColor: 255 },
       });
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      yPosition = (doc as any).lastAutoTable.finalY + 15;
+
+      // Tasks section (if detailed)
+      if (reportType === 'detailed' && filteredTasks.length > 0) {
+        if (yPosition + 50 > pageHeight) {
+          doc.addPage();
+          yPosition = 20;
+        }
+
+        doc.setFont(undefined, 'bold');
+        doc.text('Task Details', 20, yPosition);
+        yPosition += 10;
+
+        const tasksTable = [
+          ['Task', 'Status', 'Priority', 'Date'],
+          ...filteredTasks.map((task: NursingTask) => [
+            task.title || 'N/A',
+            task.status?.charAt(0).toUpperCase() + task.status?.slice(1) || 'N/A',
+            task.priority?.charAt(0).toUpperCase() + task.priority?.slice(1) || 'N/A',
+            task.completed_at ? format(parseISO(task.completed_at), 'MMM dd') : format(parseISO(task.created_at), 'MMM dd'),
+          ]),
+        ];
+
+        autoTable(doc, {
+          startY: yPosition,
+          head: [tasksTable[0]],
+          body: tasksTable.slice(1),
+          margin: { left: 20, right: 20 },
+          styles: { fontSize: 8 },
+          headStyles: { fillColor: [59, 130, 246], textColor: 255 },
+        });
+      }
+
+      // Footer
+      const footerY = pageHeight - 10;
+      doc.setFontSize(8);
+      doc.text(`Generated on ${format(new Date(), 'MMM dd, yyyy HH:mm:ss')}`, 20, footerY);
+      doc.text(`Page 1 of 1`, pageWidth - 30, footerY);
+
+      // Save
+      const filename = `${reportTitle || 'nursing-report'}_${format(new Date(), 'yyyy-MM-dd')}.pdf`;
+      doc.save(filename);
+      toast.success('Report exported successfully');
+    } catch (err) {
+      console.error('[GenerateNurseReport] Error generating PDF:', err);
+      toast.error('Failed to generate PDF. Please try again.');
     }
-
-    // Footer
-    const footerY = pageHeight - 10;
-    doc.setFontSize(8);
-    doc.text(`Generated on ${format(new Date(), 'MMM dd, yyyy HH:mm:ss')}`, 20, footerY);
-    doc.text(`Page 1 of 1`, pageWidth - 30, footerY);
-
-    // Save
-    const filename = `${reportTitle || 'nursing-report'}_${format(new Date(), 'yyyy-MM-dd')}.pdf`;
-    doc.save(filename);
   };
 
   const getReportStatusColor = (status: string) => {
@@ -278,7 +293,7 @@ const GenerateNurseReport = () => {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Report Type</label>
-                <Select value={reportType} onValueChange={(value: any) => setReportType(value)}>
+              <Select value={reportType} onValueChange={(value: 'summary' | 'detailed' | 'custom') => setReportType(value)}>
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
@@ -391,6 +406,7 @@ const GenerateNurseReport = () => {
         <CardContent>
           <div className="space-y-3">
             {submittedReports.length > 0 ? (
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
               submittedReports.map((report: any) => (
                 <div
                   key={report.id}

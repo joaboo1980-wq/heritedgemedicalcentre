@@ -692,7 +692,8 @@ export const useNurseReports = (nurse_id?: string) => {
     queryKey: ['nurse-reports', nurse_id],
     enabled: !!nurse_id,
     queryFn: async () => {
-      let query = supabase
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let query = (supabase as any)
         .from('nurse_reports')
         .select('*')
         .order('created_at', { ascending: false });
@@ -721,14 +722,25 @@ export const useCreateNurseReport = () => {
       const { data: user } = await supabase.auth.getUser();
       if (!user.user?.id) throw new Error('User not authenticated');
 
-      const { error } = await supabase
-        .from('nurse_reports')
-        .insert({
-          ...reportData,
-          nurse_id: user.user.id,
-        });
+      const insertPayload = {
+        ...reportData,
+        nurse_id: user.user.id,
+      };
 
-      if (error) throw error;
+      console.log('[useCreateNurseReport] Insert payload:', insertPayload);
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data, error } = await (supabase as any)
+        .from('nurse_reports')
+        .insert([insertPayload]);
+
+      if (error) {
+        console.error('[useCreateNurseReport] Supabase error:', error);
+        throw new Error(`Failed to insert report: ${error.message}`);
+      }
+
+      console.log('[useCreateNurseReport] Insert successful:', data);
+      return data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['nurse-reports'], exact: false });
@@ -736,7 +748,7 @@ export const useCreateNurseReport = () => {
     },
     onError: (error: Error) => {
       console.error('[useCreateNurseReport] Error:', error);
-      toast.error('Failed to submit report');
+      toast.error(`Failed to submit report: ${error.message}`);
     },
   });
 };
@@ -767,7 +779,8 @@ export const useUpdateNurseReportStatus = () => {
         updateData.reviewed_by_id = user.user?.id;
       }
 
-      const { error } = await supabase
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { error } = await (supabase as any)
         .from('nurse_reports')
         .update(updateData)
         .eq('id', reportId);
@@ -790,7 +803,8 @@ export const useDeleteNurseReport = () => {
 
   return useMutation({
     mutationFn: async (reportId: string) => {
-      const { error } = await supabase
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { error } = await (supabase as any)
         .from('nurse_reports')
         .delete()
         .eq('id', reportId);

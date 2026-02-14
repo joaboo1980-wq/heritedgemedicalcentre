@@ -61,7 +61,6 @@ const navItems: NavItem[] = [
   { icon: FileText, label: 'Invoices', href: '/invoices', module: 'billing' },
   { icon: DollarSign, label: 'Accounts', href: '/accounts', module: 'accounts' },
   { icon: BarChart3, label: 'Reports', href: '/reports', module: 'reports' },
-  { icon: TrendingUp, label: 'Task Progress', href: '/nurse-task-progress', module: 'dashboard' },
   { icon: FileText, label: 'Generate Report', href: '/generate-nurse-report', module: 'dashboard' },
 ];
 
@@ -156,8 +155,7 @@ const Sidebar = () => {
                  location.pathname === '/nursing-dashboard' ||
                  location.pathname === '/pharmacy-dashboard' ||
                  location.pathname === '/admin-dashboard' ||
-                 location.pathname === '/dashboard' ||
-                 location.pathname === '/nurse-task-progress')
+                 location.pathname === '/dashboard')
                   ? 'bg-blue-600 text-white font-medium' 
                   : 'hover:bg-white/10 text-white'
               )}
