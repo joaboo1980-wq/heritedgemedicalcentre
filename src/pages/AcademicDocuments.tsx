@@ -268,7 +268,26 @@ const AcademicDocuments = () => {
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => window.open(doc.file_url, '_blank')}
+                    onClick={() => {
+                      try {
+                        // Extract file path from the stored URL
+                        const filePathMatch = doc.file_url.match(/academic-documents\/(.+)$/);
+                        if (filePathMatch && filePathMatch[1]) {
+                          const filePath = filePathMatch[1];
+                          // Regenerate public URL
+                          const { data } = supabase.storage
+                            .from('academic-documents')
+                            .getPublicUrl(filePath);
+                          window.open(data.publicUrl, '_blank');
+                        } else {
+                          // Fallback to original URL if parsing fails
+                          window.open(doc.file_url, '_blank');
+                        }
+                      } catch (error) {
+                        console.error('Error opening document:', error);
+                        toast.error('Failed to open document');
+                      }
+                    }}
                   >
                     View Document
                   </Button>
