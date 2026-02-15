@@ -37,6 +37,7 @@ const modules = [
   'pharmacy',
   'billing',
   'reports',
+  'generate_reports',
   'accounts',
   'staff',
   'staff_schedule',

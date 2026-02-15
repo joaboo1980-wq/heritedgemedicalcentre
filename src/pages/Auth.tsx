@@ -7,7 +7,7 @@ import { Label } from '@/components/ui/label';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
 import heritageLogo from '@/assets/heritage-logo.jpg';
-import healthcareHero from '@/assets/healthcare-hero.jpg';
+import loginPageImage from '@/assets/Loginpage.png';
 
 const Auth = () => {
   const [email, setEmail] = useState('');
@@ -50,64 +50,31 @@ const Auth = () => {
 
   return (
     <div className="min-h-screen flex">
-      {/* Left Side - Branding with Hero Image */}
-      <div className="hidden lg:flex lg:w-1/2 relative overflow-hidden">
-        {/* Background Image */}
+      {/* LEFT HALF - Login Page Image */}
+      <div className="hidden lg:flex w-1/2 bg-gray-900">
         <img 
-          src={healthcareHero} 
+          src={loginPageImage} 
           alt="Healthcare" 
-          className="absolute inset-0 w-full h-full object-cover"
+          className="w-full h-full object-cover"
         />
-        {/* Overlay */}
-        <div className="absolute inset-0 bg-primary/80" />
-        
-        {/* Content */}
-        <div className="relative z-10 flex flex-col justify-center px-12 text-primary-foreground">
-          <div className="max-w-md">
-            <div className="flex items-center gap-3 mb-8">
-              <img 
-                src={heritageLogo} 
-                alt="Heritage Medical Center" 
-                className="h-16 w-auto rounded-lg bg-white p-1"
-              />
-            </div>
-            
-            <h1 className="text-4xl font-bold mb-4">
-              Hospital Management System
-            </h1>
-            <p className="text-lg text-primary-foreground/90 mb-8">
-              Streamline your healthcare operations with our comprehensive management solution.
-            </p>
-            
-            <div className="flex gap-4">
-              <div className="bg-white/20 backdrop-blur-sm rounded-lg p-4 flex-1">
-                <h3 className="font-semibold mb-1">Secure</h3>
-                <p className="text-sm text-primary-foreground/80">Role-based access control</p>
-              </div>
-              <div className="bg-white/20 backdrop-blur-sm rounded-lg p-4 flex-1">
-                <h3 className="font-semibold mb-1">Compliant</h3>
-                <p className="text-sm text-primary-foreground/80">Healthcare standards</p>
-              </div>
-            </div>
-          </div>
-        </div>
       </div>
 
-      {/* Right Side - Login Form */}
-      <div className="w-full lg:w-1/2 flex items-center justify-center p-8 bg-background">
-        <div className="w-full max-w-md">
-          {/* Logo for mobile */}
-          <div className="lg:hidden flex justify-center mb-6">
-            <img 
-              src={heritageLogo} 
-              alt="Heritage Medical Center" 
-              className="h-20 w-auto"
-            />
-          </div>
-          
+      {/* RIGHT HALF - Login Form */}
+      <div className="w-full lg:w-1/2 flex flex-col justify-center items-center p-4 bg-gradient-to-br from-background to-background/95">
+        {/* Logo - Above Form */}
+        <div className="flex justify-center mb-8">
+          <img 
+            src={heritageLogo} 
+            alt="Heritage Medical Center" 
+            className="h-24 w-auto rounded-lg bg-white p-2 shadow-lg"
+          />
+        </div>
+        
+        {/* Form Card */}
+        <div className="w-full max-w-md bg-white rounded-lg shadow-2xl p-8">
           <div className="text-center mb-8">
-            <h2 className="text-2xl font-bold text-foreground">Staff Login</h2>
-            <p className="text-muted-foreground mt-2">Enter your credentials to access the system</p>
+            <h2 className="text-3xl font-bold text-foreground">Staff Login</h2>
+            <p className="text-muted-foreground mt-2">Hospital Management System</p>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-6">
@@ -127,7 +94,18 @@ const Auth = () => {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
+              <div className="flex items-center justify-between">
+                <Label htmlFor="password">Password</Label>
+                <Button
+                  type="button"
+                  variant="link"
+                  size="sm"
+                  className="h-auto p-0 text-xs text-primary hover:underline"
+                  onClick={() => navigate('/forgot-password')}
+                >
+                  Forgot Password?
+                </Button>
+              </div>
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
                 <Input

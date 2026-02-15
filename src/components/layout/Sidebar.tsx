@@ -61,11 +61,14 @@ const navItems: NavItem[] = [
   { icon: FileText, label: 'Invoices', href: '/invoices', module: 'billing' },
   { icon: DollarSign, label: 'Accounts', href: '/accounts', module: 'accounts' },
   { icon: BarChart3, label: 'Reports', href: '/reports', module: 'reports' },
-  { icon: FileText, label: 'Generate Report', href: '/generate-nurse-report', module: 'dashboard' },
+  { icon: FileText, label: 'Generate Report', href: '/generate-report', module: 'generate_reports' },
+  { icon: FileText, label: 'Academic Documents', href: '/academic-documents', module: 'user_management' },
 ];
 
 const adminItems = [
   { icon: Calendar, label: 'All Appointments', href: '/admin/appointments' },
+  { icon: FileText, label: 'Submitted Reports', href: '/submitted-reports' },
+  { icon: FileText, label: 'Review Documents', href: '/admin/academic-documents' },
   { icon: Settings, label: 'User Management', href: '/admin/users' },
 ];
 

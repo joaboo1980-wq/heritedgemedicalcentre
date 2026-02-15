@@ -10,6 +10,7 @@ export type ModuleName =
   | 'pharmacy' 
   | 'billing' 
   | 'reports' 
+  | 'generate_reports'
   | 'accounts'
   | 'staff' 
   | 'user_management';
@@ -52,6 +53,7 @@ export const usePermissions = () => {
           { role: 'admin', module: 'pharmacy', can_view: true, can_create: true, can_edit: true, can_delete: true },
           { role: 'admin', module: 'billing', can_view: true, can_create: true, can_edit: true, can_delete: true },
           { role: 'admin', module: 'reports', can_view: true, can_create: true, can_edit: true, can_delete: true },
+          { role: 'admin', module: 'generate_reports', can_view: true, can_create: true, can_edit: true, can_delete: true },
           { role: 'admin', module: 'accounts', can_view: true, can_create: true, can_edit: true, can_delete: true },
           { role: 'admin', module: 'staff', can_view: true, can_create: true, can_edit: true, can_delete: true },
           { role: 'admin', module: 'user_management', can_view: true, can_create: true, can_edit: true, can_delete: true },

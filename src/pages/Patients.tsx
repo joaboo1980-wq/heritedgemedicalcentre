@@ -882,6 +882,26 @@ const Patients = () => {
                   <p className="font-medium">{selectedPatient.address}</p>
                 </div>
               )}
+
+              {(selectedPatient.emergency_contact_name || selectedPatient.emergency_contact_phone) && (
+                <div className="border-t pt-4">
+                  <h4 className="font-semibold text-sm mb-3">Emergency Contact</h4>
+                  <div className="grid grid-cols-2 gap-4 text-sm">
+                    {selectedPatient.emergency_contact_name && (
+                      <div>
+                        <p className="text-muted-foreground">Name</p>
+                        <p className="font-medium">{selectedPatient.emergency_contact_name}</p>
+                      </div>
+                    )}
+                    {selectedPatient.emergency_contact_phone && (
+                      <div>
+                        <p className="text-muted-foreground">Phone</p>
+                        <p className="font-medium">{selectedPatient.emergency_contact_phone}</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </DialogContent>

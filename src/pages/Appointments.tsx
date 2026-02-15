@@ -886,7 +886,7 @@ const Appointments = () => {
                         </TableCell>
                         <TableCell>
                           <Badge className={statusColors[apt.status]}>
-                            <StatusIcon className="h-3 w-3 mr-1" />
+                            {StatusIcon && <StatusIcon className="h-3 w-3 mr-1" />}
                             {apt.status.replace('_', ' ')}
                           </Badge>
                         </TableCell>

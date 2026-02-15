@@ -293,74 +293,8 @@ const Dashboard = () => {
         </Card>
       </div>
 
-      {/* Recent Activity and Alerts */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Recent Activity */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg font-semibold text-foreground">
-              Recent Activity
-            </CardTitle>
-            <p className="text-sm text-muted-foreground">
-              Latest updates from your clinic
-            </p>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {recentAppointments && recentAppointments.length > 0 ? (
-                <div className="space-y-3">
-                  {recentAppointments.slice(0, 3).map((apt) => (
-                    <div key={apt.id} className="flex gap-3 pb-3 border-b last:border-b-0">
-                      <div className="w-2 h-2 rounded-full bg-primary mt-2 flex-shrink-0" />
-                      <div className="flex-1 min-w-0">
-                        <p className="font-medium text-foreground text-sm">
-                          New appointment scheduled with {apt.patient_name}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          {formatDistanceToNow(new Date(apt.appointment_date), { addSuffix: true })}
-                        </p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-center py-8 text-muted-foreground">
-                  <Calendar className="h-12 w-12 mx-auto mb-2 opacity-50" />
-                  <p>No recent activity</p>
-                </div>
-              )}
-              <div className="space-y-2">
-                <div className="flex items-center gap-2 text-sm text-muted-foreground pb-2">
-                  <div className="w-1.5 h-1.5 rounded-full bg-blue-500" />
-                  Patient John Doe checked in
-                </div>
-                <div className="text-xs text-muted-foreground">12 minutes ago</div>
-              </div>
-              <div className="space-y-2">
-                <div className="flex items-center gap-2 text-sm text-muted-foreground pb-2">
-                  <div className="w-1.5 h-1.5 rounded-full bg-green-500" />
-                  Lab results ready for Patient ID: 12345
-                </div>
-                <div className="text-xs text-muted-foreground">25 minutes ago</div>
-              </div>
-              <div className="space-y-2">
-                <div className="flex items-center gap-2 text-sm text-muted-foreground pb-2">
-                  <div className="w-1.5 h-1.5 rounded-full bg-orange-500" />
-                  Payment received from Insurance Co.
-                </div>
-                <div className="text-xs text-muted-foreground">1 hour ago</div>
-              </div>
-              <div className="space-y-2">
-                <div className="flex items-center gap-2 text-sm text-muted-foreground pb-2">
-                  <div className="w-1.5 h-1.5 rounded-full bg-purple-500" />
-                  Emergency patient admitted to ICU
-                </div>
-                <div className="text-xs text-muted-foreground">5 hours ago</div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
+      {/* Alerts & Notifications */}
+      <div className="grid grid-cols-1 gap-6">
         {/* Alerts & Notifications */}
         <Card className="border-amber-200 bg-amber-50/50 dark:bg-amber-950/20 dark:border-amber-900">
           <CardHeader>

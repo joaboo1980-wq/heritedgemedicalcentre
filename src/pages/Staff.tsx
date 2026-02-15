@@ -641,6 +641,12 @@ const Staff = () => {
                   <p className="text-sm text-muted-foreground">Department</p>
                   <p className="font-medium">{selectedStaff.department || 'Not assigned'}</p>
                 </div>
+                {selectedStaff.phone && (
+                  <div>
+                    <p className="text-sm text-muted-foreground">Phone</p>
+                    <p className="font-medium">{selectedStaff.phone}</p>
+                  </div>
+                )}
               </div>
 
               <div className="flex justify-end gap-4">

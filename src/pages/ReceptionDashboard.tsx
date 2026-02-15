@@ -11,6 +11,7 @@ import { Label } from '@/components/ui/label';
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -43,6 +44,7 @@ import {
   Search,
   RefreshCw,
 } from 'lucide-react';
+import WaitingRoom from '@/components/dashboard/WaitingRoom';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -55,6 +57,7 @@ const ReceptionDashboard = () => {
   const [isScheduleDialogOpen, setIsScheduleDialogOpen] = useState(false);
   const [isPaymentDialogOpen, setIsPaymentDialogOpen] = useState(false);
   const [selectedPaymentInvoice, setSelectedPaymentInvoice] = useState<any>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   
   // Form states
   const [registerForm, setRegisterForm] = useState({
@@ -121,7 +124,37 @@ const ReceptionDashboard = () => {
   // Schedule appointment mutation
   const scheduleAppointmentMutation = useMutation({
     mutationFn: async (data: typeof scheduleForm) => {
-      const { error } = await supabase
+      console.log('[ReceptionDashboard] ========== SCHEDULING APPOINTMENT ==========');
+      console.log('[ReceptionDashboard] Form data:', data);
+      
+      // Get the selected patient and doctor details for logging
+      const selectedPatient = patients.find((p: any) => p.id === data.patient_id);
+      const selectedDoctor = doctors.find((d: any) => d.id === data.doctor_id);
+      
+      console.log('[ReceptionDashboard] Selected Patient:', selectedPatient);
+      console.log('[ReceptionDashboard] Selected Doctor:', selectedDoctor);
+      
+      // Validate doctor is actually available
+      if (!selectedDoctor) {
+        throw new Error(`Doctor not found in available doctors list. Doctor ID: ${data.doctor_id}`);
+      }
+      
+      // Validate patient exists
+      if (!selectedPatient) {
+        throw new Error(`Patient not found in available patients list. Patient ID: ${data.patient_id}`);
+      }
+      
+      console.log('[ReceptionDashboard] Sending payload:', {
+        patient_id: data.patient_id,
+        doctor_id: data.doctor_id,
+        appointment_date: data.appointment_date,
+        appointment_time: data.appointment_time,
+        reason: data.reason,
+        status: 'scheduled',
+        note: 'Using "scheduled" as default status (valid in CHECK constraint)'
+      });
+
+      const { error, data: response } = await supabase
         .from('appointments')
         .insert({
           patient_id: data.patient_id,
@@ -129,11 +162,25 @@ const ReceptionDashboard = () => {
           appointment_date: data.appointment_date,
           appointment_time: data.appointment_time,
           reason: data.reason,
-          status: 'confirmed',
+          status: 'scheduled',  // Use 'scheduled' (default status in schema)
         });
-      if (error) throw error;
+      
+      if (error) {
+        console.error('[ReceptionDashboard] ❌ SUPABASE ERROR ❌');
+        console.error('[ReceptionDashboard] Error code:', error.code);
+        console.error('[ReceptionDashboard] Error message:', error.message);
+        console.error('[ReceptionDashboard] Full error object:', JSON.stringify(error, null, 2));
+        console.error('[ReceptionDashboard] Patient ID used:', data.patient_id);
+        console.error('[ReceptionDashboard] Doctor ID used:', data.doctor_id);
+        console.error('[ReceptionDashboard] Doctor exists in list:', !!selectedDoctor);
+        console.error('[ReceptionDashboard] Patient exists in list:', !!selectedPatient);
+        throw new Error(`Failed to create appointment: ${error.message}`);
+      }
+      
+      console.log('[ReceptionDashboard] ✓ Insert successful, response:', response);
     },
     onSuccess: () => {
+      console.log('[ReceptionDashboard] ✓ MUTATION SUCCESS');
       queryClient.invalidateQueries({ queryKey: ['reception-today-appointments'] });
       toast.success('Appointment scheduled successfully');
       setIsScheduleDialogOpen(false);
@@ -145,7 +192,14 @@ const ReceptionDashboard = () => {
         reason: '',
       });
     },
-    onError: (error: Error) => toast.error(`Failed to schedule appointment: ${error.message}`),
+    onError: (error: Error) => {
+      console.error('[ReceptionDashboard] ❌ MUTATION FAILED ❌');
+      console.error('[ReceptionDashboard] Error message:', error.message);
+      if ('code' in error) {
+        console.error('[ReceptionDashboard] Error code:', (error as any).code);
+      }
+      toast.error(`Failed to schedule appointment: ${error.message}`);
+    },
   });
 
   // Process payment mutation
@@ -222,7 +276,7 @@ const ReceptionDashboard = () => {
   });
 
   // Fetch waiting patients (status = 'waiting')
-  const { data: waitingPatients, isLoading: loadingWaiting } = useQuery({
+  const { data: waitingPatients, isLoading: loadingWaiting, refetch: refetchWaitingPatients } = useQuery({
     queryKey: ['reception-waiting-patients', today],
     queryFn: async () => {
       try {
@@ -286,7 +340,7 @@ const ReceptionDashboard = () => {
   });
 
   // Fetch new registrations today
-  const { data: newRegistrations } = useQuery({
+  const { data: newRegistrations, refetch: refetchNewRegistrations } = useQuery({
     queryKey: ['reception-new-registrations', today],
     queryFn: async () => {
       const { count } = await supabase
@@ -300,7 +354,7 @@ const ReceptionDashboard = () => {
   });
 
   // Fetch pending payments
-  const { data: pendingPayments, isLoading: loadingPayments } = useQuery({
+  const { data: pendingPayments, isLoading: loadingPayments, refetch: refetchPendingPayments } = useQuery({
     queryKey: ['reception-pending-payments', today],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -337,7 +391,7 @@ const ReceptionDashboard = () => {
   });
 
   // Fetch all patients for scheduling
-  const { data: patients = [] } = useQuery({
+  const { data: patients = [], refetch: refetchPatients } = useQuery({
     queryKey: ['all-patients'],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -351,16 +405,64 @@ const ReceptionDashboard = () => {
   });
 
   // Fetch all doctors for scheduling
-  const { data: doctors = [] } = useQuery({
+  const { data: doctors = [], refetch: refetchDoctors } = useQuery({
     queryKey: ['all-doctors'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('id, full_name')
-        .eq('role', 'doctor')
-        .order('full_name');
-      if (error) throw error;
-      return data || [];
+      try {
+        console.log('[ReceptionDashboard] Fetching doctors...');
+        
+        // First fetch doctor role assignments from user_roles
+        const { data: doctorRoles, error: rolesError } = await supabase
+          .from('user_roles')
+          .select('user_id')
+          .eq('role', 'doctor');
+        
+        if (rolesError) {
+          console.error('[ReceptionDashboard] Error fetching doctor roles:', rolesError);
+          throw rolesError;
+        }
+        
+        console.log('[ReceptionDashboard] Doctor roles found:', doctorRoles?.length || 0);
+        
+        if (!doctorRoles || doctorRoles.length === 0) {
+          console.warn('[ReceptionDashboard] No doctors found in user_roles');
+          return [];
+        }
+        
+        // Get list of doctor user IDs
+        const doctorUserIds = doctorRoles.map((dr: any) => dr.user_id);
+        console.log('[ReceptionDashboard] Doctor user IDs:', doctorUserIds);
+        
+        // Now fetch the profiles for these doctor IDs
+        const { data: doctorProfiles, error: profileError } = await supabase
+          .from('profiles')
+          .select('user_id, full_name')
+          .in('user_id', doctorUserIds)
+          .order('full_name');
+        
+        if (profileError) {
+          console.error('[ReceptionDashboard] Error fetching doctor profiles:', profileError);
+          return [];
+        }
+        
+        console.log('[ReceptionDashboard] Doctor profiles fetched:', doctorProfiles?.length || 0);
+        
+        // Transform to match expected format
+        const transformedDoctors = (doctorProfiles || []).map((p: any) => ({
+          id: p.user_id,
+          full_name: p.full_name,
+        }));
+        
+        console.log('[ReceptionDashboard] Transformed doctors for UI:', transformedDoctors);
+        transformedDoctors.forEach((d: any) => {
+          console.log(`  - ${d.full_name} (ID: ${d.id})`);
+        });
+        
+        return transformedDoctors;
+      } catch (err) {
+        console.error('[ReceptionDashboard] Fetch doctors error:', err);
+        return [];
+      }
     },
     refetchInterval: 120000,
   });
@@ -393,6 +495,29 @@ const ReceptionDashboard = () => {
     }
   };
 
+  // Comprehensive refresh handler
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      // Perform all refetch operations in parallel
+      await Promise.all([
+        refetchAppointments(),
+        refetchWaitingPatients(),
+        refetchNewRegistrations(),
+        refetchPendingPayments(),
+        refetchPatients(),
+        refetchDoctors(),
+      ]);
+      
+      toast.success('Dashboard refreshed successfully');
+    } catch (error: any) {
+      console.error('[ReceptionDashboard] Refresh error:', error);
+      toast.error('Failed to refresh dashboard. Please try again.');
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -406,16 +531,13 @@ const ReceptionDashboard = () => {
         <Button
           variant="outline"
           size="sm"
-          onClick={() => {
-            refetchAppointments();
-            queryClient.invalidateQueries({ queryKey: ['reception-waiting-patients'] });
-            queryClient.invalidateQueries({ queryKey: ['reception-new-registrations'] });
-            queryClient.invalidateQueries({ queryKey: ['reception-pending-payments'] });
-          }}
+          onClick={handleRefresh}
+          disabled={isRefreshing}
           className="gap-2"
+          title="Refresh all dashboard data"
         >
-          <RefreshCw className="h-4 w-4" />
-          Refresh
+          <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+          {isRefreshing ? 'Refreshing...' : 'Refresh'}
         </Button>
       </div>
 
@@ -490,6 +612,9 @@ const ReceptionDashboard = () => {
           <DialogContent className="max-w-md">
             <DialogHeader>
               <DialogTitle>Register New Patient</DialogTitle>
+              <DialogDescription>
+                Enter the patient's personal information to register them in the system.
+              </DialogDescription>
             </DialogHeader>
             <form
               onSubmit={(e) => {
@@ -579,10 +704,31 @@ const ReceptionDashboard = () => {
           <DialogContent className="max-w-md">
             <DialogHeader>
               <DialogTitle>Schedule Appointment</DialogTitle>
+              <DialogDescription>
+                Select a patient and doctor to create a new appointment.
+              </DialogDescription>
             </DialogHeader>
             <form
               onSubmit={(e) => {
                 e.preventDefault();
+                // Validate all required fields
+                if (!scheduleForm.patient_id) {
+                  toast.error('Please select a patient');
+                  return;
+                }
+                if (!scheduleForm.doctor_id) {
+                  toast.error('Please select a doctor');
+                  return;
+                }
+                if (!scheduleForm.appointment_date) {
+                  toast.error('Please select an appointment date');
+                  return;
+                }
+                if (!scheduleForm.appointment_time) {
+                  toast.error('Please select an appointment time');
+                  return;
+                }
+                console.log('[ReceptionDashboard] Form validation passed, submitting:', scheduleForm);
                 scheduleAppointmentMutation.mutate(scheduleForm);
               }}
               className="space-y-4"
@@ -666,6 +812,9 @@ const ReceptionDashboard = () => {
           <DialogContent className="max-w-md">
             <DialogHeader>
               <DialogTitle>Process Payment</DialogTitle>
+              <DialogDescription>
+                Select a pending invoice and confirm payment to mark it as paid.
+              </DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
               {loadingPayments ? (
@@ -793,64 +942,11 @@ const ReceptionDashboard = () => {
           </CardContent>
         </Card>
 
-        {/* Waiting Room */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Users className="h-5 w-5" />
-              Waiting Room
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {loadingWaiting ? (
-              <div className="flex justify-center py-8">
-                <div className="w-6 h-6 border-4 border-primary border-t-transparent rounded-full animate-spin" />
-              </div>
-            ) : waitingPatients && waitingPatients.length > 0 ? (
-              <div className="space-y-3 max-h-96 overflow-y-auto">
-                {waitingPatients.map((wp: any) => (
-                  <div key={wp.id} className="border border-yellow-200 bg-yellow-50 dark:bg-yellow-950/20 rounded-lg p-4">
-                    <div className="flex items-start justify-between mb-2">
-                      <div>
-                        <p className="font-semibold">{wp.patient_name}</p>
-                        <p className="text-sm text-muted-foreground flex items-center gap-1 mt-1">
-                          <Clock className="h-3 w-3" />
-                          Waiting for {wp.doctor_name}
-                        </p>
-                      </div>
-                      <Badge className="bg-yellow-600 text-white">Waiting</Badge>
-                    </div>
-                    <div className="flex gap-2 flex-wrap">
-                      <Button
-                        size="sm"
-                        className="bg-blue-600 hover:bg-blue-700"
-                        onClick={() => updateStatusMutation.mutate({ id: wp.id, status: 'in_progress' })}
-                        disabled={updateStatusMutation.isPending}
-                      >
-                        <Phone className="h-3 w-3 mr-1" />
-                        Call Now
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => updateStatusMutation.mutate({ id: wp.id, status: 'cancelled' })}
-                        disabled={updateStatusMutation.isPending}
-                      >
-                        No Show
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="text-center py-12 text-muted-foreground">
-                <AlertCircle className="h-12 w-12 mx-auto mb-2 opacity-50" />
-                <p>No patients waiting</p>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+        {/* Waiting Room - Replaced with new comprehensive component below */}
       </div>
+
+      {/* Comprehensive Waiting Room Component */}
+      <WaitingRoom />
 
       {/* Pending Payments Table */}
       {pendingPayments && pendingPayments.length > 0 && (

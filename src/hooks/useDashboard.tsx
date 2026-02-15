@@ -294,11 +294,7 @@ export const useDepartmentDistribution = () => {
             email,
             phone,
             role,
-            department_id,
-            departments (
-              id,
-              name
-            )
+            department
           `);
 
         if (error || !staffData || staffData.length === 0) {
@@ -310,7 +306,7 @@ export const useDepartmentDistribution = () => {
         const departmentMap: Record<string, { count: number; staff: StaffMember[] }> = {};
         
         staffData.forEach((member: any) => {
-          const deptName = member.departments?.name || 'Unassigned';
+          const deptName = member.department || 'Unassigned';
           if (!departmentMap[deptName]) {
             departmentMap[deptName] = { count: 0, staff: [] };
           }
@@ -544,7 +540,6 @@ export const useActivityLog = () => {
             appointment_time,
             status,
             created_at,
-            created_by,
             patients (
               first_name,
               last_name
@@ -556,22 +551,8 @@ export const useActivityLog = () => {
         if (apptError) {
           console.warn('[Dashboard] Error fetching appointment activity logs:', apptError);
         } else if (appointments) {
-          // Fetch user role for each appointment
+          // Process appointments
           for (const apt of appointments) {
-            let userRole = 'Unknown';
-            
-            if (apt.created_by) {
-              const { data: userProfiles } = await supabase
-                .from('profiles')
-                .select('role')
-                .eq('id', apt.created_by)
-                .single();
-              
-              if (userProfiles?.role) {
-                userRole = userProfiles.role.charAt(0).toUpperCase() + userProfiles.role.slice(1).replace('_', ' ');
-              }
-            }
-            
             activities.push({
               id: `apt-${apt.id}`,
               type: 'appointment' as const,
@@ -579,8 +560,8 @@ export const useActivityLog = () => {
               timestamp: apt.created_at,
               timeAgo: formatDistanceToNow(new Date(apt.created_at), { addSuffix: true }),
               icon: '📅',
-              user_role: userRole,
-              user_id: apt.created_by,
+              user_role: 'Staff',
+              user_id: '',
             });
           }
         }
@@ -592,7 +573,6 @@ export const useActivityLog = () => {
             id,
             order_number,
             created_at,
-            created_by,
             patients (
               first_name,
               last_name
@@ -604,22 +584,8 @@ export const useActivityLog = () => {
         if (labError) {
           console.warn('[Dashboard] Error fetching lab order activity logs:', labError);
         } else if (labOrders) {
-          // Fetch user role for each lab order
+          // Process lab orders
           for (const order of labOrders) {
-            let userRole = 'Unknown';
-            
-            if (order.created_by) {
-              const { data: userProfiles } = await supabase
-                .from('profiles')
-                .select('role')
-                .eq('id', order.created_by)
-                .single();
-              
-              if (userProfiles?.role) {
-                userRole = userProfiles.role.charAt(0).toUpperCase() + userProfiles.role.slice(1).replace('_', ' ');
-              }
-            }
-            
             activities.push({
               id: `lab-${order.id}`,
               type: 'lab_order' as const,
@@ -627,8 +593,8 @@ export const useActivityLog = () => {
               timestamp: order.created_at,
               timeAgo: formatDistanceToNow(new Date(order.created_at), { addSuffix: true }),
               icon: '🧪',
-              user_role: userRole,
-              user_id: order.created_by,
+              user_role: 'Staff',
+              user_id: '',
             });
           }
         }

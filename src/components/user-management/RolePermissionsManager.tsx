@@ -28,6 +28,7 @@ const MODULES: { value: ModuleName; label: string; description: string }[] = [
   { value: 'pharmacy', label: 'Pharmacy', description: 'Medications and inventory' },
   { value: 'billing', label: 'Billing', description: 'Invoices and payments' },
   { value: 'reports', label: 'Reports', description: 'Analytics and reports' },
+  { value: 'generate_reports', label: 'Generate Reports', description: 'Staff report generation' },
   { value: 'accounts', label: 'Accounts', description: 'Financial accounts and transactions' },
   { value: 'staff', label: 'Staff', description: 'Staff directory' },
   { value: 'staff_schedule', label: 'Staff Schedule', description: 'Work schedules and assignments' },

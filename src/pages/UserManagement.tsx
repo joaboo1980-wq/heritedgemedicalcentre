@@ -174,6 +174,17 @@ const UserManagement = () => {
           // Continue anyway, the user was created successfully
         }
 
+        // Send password reset email so user can set their own password
+        const { error: resetError } = await supabase.auth.resetPasswordForEmail(userData.email.trim().toLowerCase(), {
+          redirectTo: `${window.location.origin}/reset-password`,
+        });
+
+        if (resetError) {
+          console.error('Error sending reset email:', resetError);
+          // Log but don't fail - user creation was successful
+          throw new Error('User created but failed to send password reset email. User can use "Forgot Password" to reset.');
+        }
+
         return authData.user;
       } catch (error) {
         console.error('User creation error:', error);
@@ -189,7 +200,7 @@ const UserManagement = () => {
         full_name: '',
         role: 'doctor',
       });
-      toast.success('Staff member created successfully');
+      toast.success('Staff member created! Password reset email sent.');
     },
     onError: (error: Error) => {
       console.error('Mutation error:', error);

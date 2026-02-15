@@ -27,11 +27,18 @@ import StaffSchedule from "./pages/StaffSchedule";
 import Laboratory from "./pages/Laboratory";
 import Pharmacy from "./pages/Pharmacy";
 import Reports from "./pages/Reports";
+import GenerateReport from "./pages/GenerateReport";
+import SubmittedReports from "./pages/SubmittedReports";
+import AcademicDocuments from "./pages/AcademicDocuments";
+import ReviewAcademicDocuments from "./pages/ReviewAcademicDocuments";
+import Profile from "./pages/Profile";
 import UserManagement from "./pages/UserManagement";
 import Billing from "./pages/Billing";
 import Invoices from "./pages/Invoices";
 import Accounts from "./pages/Accounts";
 import NotFound from "./pages/NotFound";
+import ForgotPassword from "./pages/ForgotPassword";
+import ResetPassword from "./pages/ResetPassword";
 
 const queryClient = new QueryClient();
 
@@ -101,6 +108,8 @@ const App = () => (
               <Routes>
             <Route path="/" element={<RootRedirect />} />
             <Route path="/auth" element={<Auth />} />
+            <Route path="/forgot-password" element={<ForgotPassword />} />
+            <Route path="/reset-password" element={<ResetPassword />} />
             <Route element={<DashboardLayout />}>
               <Route path="/dashboard" element={<DashboardRedirect />} />
               <Route path="/admin-dashboard" element={
@@ -183,6 +192,31 @@ const App = () => (
               <Route path="/reports" element={
                 <ProtectedRoute module="reports">
                   <Reports />
+                </ProtectedRoute>
+              } />
+              <Route path="/generate-report" element={
+                <ProtectedRoute module="generate_reports">
+                  <GenerateReport />
+                </ProtectedRoute>
+              } />
+              <Route path="/submitted-reports" element={
+                <ProtectedRoute module="generate_reports" requiredRole="admin">
+                  <SubmittedReports />
+                </ProtectedRoute>
+              } />
+              <Route path="/profile" element={
+                <ProtectedRoute module="dashboard">
+                  <Profile />
+                </ProtectedRoute>
+              } />
+              <Route path="/academic-documents" element={
+                <ProtectedRoute module="user_management">
+                  <AcademicDocuments />
+                </ProtectedRoute>
+              } />
+              <Route path="/admin/academic-documents" element={
+                <ProtectedRoute module="user_management" requiredRole="admin">
+                  <ReviewAcademicDocuments />
                 </ProtectedRoute>
               } />
               <Route path="/billing" element={
