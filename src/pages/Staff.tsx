@@ -779,7 +779,7 @@ const Staff = () => {
               <div className="space-y-4">
                 <h4 className="font-semibold">Module Permissions</h4>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {['dashboard', 'patients', 'appointments', 'laboratory', 'pharmacy', 'billing', 'reports', 'accounts', 'staff', 'user_management'].map((module) => (
+                  {['dashboard', 'patients', 'appointments', 'laboratory', 'pharmacy', 'billing', 'reports', 'generate_reports', 'academic_documents', 'accounts', 'staff', 'staff_schedule', 'user_management'].map((module) => (
                     <div key={module} className="border rounded-lg p-4 space-y-3">
                       <h5 className="font-medium capitalize">{module.replace('_', ' ')}</h5>
                       <div className="space-y-2 text-sm">

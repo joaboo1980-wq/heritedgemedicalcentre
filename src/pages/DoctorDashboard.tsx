@@ -340,6 +340,7 @@ const DoctorDashboard = () => {
              triage_temperature, triage_blood_pressure, triage_pulse_rate, plan_treatment,
              patients(first_name, last_name)`
           )
+          .eq('examined_by', doctorId)
           .order('examination_date', { ascending: false })
           .limit(50);
 

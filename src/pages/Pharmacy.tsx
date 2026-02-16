@@ -30,7 +30,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from 'sonner';
-import { Plus, Search, Pill, Package, AlertTriangle, TrendingDown, Edit, Eye, CheckSquare, Printer, Phone, Trash2, Package2, RotateCw, BarChart3 } from 'lucide-react';
+import { Plus, Search, Pill, Package, AlertTriangle, TrendingDown, Edit, Eye, CheckSquare, Printer, Phone, Trash2, Package2, RotateCw, BarChart3, FileText } from 'lucide-react';
 import { format } from 'date-fns';
 import PermissionGuard from '@/components/layout/PermissionGuard';
 
@@ -64,6 +64,8 @@ interface Prescription {
   first_name?: string;
   last_name?: string;
   patient_number?: string;
+  // Prescription items with medications
+  items?: Array<{id: string; medication_name?: string}> | null;
 }
 
 interface PurchaseOrder {
@@ -107,6 +109,13 @@ const Pharmacy = () => {
   const [invoicesLoading, setInvoicesLoading] = useState(false);
   const [editingMedication, setEditingMedication] = useState<Medication | null>(null);
   const [editFormData, setEditFormData] = useState<Partial<Medication>>({});
+  const [isCreatingInvoice, setIsCreatingInvoice] = useState<string | null>(null);
+  const [invoiceModalOpen, setInvoiceModalOpen] = useState(false);
+  const [simplifiedInvoiceForm, setSimplifiedInvoiceForm] = useState({
+    patient_id: '',
+    due_date: '',
+    items: [{ description: '', item_type: 'medication', quantity: 1, unit_price: 0 }],
+  });
 
   const [newMedication, setNewMedication] = useState({
     medication_code: '',
@@ -160,7 +169,7 @@ const Pharmacy = () => {
     queryKey: ['prescriptions'],
     queryFn: async () => {
       try {
-        // Fetch prescriptions with patient details
+        // Fetch prescriptions first
         const { data: prescriptionData, error } = await supabase
           .from('prescriptions')
           .select('*')
@@ -168,20 +177,21 @@ const Pharmacy = () => {
           .limit(100);
         if (error) throw error;
 
+        if (!prescriptionData || prescriptionData.length === 0) {
+          return [];
+        }
+
         // Extract patient IDs and fetch patient data
-        const patientIds = [...new Set((prescriptionData || []).map(p => p.patient_id).filter(Boolean))];
+        const patientIds = [...new Set(prescriptionData.map(p => p.patient_id).filter(Boolean))];
         let patientMap: Record<string, any> = {};
         
         if (patientIds.length > 0) {
           try {
             const { data: patientData, error: patientError } = await supabase
               .from('patients')
-              .select('id, first_name, last_name, patient_number')
-              .in('id', patientIds);
-            if (patientError) {
-              console.error('Error fetching patients:', patientError);
-            } else {
-              patientMap = (patientData || []).reduce((acc: Record<string, any>, p: any) => {
+              .select('id, first_name, last_name, patient_number');
+            if (!patientError && patientData) {
+              patientMap = patientData.reduce((acc: Record<string, any>, p: any) => {
                 acc[p.id] = p;
                 return acc;
               }, {});
@@ -191,17 +201,42 @@ const Pharmacy = () => {
           }
         }
 
-        // Map patient data to prescriptions
-        const prescriptionsWithPatients = (prescriptionData || []).map((rx: any) => ({
+        // Fetch all prescription items with medications
+        const presRxIds = prescriptionData.map(p => p.id);
+        let itemsMap: Record<string, any[]> = {};
+        if (presRxIds.length > 0) {
+          try {
+            const { data: itemsData, error: itemsError } = await supabase
+              .from('prescription_items')
+              .select('id, prescription_id, medication_id, medications(name)')
+              .in('prescription_id', presRxIds);
+            if (!itemsError && itemsData) {
+              itemsMap = itemsData.reduce((acc: Record<string, any[]>, item: any) => {
+                if (!acc[item.prescription_id]) acc[item.prescription_id] = [];
+                acc[item.prescription_id].push({
+                  id: item.id,
+                  medication_name: item.medications?.name || 'Unknown',
+                });
+                return acc;
+              }, {});
+            }
+          } catch (err) {
+            console.error('Exception fetching prescription items:', err);
+          }
+        }
+
+        // Map patient data and medication items to prescriptions
+        const prescriptionsWithData = prescriptionData.map((rx: any) => ({
           ...rx,
           first_name: patientMap[rx.patient_id]?.first_name || '',
           last_name: patientMap[rx.patient_id]?.last_name || '',
           patient_number: patientMap[rx.patient_id]?.patient_number || '',
+          items: itemsMap[rx.id] || [],
         }));
 
-        return prescriptionsWithPatients as Prescription[];
+        return prescriptionsWithData as Prescription[];
       } catch (err) {
-        console.log('Prescriptions table not available yet', err);
+        console.error('[Pharmacy] Prescriptions query error:', err);
         return [];
       }
     },
@@ -407,6 +442,82 @@ const Pharmacy = () => {
     onError: (error: Error) => {
       console.error('[Pharmacy] Payment check error:', error.message);
       toast.error('Could not check payment status');
+    },
+  });
+
+
+
+  // Create invoice from form
+  const createSimpleInvoiceMutation = useMutation({
+    mutationFn: async (data: typeof simplifiedInvoiceForm) => {
+      if (!data.patient_id?.trim()) {
+        throw new Error('Patient is required');
+      }
+      if (data.items.length === 0) {
+        throw new Error('At least one item is required');
+      }
+
+      const invalidItems = data.items.filter(
+        (item) => !item.description || item.quantity <= 0 || item.unit_price <= 0
+      );
+      if (invalidItems.length > 0) {
+        throw new Error('All items must have description, quantity > 0, and unit price > 0');
+      }
+
+      try {
+        const subtotal = data.items.reduce((sum, item) => sum + (item.quantity * item.unit_price), 0);
+        const totalAmount = subtotal;
+
+        const { data: invoice, error: invoiceError } = await supabase
+          .from('invoices')
+          .insert({
+            patient_id: data.patient_id,
+            due_date: data.due_date && data.due_date.trim() ? data.due_date : null,
+            subtotal: subtotal,
+            total_amount: totalAmount,
+            tax_amount: 0,
+            discount_amount: 0,
+            amount_paid: 0,
+            invoice_number: `INV-${Date.now()}`,
+            status: 'pending',
+          })
+          .select()
+          .single();
+
+        if (invoiceError) throw invoiceError;
+
+        const items = data.items.map((item) => ({
+          invoice_id: invoice.id,
+          description: item.description.trim(),
+          item_type: item.item_type,
+          quantity: parseInt(item.quantity.toString()),
+          unit_price: parseFloat(item.unit_price.toString()),
+          total_price: parseFloat((item.quantity * item.unit_price).toString()),
+        }));
+
+        const { error: itemsError } = await supabase.from('invoice_items').insert(items);
+        if (itemsError) throw itemsError;
+
+        return invoice;
+      } catch (err) {
+        console.error('[Pharmacy] Invoice creation failed:', err);
+        throw err;
+      }
+    },
+    onSuccess: (invoice) => {
+      queryClient.invalidateQueries({ queryKey: ['invoices'] });
+      setInvoiceModalOpen(false);
+      setSimplifiedInvoiceForm({
+        patient_id: '',
+        due_date: '',
+        items: [{ description: '', item_type: 'medication', quantity: 1, unit_price: 0 }],
+      });
+      setIsCreatingInvoice(null);
+      toast.success(`Invoice ${invoice.invoice_number} created successfully`);
+    },
+    onError: (error: Error) => {
+      console.error('[Pharmacy] Invoice creation error:', error.message);
+      toast.error(`Failed to create invoice: ${error.message}`);
     },
   });
 
@@ -1272,6 +1383,7 @@ const Pharmacy = () => {
                       <TableHead>Prescription #</TableHead>
                       <TableHead>Patient Name</TableHead>
                       <TableHead>Patient #</TableHead>
+                      <TableHead>Medication(s)</TableHead>
                       <TableHead>Prescribed By</TableHead>
                       <TableHead>Notes</TableHead>
                       <TableHead>Status</TableHead>
@@ -1290,6 +1402,12 @@ const Pharmacy = () => {
                             : prescription.patient_id.substring(0, 8)}
                         </TableCell>
                         <TableCell>{prescription.patient_number || '-'}</TableCell>
+                        <TableCell className="text-sm">
+                          {prescription.items && prescription.items.length > 0
+                            ? prescription.items.map(item => item.medication_name).join(', ')
+                            : '-'
+                          }
+                        </TableCell>
                         <TableCell>{prescription.prescribed_by}</TableCell>
                         <TableCell className="max-w-xs truncate">{prescription.notes || '-'}</TableCell>
                         <TableCell>
@@ -1394,18 +1512,30 @@ const Pharmacy = () => {
                             </Dialog>
 
                             {prescription.status !== 'dispensed' && prescription.status !== 'completed' && (
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                title="Check Payment & Dispense"
-                                onClick={() => {
-                                  setInvoicesLoading(true);
-                                  checkPaymentStatusMutation.mutate(prescription);
-                                }}
-                                disabled={checkPaymentStatusMutation.isPending || dispenseMedicationMutation.isPending}
-                              >
-                                <CheckSquare className="h-4 w-4" />
-                              </Button>
+                              <>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  title="Create Invoice"
+                                  onClick={() => {
+                                    setInvoiceModalOpen(true);
+                                  }}
+                                >
+                                  <FileText className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  title="Check Payment & Dispense"
+                                  onClick={() => {
+                                    setInvoicesLoading(true);
+                                    checkPaymentStatusMutation.mutate(prescription);
+                                  }}
+                                  disabled={checkPaymentStatusMutation.isPending || dispenseMedicationMutation.isPending}
+                                >
+                                  <CheckSquare className="h-4 w-4" />
+                                </Button>
+                              </>
                             )}
 
                             <Dialog
@@ -1679,6 +1809,181 @@ const Pharmacy = () => {
                       </div>
                     </div>
                   )}
+                </DialogContent>
+              </Dialog>
+
+              {/* Create Invoice Modal */}
+              <Dialog open={invoiceModalOpen} onOpenChange={setInvoiceModalOpen}>
+                <DialogContent className="max-w-2xl">
+                  <DialogHeader>
+                    <DialogTitle>Create Invoice</DialogTitle>
+                    <p className="text-sm text-muted-foreground">Create a new invoice for patient billing.</p>
+                  </DialogHeader>
+                  <div className="space-y-4">
+                    {/* Patient Field */}
+                    <div className="space-y-2">
+                      <Label htmlFor="patient">Patient *</Label>
+                      <Select value={simplifiedInvoiceForm.patient_id} onValueChange={(v) => setSimplifiedInvoiceForm({ ...simplifiedInvoiceForm, patient_id: v })}>
+                        <SelectTrigger id="patient">
+                          <SelectValue placeholder="Select patient" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {prescriptions?.map((rx) => (
+                            <SelectItem key={rx.patient_id} value={rx.patient_id}>
+                              {rx.first_name} {rx.last_name} - {rx.patient_number}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {/* Due Date Field */}
+                    <div className="space-y-2">
+                      <Label htmlFor="due-date">Due Date</Label>
+                      <Input
+                        id="due-date"
+                        type="date"
+                        value={simplifiedInvoiceForm.due_date}
+                        onChange={(e) => setSimplifiedInvoiceForm({ ...simplifiedInvoiceForm, due_date: e.target.value })}
+                      />
+                    </div>
+
+                    {/* Items Section */}
+                    <div className="space-y-2">
+                      <div className="flex justify-between items-center">
+                        <Label>Items</Label>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            setSimplifiedInvoiceForm({
+                              ...simplifiedInvoiceForm,
+                              items: [...simplifiedInvoiceForm.items, { description: '', item_type: 'medication', quantity: 1, unit_price: 0 }],
+                            });
+                          }}
+                        >
+                          <Plus className="h-4 w-4 mr-1" /> Add Item
+                        </Button>
+                      </div>
+
+                      <div className="space-y-2 max-h-48 overflow-y-auto border rounded p-3">
+                        {simplifiedInvoiceForm.items.map((item, idx) => (
+                          <div key={idx} className="flex gap-2 items-end">
+                            <div className="flex-1">
+                              <Input
+                                placeholder="Description"
+                                value={item.description}
+                                onChange={(e) => {
+                                  const items = [...simplifiedInvoiceForm.items];
+                                  items[idx].description = e.target.value;
+                                  setSimplifiedInvoiceForm({ ...simplifiedInvoiceForm, items });
+                                }}
+                              />
+                            </div>
+                            <Select
+                              value={item.item_type}
+                              onValueChange={(v) => {
+                                const items = [...simplifiedInvoiceForm.items];
+                                items[idx].item_type = v;
+                                setSimplifiedInvoiceForm({ ...simplifiedInvoiceForm, items });
+                              }}
+                            >
+                              <SelectTrigger className="w-32">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="consultation">Consultation</SelectItem>
+                                <SelectItem value="lab_test">Lab Test</SelectItem>
+                                <SelectItem value="medication">Medication</SelectItem>
+                                <SelectItem value="procedure">Procedure</SelectItem>
+                                <SelectItem value="room">Room</SelectItem>
+                                <SelectItem value="other">Other</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            <Input
+                              type="number"
+                              min="1"
+                              className="w-16"
+                              value={item.quantity}
+                              onChange={(e) => {
+                                const items = [...simplifiedInvoiceForm.items];
+                                items[idx].quantity = parseInt(e.target.value) || 1;
+                                setSimplifiedInvoiceForm({ ...simplifiedInvoiceForm, items });
+                              }}
+                            />
+                            <Input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              className="w-20"
+                              value={item.unit_price}
+                              onChange={(e) => {
+                                const items = [...simplifiedInvoiceForm.items];
+                                items[idx].unit_price = parseFloat(e.target.value) || 0;
+                                setSimplifiedInvoiceForm({ ...simplifiedInvoiceForm, items });
+                              }}
+                            />
+                            {simplifiedInvoiceForm.items.length > 1 && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => {
+                                  const items = simplifiedInvoiceForm.items.filter((_, i) => i !== idx);
+                                  setSimplifiedInvoiceForm({ ...simplifiedInvoiceForm, items });
+                                }}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Total Summary */}
+                    <div className="bg-gray-50 p-3 rounded border">
+                      <div className="flex justify-between font-bold">
+                        <span>Total:</span>
+                        <span>
+                          UGX{' '}
+                          {simplifiedInvoiceForm.items
+                            .reduce((sum, item) => sum + item.quantity * item.unit_price, 0)
+                            .toLocaleString()}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Action Buttons */}
+                    <div className="flex gap-2 justify-end">
+                      <Button
+                        variant="outline"
+                        onClick={() => {
+                          setInvoiceModalOpen(false);
+                          setSimplifiedInvoiceForm({
+                            patient_id: '',
+                            due_date: '',
+                            items: [{ description: '', item_type: 'medication', quantity: 1, unit_price: 0 }],
+                          });
+                        }}
+                        disabled={createSimpleInvoiceMutation.isPending}
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        onClick={() => createSimpleInvoiceMutation.mutate(simplifiedInvoiceForm)}
+                        disabled={createSimpleInvoiceMutation.isPending}
+                      >
+                        {createSimpleInvoiceMutation.isPending ? (
+                          <>
+                            <RotateCw className="h-4 w-4 mr-2 animate-spin" />
+                            Creating...
+                          </>
+                        ) : (
+                          'Create Invoice'
+                        )}
+                      </Button>
+                    </div>
+                  </div>
                 </DialogContent>
               </Dialog>
             </TabsContent>
