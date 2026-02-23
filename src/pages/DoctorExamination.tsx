@@ -1,6 +1,8 @@
-import { useState } from 'react';
+import { useState, useContext } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
+import { AuthContext } from '@/contexts/AuthContext';
+import { withSessionValidation } from '@/utils/sessionValidationAPI';
 import { useAuth } from '@/hooks/useAuth';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -91,6 +93,9 @@ interface Patient {
 const DoctorExamination = () => {
   const { user } = useAuth();
   const queryClient = useQueryClient();
+  const authContext = useContext(AuthContext);
+  const userId = authContext?.user?.id;
+  const sessionToken = authContext?.sessionToken;
   const [searchTerm, setSearchTerm] = useState('');
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
@@ -178,77 +183,88 @@ const DoctorExamination = () => {
   // Create examination mutation
   const createExaminationMutation = useMutation({
     mutationFn: async (data: typeof newExamination) => {
-      // Validate required fields
-      if (!data.patient_id?.trim()) {
-        console.warn('[DoctorExamination] Patient is required');
-        throw new Error('Patient is required');
-      }
-      if (!data.chief_complaint?.trim()) {
-        console.warn('[DoctorExamination] Chief complaint is required');
-        throw new Error('Chief complaint is required');
-      }
-      if (!data.assessment_diagnosis?.trim()) {
-        console.warn('[DoctorExamination] Assessment/diagnosis is required');
-        throw new Error('Assessment/diagnosis is required');
+      if (!userId || !sessionToken) {
+        throw new Error('Session not found. Please log in again.');
       }
 
-      try {
-        // Calculate BMI if weight and height are provided
-        let bmi = null;
-        if (data.triage_weight && data.triage_height) {
-          const heightInMeters = parseFloat(data.triage_height) / 100;
-          bmi = parseFloat(data.triage_weight) / (heightInMeters * heightInMeters);
-        }
+      return withSessionValidation(
+        userId,
+        sessionToken,
+        async () => {
+          // Validate required fields
+          if (!data.patient_id?.trim()) {
+            console.warn('[DoctorExamination] Patient is required');
+            throw new Error('Patient is required');
+          }
+          if (!data.chief_complaint?.trim()) {
+            console.warn('[DoctorExamination] Chief complaint is required');
+            throw new Error('Chief complaint is required');
+          }
+          if (!data.assessment_diagnosis?.trim()) {
+            console.warn('[DoctorExamination] Assessment/diagnosis is required');
+            throw new Error('Assessment/diagnosis is required');
+          }
 
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const { data: result, error } = await (supabase as any)
-          .from('medical_examinations')
-          .insert({
-            patient_id: data.patient_id,
-            examined_by: user?.id,
-            chief_complaint: data.chief_complaint,
-            triage_temperature: data.triage_temperature ? parseFloat(data.triage_temperature) : null,
-            triage_blood_pressure: data.triage_blood_pressure || null,
-            triage_pulse_rate: data.triage_pulse_rate ? parseInt(data.triage_pulse_rate) : null,
-            triage_respiratory_rate: data.triage_respiratory_rate ? parseInt(data.triage_respiratory_rate) : null,
-            triage_oxygen_saturation: data.triage_oxygen_saturation ? parseFloat(data.triage_oxygen_saturation) : null,
-            triage_weight: data.triage_weight ? parseFloat(data.triage_weight) : null,
-            triage_height: data.triage_height ? parseFloat(data.triage_height) : null,
-            triage_bmi: bmi,
-            history_of_present_illness: data.history_of_present_illness || null,
-            past_medical_history: data.past_medical_history || null,
-            past_surgical_history: data.past_surgical_history || null,
-            medication_list: data.medication_list || null,
-            allergies: data.allergies || null,
-            family_history: data.family_history || null,
-            social_history: data.social_history || null,
-            general_appearance: data.general_appearance || null,
-            heent_examination: data.heent_examination || null,
-            cardiovascular_examination: data.cardiovascular_examination || null,
-            respiratory_examination: data.respiratory_examination || null,
-            abdominal_examination: data.abdominal_examination || null,
-            neurological_examination: data.neurological_examination || null,
-            musculoskeletal_examination: data.musculoskeletal_examination || null,
-            skin_examination: data.skin_examination || null,
-            other_systems: data.other_systems || null,
-            assessment_diagnosis: data.assessment_diagnosis,
-            plan_treatment: data.plan_treatment || null,
-            medications_prescribed: data.medications_prescribed || null,
-            follow_up_date: data.follow_up_date || null,
-            referrals: data.referrals || null,
-          })
-          .select();
+          try {
+            // Calculate BMI if weight and height are provided
+            let bmi = null;
+            if (data.triage_weight && data.triage_height) {
+              const heightInMeters = parseFloat(data.triage_height) / 100;
+              bmi = parseFloat(data.triage_weight) / (heightInMeters * heightInMeters);
+            }
 
-        if (error) {
-          console.error('[DoctorExamination] Error creating examination:', error);
-          throw error;
-        }
-        console.log('[DoctorExamination] Examination created successfully');
-        return result;
-      } catch (err) {
-        console.error('[DoctorExamination] Examination creation failed:', err);
-        throw err;
-      }
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const { data: result, error } = await (supabase as any)
+              .from('medical_examinations')
+              .insert({
+                patient_id: data.patient_id,
+                examined_by: user?.id,
+                chief_complaint: data.chief_complaint,
+                triage_temperature: data.triage_temperature ? parseFloat(data.triage_temperature) : null,
+                triage_blood_pressure: data.triage_blood_pressure || null,
+                triage_pulse_rate: data.triage_pulse_rate ? parseInt(data.triage_pulse_rate) : null,
+                triage_respiratory_rate: data.triage_respiratory_rate ? parseInt(data.triage_respiratory_rate) : null,
+                triage_oxygen_saturation: data.triage_oxygen_saturation ? parseFloat(data.triage_oxygen_saturation) : null,
+                triage_weight: data.triage_weight ? parseFloat(data.triage_weight) : null,
+                triage_height: data.triage_height ? parseFloat(data.triage_height) : null,
+                triage_bmi: bmi,
+                history_of_present_illness: data.history_of_present_illness || null,
+                past_medical_history: data.past_medical_history || null,
+                past_surgical_history: data.past_surgical_history || null,
+                medication_list: data.medication_list || null,
+                allergies: data.allergies || null,
+                family_history: data.family_history || null,
+                social_history: data.social_history || null,
+                general_appearance: data.general_appearance || null,
+                heent_examination: data.heent_examination || null,
+                cardiovascular_examination: data.cardiovascular_examination || null,
+                respiratory_examination: data.respiratory_examination || null,
+                abdominal_examination: data.abdominal_examination || null,
+                neurological_examination: data.neurological_examination || null,
+                musculoskeletal_examination: data.musculoskeletal_examination || null,
+                skin_examination: data.skin_examination || null,
+                other_systems: data.other_systems || null,
+                assessment_diagnosis: data.assessment_diagnosis,
+                plan_treatment: data.plan_treatment || null,
+                medications_prescribed: data.medications_prescribed || null,
+                follow_up_date: data.follow_up_date || null,
+                referrals: data.referrals || null,
+              })
+              .select();
+
+            if (error) {
+              console.error('[DoctorExamination] Error creating examination:', error);
+              throw error;
+            }
+            console.log('[DoctorExamination] Examination created successfully');
+            return result;
+          } catch (err) {
+            console.error('[DoctorExamination] Examination creation failed:', err);
+            throw err;
+          }
+        },
+        'Create Medical Examination'
+      );
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['medical-examinations'] });

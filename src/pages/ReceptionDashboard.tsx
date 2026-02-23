@@ -1,8 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useContext } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
+import { AuthContext } from '@/contexts/AuthContext';
+import { withSessionValidation } from '@/utils/sessionValidationAPI';
 import { format, parseISO } from 'date-fns';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -51,6 +53,9 @@ import WaitingRoom from '@/components/dashboard/WaitingRoom';
 const ReceptionDashboard = () => {
   const queryClient = useQueryClient();
   const { user } = useAuth();
+  const authContext = useContext(AuthContext);
+  const userId = authContext?.user?.id;
+  const sessionToken = authContext?.sessionToken;
   
   const [searchTerm, setSearchTerm] = useState('');
   const [isRegisterDialogOpen, setIsRegisterDialogOpen] = useState(false);
@@ -97,13 +102,25 @@ const ReceptionDashboard = () => {
   // Register new patient mutation
   const registerPatientMutation = useMutation({
     mutationFn: async (data: typeof registerForm) => {
-      const { error } = await supabase
-        .from('patients')
-        .insert({
-          ...data,
-          patient_number: `PAT-${Date.now()}`,
-        });
-      if (error) throw error;
+      if (!userId || !sessionToken) {
+        throw new Error('Session not found. Please log in again.');
+      }
+
+      return withSessionValidation(
+        userId,
+        sessionToken,
+        async () => {
+          const { error } = await supabase
+            .from('patients')
+            .insert({
+              ...data,
+              patient_number: `PAT-${Date.now()}`,
+            });
+          if (error) throw error;
+          return { success: true };
+        },
+        'Register Patient'
+      );
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['reception-new-registrations'] });
@@ -124,60 +141,72 @@ const ReceptionDashboard = () => {
   // Schedule appointment mutation
   const scheduleAppointmentMutation = useMutation({
     mutationFn: async (data: typeof scheduleForm) => {
-      console.log('[ReceptionDashboard] ========== SCHEDULING APPOINTMENT ==========');
-      console.log('[ReceptionDashboard] Form data:', data);
-      
-      // Get the selected patient and doctor details for logging
-      const selectedPatient = patients.find((p: any) => p.id === data.patient_id);
-      const selectedDoctor = doctors.find((d: any) => d.id === data.doctor_id);
-      
-      console.log('[ReceptionDashboard] Selected Patient:', selectedPatient);
-      console.log('[ReceptionDashboard] Selected Doctor:', selectedDoctor);
-      
-      // Validate doctor is actually available
-      if (!selectedDoctor) {
-        throw new Error(`Doctor not found in available doctors list. Doctor ID: ${data.doctor_id}`);
+      if (!userId || !sessionToken) {
+        throw new Error('Session not found. Please log in again.');
       }
-      
-      // Validate patient exists
-      if (!selectedPatient) {
-        throw new Error(`Patient not found in available patients list. Patient ID: ${data.patient_id}`);
-      }
-      
-      console.log('[ReceptionDashboard] Sending payload:', {
-        patient_id: data.patient_id,
-        doctor_id: data.doctor_id,
-        appointment_date: data.appointment_date,
-        appointment_time: data.appointment_time,
-        reason: data.reason,
-        status: 'scheduled',
-        note: 'Using "scheduled" as default status (valid in CHECK constraint)'
-      });
 
-      const { error, data: response } = await supabase
-        .from('appointments')
-        .insert({
-          patient_id: data.patient_id,
-          doctor_id: data.doctor_id,
-          appointment_date: data.appointment_date,
-          appointment_time: data.appointment_time,
-          reason: data.reason,
-          status: 'scheduled',  // Use 'scheduled' (default status in schema)
-        });
-      
-      if (error) {
-        console.error('[ReceptionDashboard] ❌ SUPABASE ERROR ❌');
-        console.error('[ReceptionDashboard] Error code:', error.code);
-        console.error('[ReceptionDashboard] Error message:', error.message);
-        console.error('[ReceptionDashboard] Full error object:', JSON.stringify(error, null, 2));
-        console.error('[ReceptionDashboard] Patient ID used:', data.patient_id);
-        console.error('[ReceptionDashboard] Doctor ID used:', data.doctor_id);
-        console.error('[ReceptionDashboard] Doctor exists in list:', !!selectedDoctor);
-        console.error('[ReceptionDashboard] Patient exists in list:', !!selectedPatient);
-        throw new Error(`Failed to create appointment: ${error.message}`);
-      }
-      
-      console.log('[ReceptionDashboard] ✓ Insert successful, response:', response);
+      return withSessionValidation(
+        userId,
+        sessionToken,
+        async () => {
+          console.log('[ReceptionDashboard] ========== SCHEDULING APPOINTMENT ==========');
+          console.log('[ReceptionDashboard] Form data:', data);
+          
+          // Get the selected patient and doctor details for logging
+          const selectedPatient = patients.find((p: any) => p.id === data.patient_id);
+          const selectedDoctor = doctors.find((d: any) => d.id === data.doctor_id);
+          
+          console.log('[ReceptionDashboard] Selected Patient:', selectedPatient);
+          console.log('[ReceptionDashboard] Selected Doctor:', selectedDoctor);
+          
+          // Validate doctor is actually available
+          if (!selectedDoctor) {
+            throw new Error(`Doctor not found in available doctors list. Doctor ID: ${data.doctor_id}`);
+          }
+          
+          // Validate patient exists
+          if (!selectedPatient) {
+            throw new Error(`Patient not found in available patients list. Patient ID: ${data.patient_id}`);
+          }
+          
+          console.log('[ReceptionDashboard] Sending payload:', {
+            patient_id: data.patient_id,
+            doctor_id: data.doctor_id,
+            appointment_date: data.appointment_date,
+            appointment_time: data.appointment_time,
+            reason: data.reason,
+            status: 'scheduled',
+            note: 'Using "scheduled" as default status (valid in CHECK constraint)'
+          });
+
+          const { error, data: response } = await supabase
+            .from('appointments')
+            .insert({
+              patient_id: data.patient_id,
+              doctor_id: data.doctor_id,
+              appointment_date: data.appointment_date,
+              appointment_time: data.appointment_time,
+              reason: data.reason,
+              status: 'scheduled',  // Use 'scheduled' (default status in schema)
+            });
+          
+          if (error) {
+            console.error('[ReceptionDashboard] ❌ SUPABASE ERROR ❌');
+            console.error('[ReceptionDashboard] Error code:', error.code);
+            console.error('[ReceptionDashboard] Error message:', error.message);
+            console.error('[ReceptionDashboard] Full error object:', JSON.stringify(error, null, 2));
+            console.error('[ReceptionDashboard] Patient ID used:', data.patient_id);
+            console.error('[ReceptionDashboard] Doctor ID used:', data.doctor_id);
+            console.error('[ReceptionDashboard] Doctor exists in list:', !!selectedDoctor);
+            console.error('[ReceptionDashboard] Patient exists in list:', !!selectedPatient);
+            throw new Error(`Failed to create appointment: ${error.message}`);
+          }
+          
+          console.log('[ReceptionDashboard] ✓ Insert successful, response:', response);
+          return { success: true };
+        },
+        'Schedule Appointment'
+      );
     },
     onSuccess: () => {
       console.log('[ReceptionDashboard] ✓ MUTATION SUCCESS');

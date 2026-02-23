@@ -1,6 +1,8 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useContext } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
+import { AuthContext } from '@/contexts/AuthContext';
+import { withSessionValidation } from '@/utils/sessionValidationAPI';
 import { useAuth } from '@/hooks/useAuth';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -90,6 +92,9 @@ const itemTypes = ['consultation', 'lab_test', 'medication', 'procedure', 'room'
 const Invoices = () => {
   const { user } = useAuth();
   const queryClient = useQueryClient();
+  const authContext = useContext(AuthContext);
+  const userId = authContext?.user?.id;
+  const sessionToken = authContext?.sessionToken;
   const invoiceTemplateRef = useRef<HTMLDivElement>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState<'all' | 'pending' | 'paid' | 'overdue'>('all');
@@ -151,70 +156,81 @@ const Invoices = () => {
   // Create invoice
   const createInvoiceMutation = useMutation({
     mutationFn: async (data: typeof newInvoice) => {
-      if (!data.patient_id) {
-        console.warn('[Invoices] Patient is required');
-        throw new Error('Patient is required');
+      if (!userId || !sessionToken) {
+        throw new Error('Session not found. Please log in again.');
       }
 
-      if (data.items.length === 0) {
-        console.warn('[Invoices] At least one item is required');
-        throw new Error('At least one item is required');
-      }
+      return withSessionValidation(
+        userId,
+        sessionToken,
+        async () => {
+          if (!data.patient_id) {
+            console.warn('[Invoices] Patient is required');
+            throw new Error('Patient is required');
+          }
 
-      const invalidItems = data.items.filter(
-        (item) => !item.description || item.quantity <= 0 || item.unit_price <= 0
+          if (data.items.length === 0) {
+            console.warn('[Invoices] At least one item is required');
+            throw new Error('At least one item is required');
+          }
+
+          const invalidItems = data.items.filter(
+            (item) => !item.description || item.quantity <= 0 || item.unit_price <= 0
+          );
+          if (invalidItems.length > 0) {
+            console.warn('[Invoices] Invalid invoice items found');
+            throw new Error('All items must have description, quantity > 0, and unit price > 0');
+          }
+
+          try {
+            const subtotal = data.items.reduce((sum, item) => sum + (item.quantity * item.unit_price), 0);
+            const totalAmount = subtotal;
+
+            const { data: invoice, error: invoiceError } = await supabase
+              .from('invoices')
+              .insert({
+                patient_id: data.patient_id,
+                due_date: data.due_date && data.due_date.trim() ? data.due_date : null,
+                subtotal: subtotal,
+                total_amount: totalAmount,
+                tax_amount: 0,
+                discount_amount: 0,
+                amount_paid: 0,
+                invoice_number: `INV-${Date.now()}`,
+                status: 'draft',
+              })
+              .select()
+              .single();
+
+            if (invoiceError) {
+              console.error('[Invoices] Invoice creation error:', invoiceError);
+              throw new Error(`Failed to create invoice: ${invoiceError.message}`);
+            }
+
+            const items = data.items.map((item) => ({
+              invoice_id: invoice.id,
+              description: item.description.trim(),
+              item_type: item.item_type,
+              quantity: parseInt(item.quantity.toString()),
+              unit_price: parseFloat(item.unit_price.toString()),
+              total_price: parseFloat((item.quantity * item.unit_price).toString()),
+            }));
+
+            const { error: itemsError } = await supabase.from('invoice_items').insert(items);
+            if (itemsError) {
+              console.error('[Invoices] Invoice items creation error:', itemsError);
+              throw new Error(`Failed to create invoice items: ${itemsError.message}`);
+            }
+
+            console.log('[Invoices] Invoice created successfully, ID:', invoice.id);
+            return invoice;
+          } catch (err) {
+            console.error('[Invoices] Invoice creation failed:', err);
+            throw err;
+          }
+        },
+        'Create Invoice'
       );
-      if (invalidItems.length > 0) {
-        console.warn('[Invoices] Invalid invoice items found');
-        throw new Error('All items must have description, quantity > 0, and unit price > 0');
-      }
-
-      try {
-        const subtotal = data.items.reduce((sum, item) => sum + (item.quantity * item.unit_price), 0);
-        const totalAmount = subtotal;
-
-        const { data: invoice, error: invoiceError } = await supabase
-          .from('invoices')
-          .insert({
-            patient_id: data.patient_id,
-            due_date: data.due_date && data.due_date.trim() ? data.due_date : null,
-            subtotal: subtotal,
-            total_amount: totalAmount,
-            tax_amount: 0,
-            discount_amount: 0,
-            amount_paid: 0,
-            invoice_number: `INV-${Date.now()}`,
-            status: 'draft',
-          })
-          .select()
-          .single();
-
-        if (invoiceError) {
-          console.error('[Invoices] Invoice creation error:', invoiceError);
-          throw new Error(`Failed to create invoice: ${invoiceError.message}`);
-        }
-
-        const items = data.items.map((item) => ({
-          invoice_id: invoice.id,
-          description: item.description.trim(),
-          item_type: item.item_type,
-          quantity: parseInt(item.quantity.toString()),
-          unit_price: parseFloat(item.unit_price.toString()),
-          total_price: parseFloat((item.quantity * item.unit_price).toString()),
-        }));
-
-        const { error: itemsError } = await supabase.from('invoice_items').insert(items);
-        if (itemsError) {
-          console.error('[Invoices] Invoice items creation error:', itemsError);
-          throw new Error(`Failed to create invoice items: ${itemsError.message}`);
-        }
-
-        console.log('[Invoices] Invoice created successfully, ID:', invoice.id);
-        return invoice;
-      } catch (err) {
-        console.error('[Invoices] Invoice creation failed:', err);
-        throw err;
-      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['invoices'] });
@@ -255,11 +271,23 @@ const Invoices = () => {
   // Mark invoice as sent
   const markAsSentMutation = useMutation({
     mutationFn: async (invoiceId: string) => {
-      const { error } = await supabase
-        .from('invoices')
-        .update({ status: 'pending' })
-        .eq('id', invoiceId);
-      if (error) throw error;
+      if (!userId || !sessionToken) {
+        throw new Error('Session not found. Please log in again.');
+      }
+
+      return withSessionValidation(
+        userId,
+        sessionToken,
+        async () => {
+          const { error } = await supabase
+            .from('invoices')
+            .update({ status: 'pending' })
+            .eq('id', invoiceId);
+          if (error) throw error;
+          return { success: true };
+        },
+        'Mark As Sent'
+      );
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['invoices'] });
@@ -273,20 +301,33 @@ const Invoices = () => {
   // Record payment
   const recordPaymentMutation = useMutation({
     mutationFn: async ({ invoiceId, amount }: { invoiceId: string; amount: number }) => {
-      const invoice = invoices?.find(inv => inv.id === invoiceId);
-      if (!invoice) throw new Error('Invoice not found');
-      
-      const newAmountPaid = invoice.amount_paid + amount;
-      const newStatus = newAmountPaid >= invoice.total_amount ? 'paid' : 'partially_paid';
-      
-      const { error } = await supabase
-        .from('invoices')
-        .update({ 
-          amount_paid: newAmountPaid,
-          status: newStatus
-        })
-        .eq('id', invoiceId);
-      if (error) throw error;
+      if (!userId || !sessionToken) {
+        throw new Error('Session not found. Please log in again.');
+      }
+
+      return withSessionValidation(
+        userId,
+        sessionToken,
+        async () => {
+          const invoice = invoices?.find(inv => inv.id === invoiceId);
+          if (!invoice) throw new Error('Invoice not found');
+          
+          const newAmountPaid = invoice.amount_paid + amount;
+          const newStatus = newAmountPaid >= invoice.total_amount ? 'paid' : 'partially_paid';
+          
+          const { error } = await supabase
+            .from('invoices')
+            .update({ 
+              amount_paid: newAmountPaid,
+              status: newStatus
+            })
+            .eq('id', invoiceId);
+          if (error) throw error;
+          
+          return { success: true };
+        },
+        'Record Payment'
+      );
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['invoices'] });
@@ -300,17 +341,30 @@ const Invoices = () => {
   // Delete invoice
   const deleteInvoiceMutation = useMutation({
     mutationFn: async (invoiceId: string) => {
-      const { error: itemsError } = await supabase
-        .from('invoice_items')
-        .delete()
-        .eq('invoice_id', invoiceId);
-      if (itemsError) throw itemsError;
+      if (!userId || !sessionToken) {
+        throw new Error('Session not found. Please log in again.');
+      }
 
-      const { error } = await supabase
-        .from('invoices')
-        .delete()
-        .eq('id', invoiceId);
-      if (error) throw error;
+      return withSessionValidation(
+        userId,
+        sessionToken,
+        async () => {
+          const { error: itemsError } = await supabase
+            .from('invoice_items')
+            .delete()
+            .eq('invoice_id', invoiceId);
+          if (itemsError) throw itemsError;
+
+          const { error } = await supabase
+            .from('invoices')
+            .delete()
+            .eq('id', invoiceId);
+          if (error) throw error;
+          
+          return { success: true };
+        },
+        'Delete Invoice'
+      );
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['invoices'] });

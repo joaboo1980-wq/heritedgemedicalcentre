@@ -1,6 +1,8 @@
-import { useState } from 'react';
+import { useState, useContext } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
+import { AuthContext } from '@/contexts/AuthContext';
+import { withSessionValidation } from '@/utils/sessionValidationAPI';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -95,6 +97,9 @@ const formOptions = ['tablet', 'capsule', 'syrup', 'injection', 'cream', 'drops'
 
 const Pharmacy = () => {
   const queryClient = useQueryClient();
+  const authContext = useContext(AuthContext);
+  const userId = authContext?.user?.id;
+  const sessionToken = authContext?.sessionToken;
   const [searchTerm, setSearchTerm] = useState('');
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isCreateOrderOpen, setIsCreateOrderOpen] = useState(false);
@@ -274,35 +279,47 @@ const Pharmacy = () => {
   // Create medication
   const createMedicationMutation = useMutation({
     mutationFn: async (data: typeof newMedication) => {
-      // Validate required fields
-      if (!data.name?.trim()) {
-        console.warn('[Pharmacy] Medication name is required');
-        throw new Error('Medication name is required');
-      }
-      if (!data.medication_code?.trim()) {
-        console.warn('[Pharmacy] Medication code is required');
-        throw new Error('Medication code is required');
-      }
-      if (data.unit_price <= 0) {
-        console.warn('[Pharmacy] Unit price must be greater than 0');
-        throw new Error('Unit price must be greater than 0');
+      if (!userId || !sessionToken) {
+        throw new Error('Session not found. Please log in again.');
       }
 
-      try {
-        const { error } = await supabase.from('medications').insert({
-          ...data,
-          generic_name: data.generic_name || null,
-          expiry_date: data.expiry_date || null,
-        });
-        if (error) {
-          console.error('[Pharmacy] Error creating medication:', error);
-          throw error;
-        }
-        console.log('[Pharmacy] Medication created successfully');
-      } catch (err) {
-        console.error('[Pharmacy] Medication creation failed:', err);
-        throw err;
-      }
+      return withSessionValidation(
+        userId,
+        sessionToken,
+        async () => {
+          // Validate required fields
+          if (!data.name?.trim()) {
+            console.warn('[Pharmacy] Medication name is required');
+            throw new Error('Medication name is required');
+          }
+          if (!data.medication_code?.trim()) {
+            console.warn('[Pharmacy] Medication code is required');
+            throw new Error('Medication code is required');
+          }
+          if (data.unit_price <= 0) {
+            console.warn('[Pharmacy] Unit price must be greater than 0');
+            throw new Error('Unit price must be greater than 0');
+          }
+
+          try {
+            const { error } = await supabase.from('medications').insert({
+              ...data,
+              generic_name: data.generic_name || null,
+              expiry_date: data.expiry_date || null,
+            });
+            if (error) {
+              console.error('[Pharmacy] Error creating medication:', error);
+              throw error;
+            }
+            console.log('[Pharmacy] Medication created successfully');
+            return { success: true };
+          } catch (err) {
+            console.error('[Pharmacy] Medication creation failed:', err);
+            throw err;
+          }
+        },
+        'Create Medication'
+      );
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['medications'] });
@@ -319,26 +336,38 @@ const Pharmacy = () => {
   // Update medication
   const updateMedicationMutation = useMutation({
     mutationFn: async ({ id, data }: { id: string; data: Partial<Medication> }) => {
-      if (!id?.trim()) {
-        console.warn('[Pharmacy] Medication ID is required');
-        throw new Error('Medication ID is required');
-      }
-      if (!data.name?.trim()) {
-        console.warn('[Pharmacy] Medication name is required');
-        throw new Error('Medication name is required');
+      if (!userId || !sessionToken) {
+        throw new Error('Session not found. Please log in again.');
       }
 
-      try {
-        const { error } = await supabase.from('medications').update(data).eq('id', id);
-        if (error) {
-          console.error('[Pharmacy] Error updating medication:', error);
-          throw error;
-        }
-        console.log('[Pharmacy] Medication updated successfully');
-      } catch (err) {
-        console.error('[Pharmacy] Medication update failed:', err);
-        throw err;
-      }
+      return withSessionValidation(
+        userId,
+        sessionToken,
+        async () => {
+          if (!id?.trim()) {
+            console.warn('[Pharmacy] Medication ID is required');
+            throw new Error('Medication ID is required');
+          }
+          if (!data.name?.trim()) {
+            console.warn('[Pharmacy] Medication name is required');
+            throw new Error('Medication name is required');
+          }
+
+          try {
+            const { error } = await supabase.from('medications').update(data).eq('id', id);
+            if (error) {
+              console.error('[Pharmacy] Error updating medication:', error);
+              throw error;
+            }
+            console.log('[Pharmacy] Medication updated successfully');
+            return { success: true };
+          } catch (err) {
+            console.error('[Pharmacy] Medication update failed:', err);
+            throw err;
+          }
+        },
+        'Update Medication'
+      );
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['medications'] });
@@ -354,24 +383,36 @@ const Pharmacy = () => {
   // Delete medication
   const deleteMedicationMutation = useMutation({
     mutationFn: async (medicationId: string) => {
-      if (!medicationId?.trim()) {
-        throw new Error('Medication ID is required');
+      if (!userId || !sessionToken) {
+        throw new Error('Session not found. Please log in again.');
       }
 
-      try {
-        const { error } = await supabase
-          .from('medications')
-          .delete()
-          .eq('id', medicationId);
-        if (error) {
-          console.error('[Pharmacy] Error deleting medication:', error);
-          throw error;
-        }
-        console.log('[Pharmacy] Medication deleted successfully');
-      } catch (err) {
-        console.error('[Pharmacy] Medication deletion failed:', err);
-        throw err;
-      }
+      return withSessionValidation(
+        userId,
+        sessionToken,
+        async () => {
+          if (!medicationId?.trim()) {
+            throw new Error('Medication ID is required');
+          }
+
+          try {
+            const { error } = await supabase
+              .from('medications')
+              .delete()
+              .eq('id', medicationId);
+            if (error) {
+              console.error('[Pharmacy] Error deleting medication:', error);
+              throw error;
+            }
+            console.log('[Pharmacy] Medication deleted successfully');
+            return { success: true };
+          } catch (err) {
+            console.error('[Pharmacy] Medication deletion failed:', err);
+            throw err;
+          }
+        },
+        'Delete Medication'
+      );
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['medications'] });
@@ -386,26 +427,38 @@ const Pharmacy = () => {
   // Update stock
   const updateStockMutation = useMutation({
     mutationFn: async ({ id, quantity }: { id: string; quantity: number }) => {
-      if (!id?.trim()) {
-        console.warn('[Pharmacy] Medication ID is required for stock update');
-        throw new Error('Medication ID is required');
-      }
-      if (quantity < 0) {
-        console.warn('[Pharmacy] Quantity cannot be negative');
-        throw new Error('Quantity cannot be negative');
+      if (!userId || !sessionToken) {
+        throw new Error('Session not found. Please log in again.');
       }
 
-      try {
-        const { error } = await supabase.from('medications').update({ stock_quantity: quantity }).eq('id', id);
-        if (error) {
-          console.error('[Pharmacy] Error updating stock:', error);
-          throw error;
-        }
-        console.log('[Pharmacy] Stock updated successfully');
-      } catch (err) {
-        console.error('[Pharmacy] Stock update failed:', err);
-        throw err;
-      }
+      return withSessionValidation(
+        userId,
+        sessionToken,
+        async () => {
+          if (!id?.trim()) {
+            console.warn('[Pharmacy] Medication ID is required for stock update');
+            throw new Error('Medication ID is required');
+          }
+          if (quantity < 0) {
+            console.warn('[Pharmacy] Quantity cannot be negative');
+            throw new Error('Quantity cannot be negative');
+          }
+
+          try {
+            const { error } = await supabase.from('medications').update({ stock_quantity: quantity }).eq('id', id);
+            if (error) {
+              console.error('[Pharmacy] Error updating stock:', error);
+              throw error;
+            }
+            console.log('[Pharmacy] Stock updated successfully');
+            return { success: true };
+          } catch (err) {
+            console.error('[Pharmacy] Stock update failed:', err);
+            throw err;
+          }
+        },
+        'Update Stock'
+      );
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['medications'] });
@@ -420,20 +473,31 @@ const Pharmacy = () => {
   // Check patient payment status before dispensing
   const checkPaymentStatusMutation = useMutation({
     mutationFn: async (prescription: Prescription) => {
-      try {
-        // Fetch patient's invoices
-        const { data: invoices, error } = await supabase
-          .from('invoices')
-          .select('id, invoice_number, total_amount, amount_paid, status')
-          .eq('patient_id', prescription.patient_id)
-          .order('created_at', { ascending: false });
-
-        if (error) throw error;
-        return { invoices: invoices || [], prescription };
-      } catch (err) {
-        console.error('[Pharmacy] Error checking payment status:', err);
-        throw err;
+      if (!userId || !sessionToken) {
+        throw new Error('Session not found. Please log in again.');
       }
+
+      return withSessionValidation(
+        userId,
+        sessionToken,
+        async () => {
+          try {
+            // Fetch patient's invoices
+            const { data: invoices, error } = await supabase
+              .from('invoices')
+              .select('id, invoice_number, total_amount, amount_paid, status')
+              .eq('patient_id', prescription.patient_id)
+              .order('created_at', { ascending: false });
+
+            if (error) throw error;
+            return { invoices: invoices || [], prescription };
+          } catch (err) {
+            console.error('[Pharmacy] Error checking payment status:', err);
+            throw err;
+          }
+        },
+        'Check Payment Status'
+      );
     },
     onSuccess: (data) => {
       setPatientInvoices(data.invoices);
@@ -450,59 +514,70 @@ const Pharmacy = () => {
   // Create invoice from form
   const createSimpleInvoiceMutation = useMutation({
     mutationFn: async (data: typeof simplifiedInvoiceForm) => {
-      if (!data.patient_id?.trim()) {
-        throw new Error('Patient is required');
-      }
-      if (data.items.length === 0) {
-        throw new Error('At least one item is required');
+      if (!userId || !sessionToken) {
+        throw new Error('Session not found. Please log in again.');
       }
 
-      const invalidItems = data.items.filter(
-        (item) => !item.description || item.quantity <= 0 || item.unit_price <= 0
+      return withSessionValidation(
+        userId,
+        sessionToken,
+        async () => {
+          if (!data.patient_id?.trim()) {
+            throw new Error('Patient is required');
+          }
+          if (data.items.length === 0) {
+            throw new Error('At least one item is required');
+          }
+
+          const invalidItems = data.items.filter(
+            (item) => !item.description || item.quantity <= 0 || item.unit_price <= 0
+          );
+          if (invalidItems.length > 0) {
+            throw new Error('All items must have description, quantity > 0, and unit price > 0');
+          }
+
+          try {
+            const subtotal = data.items.reduce((sum, item) => sum + (item.quantity * item.unit_price), 0);
+            const totalAmount = subtotal;
+
+            const { data: invoice, error: invoiceError } = await supabase
+              .from('invoices')
+              .insert({
+                patient_id: data.patient_id,
+                due_date: data.due_date && data.due_date.trim() ? data.due_date : null,
+                subtotal: subtotal,
+                total_amount: totalAmount,
+                tax_amount: 0,
+                discount_amount: 0,
+                amount_paid: 0,
+                invoice_number: `INV-${Date.now()}`,
+                status: 'pending',
+              })
+              .select()
+              .single();
+
+            if (invoiceError) throw invoiceError;
+
+            const items = data.items.map((item) => ({
+              invoice_id: invoice.id,
+              description: item.description.trim(),
+              item_type: item.item_type,
+              quantity: parseInt(item.quantity.toString()),
+              unit_price: parseFloat(item.unit_price.toString()),
+              total_price: parseFloat((item.quantity * item.unit_price).toString()),
+            }));
+
+            const { error: itemsError } = await supabase.from('invoice_items').insert(items);
+            if (itemsError) throw itemsError;
+
+            return invoice;
+          } catch (err) {
+            console.error('[Pharmacy] Invoice creation failed:', err);
+            throw err;
+          }
+        },
+        'Create Invoice'
       );
-      if (invalidItems.length > 0) {
-        throw new Error('All items must have description, quantity > 0, and unit price > 0');
-      }
-
-      try {
-        const subtotal = data.items.reduce((sum, item) => sum + (item.quantity * item.unit_price), 0);
-        const totalAmount = subtotal;
-
-        const { data: invoice, error: invoiceError } = await supabase
-          .from('invoices')
-          .insert({
-            patient_id: data.patient_id,
-            due_date: data.due_date && data.due_date.trim() ? data.due_date : null,
-            subtotal: subtotal,
-            total_amount: totalAmount,
-            tax_amount: 0,
-            discount_amount: 0,
-            amount_paid: 0,
-            invoice_number: `INV-${Date.now()}`,
-            status: 'pending',
-          })
-          .select()
-          .single();
-
-        if (invoiceError) throw invoiceError;
-
-        const items = data.items.map((item) => ({
-          invoice_id: invoice.id,
-          description: item.description.trim(),
-          item_type: item.item_type,
-          quantity: parseInt(item.quantity.toString()),
-          unit_price: parseFloat(item.unit_price.toString()),
-          total_price: parseFloat((item.quantity * item.unit_price).toString()),
-        }));
-
-        const { error: itemsError } = await supabase.from('invoice_items').insert(items);
-        if (itemsError) throw itemsError;
-
-        return invoice;
-      } catch (err) {
-        console.error('[Pharmacy] Invoice creation failed:', err);
-        throw err;
-      }
     },
     onSuccess: (invoice) => {
       queryClient.invalidateQueries({ queryKey: ['invoices'] });
@@ -524,25 +599,37 @@ const Pharmacy = () => {
   // Dispense medication
   const dispenseMedicationMutation = useMutation({
     mutationFn: async (prescriptionId: string) => {
-      if (!prescriptionId?.trim()) {
-        console.warn('[Pharmacy] Prescription ID is required');
-        throw new Error('Prescription ID is required');
+      if (!userId || !sessionToken) {
+        throw new Error('Session not found. Please log in again.');
       }
 
-      try {
-        const { error } = await supabase
-          .from('prescriptions')
-          .update({ status: 'dispensed' })
-          .eq('id', prescriptionId);
-        if (error) {
-          console.error('[Pharmacy] Error dispensing medication:', error);
-          throw error;
-        }
-        console.log('[Pharmacy] Medication dispensed successfully');
-      } catch (err) {
-        console.error('[Pharmacy] Dispensing failed:', err);
-        throw err;
-      }
+      return withSessionValidation(
+        userId,
+        sessionToken,
+        async () => {
+          if (!prescriptionId?.trim()) {
+            console.warn('[Pharmacy] Prescription ID is required');
+            throw new Error('Prescription ID is required');
+          }
+
+          try {
+            const { error } = await supabase
+              .from('prescriptions')
+              .update({ status: 'dispensed' })
+              .eq('id', prescriptionId);
+            if (error) {
+              console.error('[Pharmacy] Error dispensing medication:', error);
+              throw error;
+            }
+            console.log('[Pharmacy] Medication dispensed successfully');
+            return { success: true };
+          } catch (err) {
+            console.error('[Pharmacy] Dispensing failed:', err);
+            throw err;
+          }
+        },
+        'Dispense Medication'
+      );
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['prescriptions'] });
@@ -561,25 +648,37 @@ const Pharmacy = () => {
   // Delete prescription
   const deletePrescriptionMutation = useMutation({
     mutationFn: async (prescriptionId: string) => {
-      if (!prescriptionId?.trim()) {
-        console.warn('[Pharmacy] Prescription ID is required for deletion');
-        throw new Error('Prescription ID is required');
+      if (!userId || !sessionToken) {
+        throw new Error('Session not found. Please log in again.');
       }
 
-      try {
-        const { error } = await supabase
-          .from('prescriptions')
-          .delete()
-          .eq('id', prescriptionId);
-        if (error) {
-          console.error('[Pharmacy] Error deleting prescription:', error);
-          throw error;
-        }
-        console.log('[Pharmacy] Prescription deleted successfully');
-      } catch (err) {
-        console.error('[Pharmacy] Prescription deletion failed:', err);
-        throw err;
-      }
+      return withSessionValidation(
+        userId,
+        sessionToken,
+        async () => {
+          if (!prescriptionId?.trim()) {
+            console.warn('[Pharmacy] Prescription ID is required for deletion');
+            throw new Error('Prescription ID is required');
+          }
+
+          try {
+            const { error } = await supabase
+              .from('prescriptions')
+              .delete()
+              .eq('id', prescriptionId);
+            if (error) {
+              console.error('[Pharmacy] Error deleting prescription:', error);
+              throw error;
+            }
+            console.log('[Pharmacy] Prescription deleted successfully');
+            return { success: true };
+          } catch (err) {
+            console.error('[Pharmacy] Prescription deletion failed:', err);
+            throw err;
+          }
+        },
+        'Delete Prescription'
+      );
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['prescriptions'] });
@@ -594,8 +693,19 @@ const Pharmacy = () => {
   // Create purchase order - disabled as table doesn't exist yet
   const createPurchaseOrderMutation = useMutation({
     mutationFn: async (order: typeof newOrder) => {
-      toast.info('Purchase orders module coming soon');
-      return;
+      if (!userId || !sessionToken) {
+        throw new Error('Session not found. Please log in again.');
+      }
+
+      return withSessionValidation(
+        userId,
+        sessionToken,
+        async () => {
+          toast.info('Purchase orders module coming soon');
+          return { success: true };
+        },
+        'Create Purchase Order'
+      );
     },
     onSuccess: () => {
       setIsCreateOrderOpen(false);
@@ -612,24 +722,36 @@ const Pharmacy = () => {
   // Mark expired for disposal
   const markForDisposalMutation = useMutation({
     mutationFn: async (medicationId: string) => {
-      if (!medicationId?.trim()) {
-        throw new Error('Medication ID is required');
+      if (!userId || !sessionToken) {
+        throw new Error('Session not found. Please log in again.');
       }
 
-      try {
-        const { error } = await supabase
-          .from('medications')
-          .delete()
-          .eq('id', medicationId);
-        if (error) {
-          console.error('[Pharmacy] Error marking medication for disposal:', error);
-          throw error;
-        }
-        console.log('[Pharmacy] Medication marked for disposal');
-      } catch (err) {
-        console.error('[Pharmacy] Disposal marking failed:', err);
-        throw err;
-      }
+      return withSessionValidation(
+        userId,
+        sessionToken,
+        async () => {
+          if (!medicationId?.trim()) {
+            throw new Error('Medication ID is required');
+          }
+
+          try {
+            const { error } = await supabase
+              .from('medications')
+              .delete()
+              .eq('id', medicationId);
+            if (error) {
+              console.error('[Pharmacy] Error marking medication for disposal:', error);
+              throw error;
+            }
+            console.log('[Pharmacy] Medication marked for disposal');
+            return { success: true };
+          } catch (err) {
+            console.error('[Pharmacy] Disposal marking failed:', err);
+            throw err;
+          }
+        },
+        'Mark For Disposal'
+      );
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['expired_medications'] });
@@ -645,24 +767,36 @@ const Pharmacy = () => {
   // Return to supplier
   const returnToSupplierMutation = useMutation({
     mutationFn: async (medicationId: string) => {
-      if (!medicationId?.trim()) {
-        throw new Error('Medication ID is required');
+      if (!userId || !sessionToken) {
+        throw new Error('Session not found. Please log in again.');
       }
 
-      try {
-        const { error } = await supabase
-          .from('medications')
-          .delete()
-          .eq('id', medicationId);
-        if (error) {
-          console.error('[Pharmacy] Error returning medication to supplier:', error);
-          throw error;
-        }
-        console.log('[Pharmacy] Medication returned to supplier');
-      } catch (err) {
-        console.error('[Pharmacy] Return to supplier failed:', err);
-        throw err;
-      }
+      return withSessionValidation(
+        userId,
+        sessionToken,
+        async () => {
+          if (!medicationId?.trim()) {
+            throw new Error('Medication ID is required');
+          }
+
+          try {
+            const { error } = await supabase
+              .from('medications')
+              .delete()
+              .eq('id', medicationId);
+            if (error) {
+              console.error('[Pharmacy] Error returning medication to supplier:', error);
+              throw error;
+            }
+            console.log('[Pharmacy] Medication returned to supplier');
+            return { success: true };
+          } catch (err) {
+            console.error('[Pharmacy] Return to supplier failed:', err);
+            throw err;
+          }
+        },
+        'Return To Supplier'
+      );
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['expired_medications'] });
@@ -678,9 +812,20 @@ const Pharmacy = () => {
   // Generate report
   const generateReportMutation = useMutation({
     mutationFn: async (medicationId: string) => {
-      console.log('[Pharmacy] Generating report for medication:', medicationId);
-      // Report will be displayed in a modal, no backend action needed
-      return true;
+      if (!userId || !sessionToken) {
+        throw new Error('Session not found. Please log in again.');
+      }
+
+      return withSessionValidation(
+        userId,
+        sessionToken,
+        async () => {
+          console.log('[Pharmacy] Generating report for medication:', medicationId);
+          // Report will be displayed in a modal, no backend action needed
+          return true;
+        },
+        'Generate Report'
+      );
     },
     onSuccess: () => {
       toast.success('Report ready to print');

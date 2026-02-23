@@ -21,30 +21,58 @@ const ResetPassword = () => {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    // Verify the reset session from the URL hash
-    const verifyResetSession = async () => {
+    // Listen for auth state changes to detect when session is set from URL hash
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        console.log('[ResetPassword] Auth event:', event, 'Session:', !!session);
+        
+        if (event === 'PASSWORD_RECOVERY') {
+          // Password recovery event indicates we have a valid reset session
+          if (session) {
+            console.log('[ResetPassword] Password recovery session detected');
+            setSessionVerified(true);
+            setError(null);
+          } else {
+            setError('No active session. Please use the link from your email.');
+          }
+        } else if (event === 'SIGNED_IN') {
+          // Also handle SIGNED_IN event in case that's what Supabase triggers
+          if (session) {
+            console.log('[ResetPassword] Signed in session detected');
+            setSessionVerified(true);
+            setError(null);
+          }
+        }
+      }
+    );
+
+    // Also check for existing session immediately
+    const checkExistingSession = async () => {
       try {
-        // Supabase sets the session automatically from the URL hash
         const { data: { session }, error } = await supabase.auth.getSession();
         
         if (error) {
+          console.error('[ResetPassword] Session check error:', error);
           setError('Invalid or expired reset link. Please request a new password reset.');
-          console.error('Session verification error:', error);
           return;
         }
 
-        if (session) {
+        if (session && session.user?.email) {
+          console.log('[ResetPassword] Found existing session for:', session.user.email);
           setSessionVerified(true);
+          setError(null);
         } else {
-          setError('No active session. Please use the link from your email.');
+          console.log('[ResetPassword] No session found yet, waiting for auth state change...');
         }
       } catch (err) {
-        console.error('Error verifying session:', err);
+        console.error('[ResetPassword] Error checking session:', err);
         setError('An error occurred while verifying your reset link.');
       }
     };
 
-    verifyResetSession();
+    checkExistingSession();
+
+    return () => subscription.unsubscribe();
   }, []);
 
   const validatePassword = (pwd: string) => {
@@ -74,24 +102,48 @@ const ResetPassword = () => {
     setIsLoading(true);
 
     try {
+      // Get the latest session to ensure it's still valid
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      
+      if (sessionError || !session) {
+        console.error('[ResetPassword] Session error:', sessionError);
+        setError('Session expired. Please request a new password reset link.');
+        setSessionVerified(false);
+        setIsLoading(false);
+        return;
+      }
+
+      console.log('[ResetPassword] Attempting password update with valid session');
+      
       const { error } = await supabase.auth.updateUser({ password });
 
       if (error) {
-        setError(error.message);
+        console.error('[ResetPassword] Password update error:', error);
+        
+        // Handle specific error cases
+        if (error.message.includes('session') || error.message.includes('Session')) {
+          setError('Session expired. Please request a new password reset link.');
+          setSessionVerified(false);
+        } else {
+          setError(error.message);
+        }
+        
         toast.error('Failed to reset password: ' + error.message);
       } else {
+        console.log('[ResetPassword] Password reset successful');
         setIsResetSuccess(true);
         toast.success('Password reset successfully!');
         
-        // Redirect to login after 3 seconds
+        // Sign out and redirect to login after 3 seconds
+        await supabase.auth.signOut();
         setTimeout(() => {
           navigate('/auth');
         }, 3000);
       }
     } catch (err) {
-      console.error('Error resetting password:', err);
+      console.error('[ResetPassword] Error resetting password:', err);
       setError('An error occurred while resetting your password');
-      toast.error('An error occurred');
+      toast.error('Failed to reset password: Auth session missing!');
     } finally {
       setIsLoading(false);
     }

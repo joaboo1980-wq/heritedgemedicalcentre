@@ -1,7 +1,11 @@
-import { useState } from 'react';
+import { useState, useContext } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
+import { getAuthRedirectUrl } from '@/utils/authRedirectUrl';
+import { generateStrongPassword } from '@/utils/passwordGenerator';
 import { useAuth } from '@/hooks/useAuth';
+import { AuthContext } from '@/contexts/AuthContext';
+import { withSessionValidation } from '@/utils/sessionValidationAPI';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -58,6 +62,9 @@ const roleColors: Record<AppRole, string> = {
 const UserManagement = () => {
   const { isAdmin } = useAuth();
   const queryClient = useQueryClient();
+  const authContext = useContext(AuthContext);
+  const userId = authContext?.user?.id;
+  const sessionToken = authContext?.sessionToken;
   const [searchTerm, setSearchTerm] = useState('');
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [newUser, setNewUser] = useState({
@@ -105,91 +112,104 @@ const UserManagement = () => {
   // Create user mutation
   const createUserMutation = useMutation({
     mutationFn: async (userData: typeof newUser) => {
-      // Validate inputs
-      if (!userData.email || !userData.password || !userData.full_name) {
-        throw new Error('Email, password, and full name are required');
+      if (!userId || !sessionToken) {
+        throw new Error('Session not found. Please log in again.');
       }
 
-      if (userData.password.length < 6) {
-        throw new Error('Password must be at least 6 characters');
-      }
+      return withSessionValidation(
+        userId,
+        sessionToken,
+        async () => {
+          // Validate inputs
+          if (!userData.email || !userData.full_name) {
+            throw new Error('Email and full name are required');
+          }
 
-      try {
-        // Get the current admin's session before creating the new user
-        const { data: { session: adminSession } } = await supabase.auth.getSession();
-        
-        if (!adminSession) {
-          throw new Error('Admin session not found');
-        }
+          try {
+            // Generate a strong random temporary password
+            const temporaryPassword = generateStrongPassword(16);
+            console.log('[UserCreation] Generated temporary password for:', userData.email);
 
-        // Create auth user via signUp
-        const { data: authData, error: authError } = await supabase.auth.signUp({
-          email: userData.email.trim().toLowerCase(),
-          password: userData.password,
-          options: {
-            data: {
-              full_name: userData.full_name,
-            },
-          },
-        });
+            // Get the current admin's session before creating the new user
+            const { data: { session: adminSession } } = await supabase.auth.getSession();
+            
+            if (!adminSession) {
+              throw new Error('Admin session not found');
+            }
 
-        if (authError) {
-          console.error('Auth error details:', authError);
-          throw authError;
-        }
+            // Create auth user with temporary password
+            const { data: authData, error: authError } = await supabase.auth.signUp({
+              email: userData.email.trim().toLowerCase(),
+              password: temporaryPassword,
+              options: {
+                data: {
+                  full_name: userData.full_name,
+                },
+              },
+            });
 
-        if (!authData.user) {
-          throw new Error('User creation failed - no user returned');
-        }
+            if (authError) {
+              console.error('Auth error details:', authError);
+              throw authError;
+            }
 
-        const newUserId = authData.user.id;
+            if (!authData.user) {
+              throw new Error('User creation failed - no user returned');
+            }
 
-        // Create profile
-        const { error: profileError } = await supabase.from('profiles').insert({
-          user_id: newUserId,
-          full_name: userData.full_name.trim(),
-          email: userData.email.trim().toLowerCase(),
-        });
+            const newUserId = authData.user.id;
 
-        if (profileError) {
-          console.error('Profile error:', profileError);
-          throw profileError;
-        }
+            // Create profile
+            const { error: profileError } = await supabase.from('profiles').insert({
+              user_id: newUserId,
+              full_name: userData.full_name.trim(),
+              email: userData.email.trim().toLowerCase(),
+            });
 
-        // Assign role
-        const { error: roleError } = await supabase.from('user_roles').insert({
-          user_id: newUserId,
-          role: userData.role,
-        });
+            if (profileError) {
+              console.error('Profile error:', profileError);
+              throw profileError;
+            }
 
-        if (roleError) {
-          console.error('Role error:', roleError);
-          throw roleError;
-        }
+            // Assign role
+            const { error: roleError } = await supabase.from('user_roles').insert({
+              user_id: newUserId,
+              role: userData.role,
+            });
 
-        // Restore the admin's session to prevent auto-login of new user
-        const { error: restoreError } = await supabase.auth.setSession(adminSession);
-        if (restoreError) {
-          console.error('Error restoring admin session:', restoreError);
-          // Continue anyway, the user was created successfully
-        }
+            if (roleError) {
+              console.error('Role error:', roleError);
+              throw roleError;
+            }
 
-        // Send password reset email so user can set their own password
-        const { error: resetError } = await supabase.auth.resetPasswordForEmail(userData.email.trim().toLowerCase(), {
-          redirectTo: `${window.location.origin}/reset-password`,
-        });
+            // Restore the admin's session to prevent auto-login of new user
+            const { error: restoreError } = await supabase.auth.setSession(adminSession);
+            if (restoreError) {
+              console.error('Error restoring admin session:', restoreError);
+              // Continue anyway, the user was created successfully
+            }
 
-        if (resetError) {
-          console.error('Error sending reset email:', resetError);
-          // Log but don't fail - user creation was successful
-          throw new Error('User created but failed to send password reset email. User can use "Forgot Password" to reset.');
-        }
+            // Send password reset email so user can set their own password
+            // The temporary password is only for initial account setup if needed
+            // The reset link allows them to set their preferred password
+            const { error: resetError } = await supabase.auth.resetPasswordForEmail(userData.email.trim().toLowerCase(), {
+              redirectTo: getAuthRedirectUrl('/reset-password'),
+            });
 
-        return authData.user;
-      } catch (error) {
-        console.error('User creation error:', error);
-        throw error;
-      }
+            if (resetError) {
+              console.error('Error sending reset email:', resetError);
+              // Log but don't fail - user creation was successful
+              throw new Error('User created but failed to send password reset email. User can use "Forgot Password" to reset.');
+            }
+
+            return authData.user;
+          } catch (error) {
+            console.error('User creation error:', error);
+            throw error;
+          }
+        },
+        'Create User'
+      );
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['staff-management'] });
@@ -200,7 +220,7 @@ const UserManagement = () => {
         full_name: '',
         role: 'doctor',
       });
-      toast.success('Staff member created! Password reset email sent.');
+      toast.success('Staff member created! Password reset email sent. They can click the link to set their password.');
     },
     onError: (error: Error) => {
       console.error('Mutation error:', error);
@@ -212,29 +232,41 @@ const UserManagement = () => {
   // Add role mutation
   const addRoleMutation = useMutation({
     mutationFn: async ({ userId, role }: { userId: string; role: AppRole }) => {
-      if (!userId?.trim()) {
-        console.warn('[UserManagement] User ID is required');
-        throw new Error('User ID is required');
-      }
-      if (!role?.trim()) {
-        console.warn('[UserManagement] Role is required');
-        throw new Error('Role is required');
+      if (!userId || !sessionToken) {
+        throw new Error('Session not found. Please log in again.');
       }
 
-      try {
-        const { error } = await supabase.from('user_roles').insert({
-          user_id: userId,
-          role: role,
-        });
-        if (error) {
-          console.error('[UserManagement] Error adding role:', error);
-          throw error;
-        }
-        console.log('[UserManagement] Role added successfully');
-      } catch (err) {
-        console.error('[UserManagement] Role addition failed:', err);
-        throw err;
-      }
+      return withSessionValidation(
+        userId,
+        sessionToken,
+        async () => {
+          if (!userId?.trim()) {
+            console.warn('[UserManagement] User ID is required');
+            throw new Error('User ID is required');
+          }
+          if (!role?.trim()) {
+            console.warn('[UserManagement] Role is required');
+            throw new Error('Role is required');
+          }
+
+          try {
+            const { error } = await supabase.from('user_roles').insert({
+              user_id: userId,
+              role: role,
+            });
+            if (error) {
+              console.error('[UserManagement] Error adding role:', error);
+              throw error;
+            }
+            console.log('[UserManagement] Role added successfully');
+            return { success: true };
+          } catch (err) {
+            console.error('[UserManagement] Role addition failed:', err);
+            throw err;
+          }
+        },
+        'Add Role'
+      );
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['staff-management'] });
@@ -249,30 +281,42 @@ const UserManagement = () => {
   // Remove role mutation
   const removeRoleMutation = useMutation({
     mutationFn: async ({ userId, role }: { userId: string; role: AppRole }) => {
-      if (!userId?.trim()) {
-        console.warn('[UserManagement] User ID is required');
-        throw new Error('User ID is required');
-      }
-      if (!role?.trim()) {
-        console.warn('[UserManagement] Role is required');
-        throw new Error('Role is required');
+      if (!userId || !sessionToken) {
+        throw new Error('Session not found. Please log in again.');
       }
 
-      try {
-        const { error } = await supabase
-          .from('user_roles')
-          .delete()
-          .eq('user_id', userId)
-          .eq('role', role);
-        if (error) {
-          console.error('[UserManagement] Error removing role:', error);
-          throw error;
-        }
-        console.log('[UserManagement] Role removed successfully');
-      } catch (err) {
-        console.error('[UserManagement] Role removal failed:', err);
-        throw err;
-      }
+      return withSessionValidation(
+        userId,
+        sessionToken,
+        async () => {
+          if (!userId?.trim()) {
+            console.warn('[UserManagement] User ID is required');
+            throw new Error('User ID is required');
+          }
+          if (!role?.trim()) {
+            console.warn('[UserManagement] Role is required');
+            throw new Error('Role is required');
+          }
+
+          try {
+            const { error } = await supabase
+              .from('user_roles')
+              .delete()
+              .eq('user_id', userId)
+              .eq('role', role);
+            if (error) {
+              console.error('[UserManagement] Error removing role:', error);
+              throw error;
+            }
+            console.log('[UserManagement] Role removed successfully');
+            return { success: true };
+          } catch (err) {
+            console.error('[UserManagement] Role removal failed:', err);
+            throw err;
+          }
+        },
+        'Remove Role'
+      );
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['staff-management'] });
@@ -322,7 +366,7 @@ const UserManagement = () => {
             <DialogHeader>
               <DialogTitle>Add New Staff Member</DialogTitle>
               <DialogDescription>
-                Create a new staff member account and assign roles.
+                Create a new staff member account. A temporary password will be generated and a password reset link will be sent to their email.
               </DialogDescription>
             </DialogHeader>
             <form
@@ -332,10 +376,6 @@ const UserManagement = () => {
                 // Client-side validation
                 if (!newUser.email.includes('@')) {
                   toast.error('Please enter a valid email address');
-                  return;
-                }
-                if (newUser.password.length < 6) {
-                  toast.error('Password must be at least 6 characters');
                   return;
                 }
                 if (!newUser.full_name.trim()) {
@@ -368,19 +408,6 @@ const UserManagement = () => {
                     setNewUser({ ...newUser, email: e.target.value })
                   }
                   required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="password">Password</Label>
-                <Input
-                  id="password"
-                  type="password"
-                  value={newUser.password}
-                  onChange={(e) =>
-                    setNewUser({ ...newUser, password: e.target.value })
-                  }
-                  required
-                  minLength={6}
                 />
               </div>
               <div className="space-y-2">
