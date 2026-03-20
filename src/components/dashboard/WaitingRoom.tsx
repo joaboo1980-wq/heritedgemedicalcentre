@@ -38,6 +38,7 @@ import {
   RefreshCw 
 } from 'lucide-react';
 import { format, differenceInMinutes } from 'date-fns';
+import { CheckInAndAssignDialog } from './CheckInAndAssignDialog';
 
 interface WaitingPatient {
   id: string;
@@ -53,11 +54,12 @@ interface WaitingPatient {
   arrival_time?: string;
 }
 
-const WaitingRoom = () => {
+const WaitingRoom = ({ hideReadyToCheckIn = false }: { hideReadyToCheckIn?: boolean }) => {
   const queryClient = useQueryClient();
   const [selectedPatient, setSelectedPatient] = useState<WaitingPatient | null>(null);
   const [showCallDialog, setShowCallDialog] = useState(false);
-  const [showCheckInDialog, setShowCheckInDialog] = useState(false);
+  const [showCheckInAndAssignDialog, setShowCheckInAndAssignDialog] = useState(false);
+  const [showNoVitalsAlert, setShowNoVitalsAlert] = useState(false);
 
   const today = format(new Date(), 'yyyy-MM-dd');
 
@@ -69,7 +71,7 @@ const WaitingRoom = () => {
         .from('appointments')
         .select('id, patient_id, doctor_id, appointment_date, appointment_time, status, reason, created_at')
         .eq('appointment_date', today)
-        .in('status', ['scheduled', 'confirmed'])
+        .in('status', ['scheduled', 'confirmed', 'cancelled'])
         .order('appointment_time', { ascending: true });
 
       if (error) throw error;
@@ -163,6 +165,7 @@ const WaitingRoom = () => {
         }, {});
       }
 
+      // Only return appointments with waiting status (appears immediately after check in)
       return appointmentData.map((apt: any) => ({
         id: apt.id,
         patient_id: apt.patient_id,
@@ -181,9 +184,10 @@ const WaitingRoom = () => {
     refetchInterval: 20000,
   });
 
-  // Check in patient mutation
+  // Check in patient mutation (legacy - now part of assignment)
   const checkInMutation = useMutation({
     mutationFn: async (appointmentId: string) => {
+      // This just marks the appointment as waiting, actual triage happens via assignment
       const { error } = await supabase
         .from('appointments')
         .update({ status: 'waiting' })
@@ -193,16 +197,16 @@ const WaitingRoom = () => {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['scheduled-today', today] });
       queryClient.invalidateQueries({ queryKey: ['waiting-patients', today] });
-      setShowCheckInDialog(false);
+      queryClient.invalidateQueries({ queryKey: ['nurse-triage-assignments'] });
+      setShowCheckInAndAssignDialog(false);
       setSelectedPatient(null);
-      toast.success('Patient checked in to waiting room');
+      toast.success('Patient assigned to nurse for triage');
     },
     onError: (error: Error) => {
       toast.error(`Failed to check in: ${error.message}`);
     },
   });
 
-  // Call next patient mutation
   const callPatientMutation = useMutation({
     mutationFn: async (appointmentId: string) => {
       const { error } = await supabase
@@ -221,6 +225,35 @@ const WaitingRoom = () => {
       toast.error(`Failed to call patient: ${error.message}`);
     },
   });
+
+  // Check if patient has recorded vitals before calling
+  const handleCallPatientClick = async (patient: WaitingPatient) => {
+    try {
+      const { data: vitalsData, error: vitalsError } = await supabase
+        .from('vitals')
+        .select('id')
+        .eq('patient_id', patient.patient_id)
+        .limit(1);
+
+      if (vitalsError) {
+        toast.error('Error checking vitals');
+        return;
+      }
+
+      if (!vitalsData || vitalsData.length === 0) {
+        // No vitals recorded
+        setSelectedPatient(patient);
+        setShowNoVitalsAlert(true);
+      } else {
+        // Vitals exist, proceed with calling
+        setSelectedPatient(patient);
+        setShowCallDialog(true);
+      }
+    } catch (err) {
+      console.error('Error checking vitals:', err);
+      toast.error('Failed to check vitals');
+    }
+  };
 
   const calculateWaitTime = (arrivalTime: string) => {
     const minutes = differenceInMinutes(new Date(), new Date(arrivalTime));
@@ -293,23 +326,23 @@ const WaitingRoom = () => {
           {waitingPatients.length === 0 ? (
             <p className="text-sm text-muted-foreground text-center py-8">No patients in waiting room</p>
           ) : (
-            <div className="space-y-3">
+            <div className="max-h-[600px] overflow-y-auto space-y-3">
               {waitingPatients.map((patient, index) => (
                 <div
                   key={patient.id}
-                  className="flex items-center justify-between p-4 border rounded-lg hover:bg-accent"
+                  className="flex items-center justify-between p-4 border rounded-lg hover:bg-accent overflow-hidden"
                 >
-                  <div className="flex items-center gap-4 flex-1">
-                    <div className="flex items-center justify-center h-10 w-10 rounded-full bg-blue-100 text-blue-700 font-semibold">
+                  <div className="flex items-center gap-4 flex-1 min-w-0">
+                    <div className="flex items-center justify-center h-10 w-10 rounded-full bg-blue-100 text-blue-700 font-semibold flex-shrink-0">
                       {index + 1}
                     </div>
-                    <div className="flex-1">
-                      <p className="font-semibold">{patient.patient_name}</p>
-                      <p className="text-xs text-muted-foreground">
+                    <div className="flex-1 min-w-0">
+                      <p className="font-semibold truncate">{patient.patient_name}</p>
+                      <p className="text-xs text-muted-foreground word-wrap" style={{ overflowWrap: 'break-word', wordWrap: 'break-word', wordBreak: 'break-word' }}>
                         {patient.reason || 'General visit'}
                       </p>
                     </div>
-                    <div className="text-right">
+                    <div className="text-right flex-shrink-0">
                       <p className="text-sm font-semibold text-red-600">
                         {calculateWaitTime(patient.arrival_time || '')}
                       </p>
@@ -321,11 +354,8 @@ const WaitingRoom = () => {
                   <Button
                     size="sm"
                     variant="outline"
-                    className="ml-4"
-                    onClick={() => {
-                      setSelectedPatient(patient);
-                      setShowCallDialog(true);
-                    }}
+                    className="ml-4 flex-shrink-0"
+                    onClick={() => handleCallPatientClick(patient)}
                   >
                     <Phone className="h-4 w-4 mr-2" />
                     Call
@@ -338,110 +368,92 @@ const WaitingRoom = () => {
       </Card>
 
       {/* Check In Section */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <CardTitle className="flex items-center gap-2">
-              <CheckCircle className="h-5 w-5" />
-              Ready to Check In
-            </CardTitle>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => queryClient.invalidateQueries({ queryKey: ['scheduled-today'] })}
-            >
-              <RefreshCw className="h-4 w-4" />
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent>
-          {scheduledPatients.length === 0 ? (
-            <p className="text-sm text-muted-foreground text-center py-8">
-              No patients scheduled for today
-            </p>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Patient</TableHead>
-                  <TableHead>Appointment Time</TableHead>
-                  <TableHead>Doctor</TableHead>
-                  <TableHead>Reason</TableHead>
-                  <TableHead className="text-right">Action</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {scheduledPatients.map((patient) => (
-                  <TableRow key={patient.id}>
-                    <TableCell className="font-semibold">{patient.patient_name}</TableCell>
-                    <TableCell>{patient.appointment_time}</TableCell>
-                    <TableCell>{patient.doctor_name}</TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
-                      {patient.reason || '-'}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Button
-                        size="sm"
-                        onClick={() => {
-                          setSelectedPatient(patient);
-                          setShowCheckInDialog(true);
-                        }}
-                      >
-                        <CheckCircle className="h-4 w-4 mr-2" />
-                        Check In
-                      </Button>
-                    </TableCell>
+      {!hideReadyToCheckIn && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle className="flex items-center gap-2">
+                <CheckCircle className="h-5 w-5" />
+                Ready to Check In
+              </CardTitle>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => queryClient.invalidateQueries({ queryKey: ['scheduled-today'] })}
+              >
+                <RefreshCw className="h-4 w-4" />
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {scheduledPatients.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-8">
+                No patients scheduled for today
+              </p>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Patient</TableHead>
+                    <TableHead>Appointment Time</TableHead>
+                    <TableHead>Doctor</TableHead>
+                    <TableHead>Reason</TableHead>
+                    <TableHead className="text-right">Action</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
+                </TableHeader>
+                <TableBody>
+                  {scheduledPatients.map((patient) => (
+                    <TableRow key={patient.id}>
+                      <TableCell className="font-semibold">{patient.patient_name}</TableCell>
+                      <TableCell>{patient.appointment_time}</TableCell>
+                      <TableCell>{patient.doctor_name}</TableCell>
+                      <TableCell className="text-sm text-muted-foreground">
+                        {patient.reason || '-'}
+                      </TableCell>
+                      <TableCell className="text-right space-x-2">
+                        {patient.status === 'cancelled' ? (
+                          <Badge variant="destructive">Cancelled</Badge>
+                        ) : (
+                          <Button
+                            size="sm"
+                            className="bg-slate-900 hover:bg-slate-800 text-white"
+                            onClick={() => {
+                              setSelectedPatient(patient);
+                              setShowCheckInAndAssignDialog(true);
+                            }}
+                          >
+                            <CheckCircle className="h-4 w-4 mr-2" />
+                            Check In
+                          </Button>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
-      {/* Check In Dialog */}
-      <Dialog open={showCheckInDialog} onOpenChange={setShowCheckInDialog}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Check In Patient</DialogTitle>
-            <DialogDescription>
-              Move {selectedPatient?.patient_name} to the waiting room
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div>
-              <p className="text-sm font-semibold text-muted-foreground">Patient</p>
-              <p className="text-lg font-bold">{selectedPatient?.patient_name}</p>
-            </div>
-            <div>
-              <p className="text-sm font-semibold text-muted-foreground">Appointment Time</p>
-              <p className="text-lg">{selectedPatient?.appointment_time}</p>
-            </div>
-            <div>
-              <p className="text-sm font-semibold text-muted-foreground">Doctor</p>
-              <p className="text-lg">{selectedPatient?.doctor_name}</p>
-            </div>
-          </div>
-          <div className="flex gap-2 justify-end">
-            <Button
-              variant="outline"
-              onClick={() => setShowCheckInDialog(false)}
-            >
-              Cancel
-            </Button>
-            <Button
-              onClick={() => {
-                if (selectedPatient) {
-                  checkInMutation.mutate(selectedPatient.id);
-                }
-              }}
-              disabled={checkInMutation.isPending}
-            >
-              {checkInMutation.isPending ? 'Checking In...' : 'Check In'}
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+      {/* Check In & Assign Dialog */}
+      {!hideReadyToCheckIn && selectedPatient && (
+        <CheckInAndAssignDialog
+          patientId={selectedPatient.patient_id}
+          patientName={selectedPatient.patient_name}
+          appointmentReason={selectedPatient.reason}
+          isOpen={showCheckInAndAssignDialog}
+          onClose={() => {
+            setShowCheckInAndAssignDialog(false);
+            setSelectedPatient(null);
+          }}
+          onSuccess={() => {
+            queryClient.invalidateQueries({ queryKey: ['scheduled-today', today] });
+            queryClient.invalidateQueries({ queryKey: ['waiting-patients', today] });
+            queryClient.invalidateQueries({ queryKey: ['nurse-triage-assignments'] });
+          }}
+        />
+      )}
 
       {/* Call Patient Dialog */}
       <AlertDialog open={showCallDialog} onOpenChange={setShowCallDialog}>
@@ -462,6 +474,19 @@ const WaitingRoom = () => {
             >
               Call Patient
             </AlertDialogAction>
+          </div>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* No Vitals Alert Dialog */}
+      <AlertDialog open={showNoVitalsAlert} onOpenChange={setShowNoVitalsAlert}>
+        <AlertDialogContent>
+          <AlertDialogTitle>Vitals Not Recorded</AlertDialogTitle>
+          <AlertDialogDescription>
+            <span className="font-semibold">{selectedPatient?.patient_name}</span> cannot see the doctor until vitals have been recorded. Please send the patient to triage first to have their vitals taken.
+          </AlertDialogDescription>
+          <div className="flex gap-2 justify-end">
+            <AlertDialogCancel>Close</AlertDialogCancel>
           </div>
         </AlertDialogContent>
       </AlertDialog>

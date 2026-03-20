@@ -114,4 +114,14 @@
   .sidebar-active {
     @apply bg-white/20 text-white font-medium;
   }
+  
+  /* Fixed text wrapping for long strings without spaces */
+  .word-wrap {
+    overflow-wrap: break-word;
+    word-wrap: break-word;
+    word-break: break-word;
+    hyphens: auto;
+    -webkit-hyphens: auto;
+    -moz-hyphens: auto;
+  }
 }

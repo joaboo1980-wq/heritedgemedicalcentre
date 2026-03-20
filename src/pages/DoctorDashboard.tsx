@@ -1,16 +1,20 @@
 // export default DoctorDashboard;
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   CalendarDaysIcon,
   UserGroupIcon,
   ClipboardDocumentListIcon,
   BeakerIcon,
   ChatBubbleLeftRightIcon,
+  EnvelopeIcon,
 } from '@heroicons/react/24/solid';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
+import { usePermissions } from '@/hooks/usePermissions';
+import { usePatientLatestVitals } from '@/hooks/useNurseTriageAssignment';
 import { Badge } from '@/components/ui/badge';
+import { PatientConsultationHistory } from '@/components/doctor/PatientConsultationHistory';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 
@@ -111,6 +115,7 @@ interface MedicalExamination {
 
 const DoctorDashboard = () => {
   const { user } = useAuth();
+  const { hasPermission, canAccessModule } = usePermissions();
   const queryClient = useQueryClient();
   const today = new Date().toISOString().split('T')[0];
 
@@ -132,8 +137,26 @@ const DoctorDashboard = () => {
   const [isViewExaminationModalOpen, setIsViewExaminationModalOpen] = useState(false);
   const [isEditExaminationModalOpen, setIsEditExaminationModalOpen] = useState(false);
   const [isDeleteExaminationDialogOpen, setIsDeleteExaminationDialogOpen] = useState(false);
+  const [isNewExaminationModalOpen, setIsNewExaminationModalOpen] = useState(false);
   const [selectedExamination, setSelectedExamination] = useState<MedicalExamination | null>(null);
   const [editingExamination, setEditingExamination] = useState<Partial<MedicalExamination> | null>(null);
+  const [newExaminationForm, setNewExaminationForm] = useState({
+    patient_id: '',
+    chief_complaint: '',
+    assessment_diagnosis: '',
+    history_of_present_illness: '',
+    triage_temperature: '',
+    triage_blood_pressure: '',
+    triage_pulse_rate: '',
+    triage_respiratory_rate: '',
+    triage_oxygen_saturation: '',
+    triage_weight: '',
+    triage_height: '',
+    plan_treatment: '',
+    medications_prescribed: '',
+    follow_up_date: '',
+    referrals: '',
+  });
   const [isPrescriptionModalOpen, setIsPrescriptionModalOpen] = useState(false);
   const [selectedPrescriptionPatient, setSelectedPrescriptionPatient] = useState<Patient | null>(null);
   const [selectedEditingPrescription, setSelectedEditingPrescription] = useState<Prescription | null>(null);
@@ -333,6 +356,7 @@ const DoctorDashboard = () => {
     queryFn: async () => {
       if (!doctorId) return [];
       try {
+        console.log('[DoctorDashboard] Fetching medical examinations for doctor:', doctorId);
         const { data, error } = await (supabase as any)
           .from('medical_examinations')
           .select(
@@ -348,10 +372,17 @@ const DoctorDashboard = () => {
           console.error('[DoctorDashboard] Error fetching medical examinations:', error);
           throw error;
         }
-        return (data || []).map((me: any) => ({
+        
+        console.log('[DoctorDashboard] Medical examinations fetched:', data?.length, 'records');
+        
+        const mapped = (data || []).map((me: any) => ({
           ...me,
           patient_name: me.patients ? `${me.patients.first_name} ${me.patients.last_name}` : 'Unknown',
         }));
+        
+        console.log('[DoctorDashboard] Mapped examinations:', mapped);
+        
+        return mapped;
       } catch (err) {
         console.error('[DoctorDashboard] Medical examinations query failed:', err);
         throw err;
@@ -400,6 +431,56 @@ const DoctorDashboard = () => {
     },
     enabled: !!selectedPatient?.id,
   });
+
+  // ===== VITALS QUERY FOR NEW EXAMINATION FORM =====
+  const selectedPatientIdForExam = newExaminationForm.patient_id || undefined;
+  const { data: latestVitals, isLoading: vitalsLoading } = usePatientLatestVitals(selectedPatientIdForExam);
+
+  // Auto-fill vitals when patient is selected in new examination form
+  useEffect(() => {
+    if (selectedPatientIdForExam && latestVitals) {
+      const vitals: any = latestVitals;
+      
+      // Only update fields that have values, preserve existing form state
+      const updates: any = {};
+      
+      if (vitals?.temperature) {
+        updates.triage_temperature = String(vitals.temperature);
+      }
+      
+      if (vitals?.blood_pressure_systolic && vitals?.blood_pressure_diastolic) {
+        updates.triage_blood_pressure = `${vitals.blood_pressure_systolic}/${vitals.blood_pressure_diastolic}`;
+      }
+      
+      if (vitals?.heart_rate) {
+        updates.triage_pulse_rate = String(vitals.heart_rate);
+      }
+      
+      if (vitals?.respiratory_rate) {
+        updates.triage_respiratory_rate = String(vitals.respiratory_rate);
+      }
+      
+      if (vitals?.oxygen_saturation) {
+        updates.triage_oxygen_saturation = String(vitals.oxygen_saturation);
+      }
+      
+      if (vitals?.weight) {
+        updates.triage_weight = String(vitals.weight);
+      }
+      
+      if (vitals?.height) {
+        updates.triage_height = String(vitals.height);
+      }
+
+      // Only update if we have at least one field to fill
+      if (Object.keys(updates).length > 0) {
+        setNewExaminationForm((prev) => ({
+          ...prev,
+          ...updates,
+        }));
+      }
+    }
+  }, [selectedPatientIdForExam, latestVitals]);
 
   // ===== MUTATIONS =====
   const confirmAppointmentMutation = useMutation({
@@ -477,7 +558,7 @@ const DoctorDashboard = () => {
     },
   });
 
-  const createExaminationMutation = useMutation({
+  const createDiagnosisMutation = useMutation({
     mutationFn: async (examinationData: any) => {
     const { data, error } = await (supabase as any)
       .from('medical_examinations')
@@ -748,6 +829,128 @@ const cancelPrescriptionMutation = useMutation({
     },
   });
 
+  // Create Examination Mutation
+  const createExaminationMutation = useMutation({
+    mutationFn: async (examinationData: any) => {
+      const { data, error } = await supabase
+        .from('medical_examinations')
+        .insert({
+          patient_id: examinationData.patient_id,
+          examined_by: doctorId,
+          examination_date: new Date().toISOString(),
+          chief_complaint: examinationData.chief_complaint,
+          assessment_diagnosis: examinationData.assessment_diagnosis,
+          history_of_present_illness: examinationData.history_of_present_illness,
+          triage_temperature: examinationData.triage_temperature ? parseFloat(examinationData.triage_temperature) : null,
+          triage_blood_pressure: examinationData.triage_blood_pressure,
+          triage_pulse_rate: examinationData.triage_pulse_rate ? parseInt(examinationData.triage_pulse_rate) : null,
+          triage_respiratory_rate: examinationData.triage_respiratory_rate ? parseInt(examinationData.triage_respiratory_rate) : null,
+          triage_oxygen_saturation: examinationData.triage_oxygen_saturation ? parseFloat(examinationData.triage_oxygen_saturation) : null,
+          plan_treatment: examinationData.plan_treatment,
+          medications_prescribed: examinationData.medications_prescribed,
+          follow_up_date: examinationData.follow_up_date,
+          referrals: examinationData.referrals,
+        })
+        .select();
+      
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['doctor-medical-examinations', doctorId] });
+      setIsNewExaminationModalOpen(false);
+      setNewExaminationForm({
+        patient_id: '',
+        chief_complaint: '',
+        assessment_diagnosis: '',
+        history_of_present_illness: '',
+        triage_temperature: '',
+        triage_blood_pressure: '',
+        triage_pulse_rate: '',
+        triage_respiratory_rate: '',
+        triage_oxygen_saturation: '',
+        triage_weight: '',
+        triage_height: '',
+        plan_treatment: '',
+        medications_prescribed: '',
+        follow_up_date: '',
+        referrals: '',
+      });
+      toast.success('Examination created successfully');
+    },
+    onError: (error: Error) => {
+      console.error('[DoctorDashboard] Examination create error:', error);
+      toast.error('Failed to create examination: ' + error.message);
+    },
+  });
+
+  // Send SMS reminder mutation
+  const sendSmsReminderMutation = useMutation({
+    mutationFn: async ({ appointmentId, patientId }: { appointmentId: string; patientId: string }) => {
+      try {
+        console.log('[SMS-Doctor] 1. Starting SMS reminder mutation for appointment:', appointmentId, 'patient:', patientId);
+        
+        // Get patient phone number
+        console.log('[SMS-Doctor] 2. Fetching patient phone number...');
+        const { data: patientData, error: patientError } = await supabase
+          .from('patients')
+          .select('phone')
+          .eq('id', patientId)
+          .single();
+        
+        console.log('[SMS-Doctor] 3. Patient fetch response:', { patientData, patientError });
+        
+        if (patientError) {
+          console.error('[SMS-Doctor] 4. Error fetching patient phone:', patientError);
+          throw patientError;
+        }
+        
+        if (!patientData?.phone) {
+          console.error('[SMS-Doctor] 5. Patient phone number not found for', patientId);
+          throw new Error('Patient phone number not found');
+        }
+        
+        console.log('[SMS-Doctor] 6. Patient phone:', patientData.phone);
+        
+        // Call Edge Function to send SMS
+        console.log('[SMS-Doctor] 7. Calling Edge Function send-appointment-reminder...');
+        console.log('[SMS-Doctor] 8. Request body:', { phone: patientData.phone, appointmentId });
+        
+        const { data, error } = await supabase.functions.invoke('send-appointment-reminder', {
+          body: {
+            phone: patientData.phone,
+            appointmentId,
+          },
+        });
+        
+        console.log('[SMS-Doctor] 9. Edge Function response:', { data, error });
+        
+        if (error) {
+          console.error('[SMS-Doctor] 10. Error from Edge Function:', error);
+          console.error('[SMS-Doctor] 10a. Error type:', typeof error);
+          console.error('[SMS-Doctor] 10b. Error keys:', Object.keys(error));
+          throw error;
+        }
+        
+        console.log('[SMS-Doctor] 11. SMS sent successfully!', data);
+        return data;
+      } catch (err) {
+        console.error('[SMS-Doctor] 12. Exception in sendSmsReminderMutation:', err);
+        console.error('[SMS-Doctor] 12a. Error message:', err instanceof Error ? err.message : String(err));
+        console.error('[SMS-Doctor] 12b. Full error object:', err);
+        throw err;
+      }
+    },
+    onSuccess: () => {
+      console.log('[SMS-Doctor] 13. onSuccess - SMS sent successfully');
+      toast.success('Reminder SMS sent successfully');
+    },
+    onError: (error: Error) => {
+      console.error('[SMS-Doctor] 14. onError - Failed with error:', error.message);
+      toast.error(error.message);
+    },
+  });
+
   // ===== HANDLERS =====
   const handleConfirmAppointment = (appointment: Appointment) => {
     confirmAppointmentMutation.mutate(appointment.id);
@@ -907,7 +1110,7 @@ const cancelPrescriptionMutation = useMutation({
       referrals: diagnosisForm.referrals || null,
     };
 
-    createExaminationMutation.mutate(dataToSubmit);
+    createDiagnosisMutation.mutate(dataToSubmit);
   };
 
   const handleSubmitPrescription = () => {
@@ -1130,12 +1333,25 @@ const cancelPrescriptionMutation = useMutation({
                     <tr key={apt.id} className="border-b border-gray-200 hover:bg-gray-50">
                       <td className="py-3 px-4 font-medium">{apt.appointment_time?.slice(0, 5)}</td>
                       <td className="py-3 px-4">{apt.patient_name}</td>
-                      <td className="py-3 px-4">{apt.reason || 'N/A'}</td>
+                      <td className="py-3 px-4 max-w-xs break-words whitespace-normal">{apt.reason || 'N/A'}</td>
                       <td className="py-3 px-4">{apt.duration_minutes ? `${apt.duration_minutes} min` : 'N/A'}</td>
                       <td className="py-3 px-4">
                         <Badge className={getStatusColor(apt.status)}>{apt.status}</Badge>
                       </td>
                       <td className="py-3 px-4 flex gap-2">
+                        <button
+                          className="bg-purple-500 hover:bg-purple-600 text-white px-2 py-1 rounded text-sm"
+                          onClick={() =>
+                            sendSmsReminderMutation.mutate({
+                              appointmentId: apt.id,
+                              patientId: apt.patient_id,
+                            })
+                          }
+                          disabled={sendSmsReminderMutation.isPending}
+                          title="Send SMS reminder"
+                        >
+                          <EnvelopeIcon className="h-4 w-4" />
+                        </button>
                         {apt.status === 'scheduled' || apt.status === 'pending' ? (
                           <button
                             className="bg-green-500 hover:bg-green-600 text-white px-2 py-1 rounded text-sm"
@@ -1349,7 +1565,7 @@ const cancelPrescriptionMutation = useMutation({
                   <button
                     className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-50"
                     onClick={handleSubmitDiagnosis}
-                    disabled={createExaminationMutation.isPending}
+                    disabled={createDiagnosisMutation.isPending}
                   >
                     Save Diagnosis
                   </button>
@@ -1992,57 +2208,109 @@ const cancelPrescriptionMutation = useMutation({
       )}
 
       {/* CONSULTATIONS TAB */}
-      {activeTab === 'consultations' && (
+      {activeTab === 'consultations' && canAccessModule('doctor_examination') && (
         <div className="bg-white rounded-lg shadow p-6">
-          <h2 className="text-xl font-semibold mb-4">Medical Examinations & Consultations</h2>
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-xl font-semibold">Medical Examinations & Consultations</h2>
+            {hasPermission('doctor_examination', 'create') && (
+              <button 
+                onClick={() => setIsNewExaminationModalOpen(true)}
+                className="bg-pink-500 hover:bg-pink-600 text-white px-4 py-2 rounded-lg transition-colors"
+              >
+                Add Consultation
+              </button>
+            )}
+          </div>
 
           {loadingExaminations ? (
             <div className="text-center py-8">Loading consultations...</div>
           ) : !medicalExaminations || medicalExaminations.length === 0 ? (
             <div className="text-center py-8 text-gray-500">No medical examinations found</div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full border-collapse">
+            <div className="overflow-x-auto w-full">
+              <table className="w-full border-collapse table-auto">
                 <thead>
                   <tr className="border-b-2 border-gray-200">
-                    <th className="text-left py-3 px-4 font-semibold w-24">Patient</th>
-                    <th className="text-left py-3 px-4 font-semibold w-32">Examination Date</th>
-                    <th className="text-left py-3 px-4 font-semibold w-40">Diagnosis</th>
-                    <th className="text-left py-3 px-4 font-semibold w-20">BP</th>
-                    <th className="text-left py-3 px-4 font-semibold w-20">Temp</th>
-                    <th className="text-left py-3 px-4 font-semibold w-32">Actions</th>
+                    <th className="text-left py-3 px-4 font-semibold min-w-[120px]">Patient</th>
+                    <th className="text-left py-3 px-4 font-semibold min-w-[140px]">Examination Date</th>
+                    <th className="text-left py-3 px-4 font-semibold min-w-[150px]">Diagnosis</th>
+                    <th className="text-left py-3 px-4 font-semibold min-w-[80px]">BP</th>
+                    <th className="text-left py-3 px-4 font-semibold min-w-[80px]">Temp</th>
+                    <th className="text-left py-3 px-4 font-semibold min-w-[220px]">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {medicalExaminations.map((exam) => (
                     <tr key={exam.id} className="border-b border-gray-200 hover:bg-gray-50">
-                      <td className="py-4 px-4 font-medium h-20 align-top whitespace-normal break-words">{exam.patient_name}</td>
-                      <td className="py-4 px-4 h-20 align-top whitespace-normal break-words">
+                      <td className="py-4 px-4 font-medium align-top">{exam.patient_name}</td>
+                      <td className="py-4 px-4 align-top">
                         {format(new Date(exam.examination_date), 'MMM dd, yyyy')}
                       </td>
 
-                      <td className="py-4 px-4 h-20 align-top whitespace-normal break-words">{exam.assessment_diagnosis}</td>
-                      <td className="py-4 px-4 h-20 align-top whitespace-normal break-words">{exam.triage_blood_pressure || 'N/A'}</td>
-                      <td className="py-4 px-4 h-20 align-top whitespace-normal break-words">{exam.triage_temperature ? `${exam.triage_temperature}°C` : 'N/A'}</td>
-                      <td className="py-4 px-4 h-20 align-top">
-                        <button
-                          className="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded text-sm"
-                          onClick={() => {
-                            setSelectedExamination(exam);
-                            setSelectedPatient({
-                              id: exam.patient_id,
-                              patient_number: '',
-                              first_name: exam.patient_name?.split(' ')[0] || '',
-                              last_name: exam.patient_name?.split(' ').slice(1).join(' ') || '',
-                              date_of_birth: '',
-                              gender: '',
-                              blood_type: null,
-                            });
-                            setIsViewExaminationModalOpen(true);
-                          }}
-                        >
-                          View
-                        </button>
+                      <td className="py-4 px-4 align-top">{exam.assessment_diagnosis}</td>
+                      <td className="py-4 px-4 align-top">{exam.triage_blood_pressure || 'N/A'}</td>
+                      <td className="py-4 px-4 align-top">{exam.triage_temperature ? `${exam.triage_temperature}°C` : 'N/A'}</td>
+                      <td className="py-4 px-4 align-top">
+                        <div className="flex gap-2 flex-wrap">
+                          {hasPermission('doctor_examination', 'view') && (
+                            <button
+                              type="button"
+                              className="bg-blue-500 hover:bg-blue-600 active:bg-blue-700 text-white px-3 py-1 rounded text-sm cursor-pointer transition-colors"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                console.log('[DEBUG] View button clicked for exam:', exam.id, exam.patient_name);
+                                setSelectedExamination(exam);
+                                setSelectedPatient({
+                                  id: exam.patient_id,
+                                  patient_number: '',
+                                  first_name: exam.patient_name?.split(' ')[0] || '',
+                                  last_name: exam.patient_name?.split(' ').slice(1).join(' ') || '',
+                                  date_of_birth: '',
+                                  gender: '',
+                                  blood_type: null,
+                                });
+                                console.log('[DEBUG] Setting isViewExaminationModalOpen to true');
+                                setIsViewExaminationModalOpen(true);
+                              }}
+                            >
+                              View
+                            </button>
+                          )}
+                          {hasPermission('doctor_examination', 'edit') && (
+                            <button
+                              type="button"
+                              className="bg-yellow-500 hover:bg-yellow-600 active:bg-yellow-700 text-white px-3 py-1 rounded text-sm cursor-pointer transition-colors"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                console.log('[DEBUG] Edit button clicked for exam:', exam.id);
+                                setSelectedExamination(exam);
+                                setEditingExamination(exam);
+                                console.log('[DEBUG] Setting isEditExaminationModalOpen to true');
+                                setIsEditExaminationModalOpen(true);
+                              }}
+                            >
+                              Edit
+                            </button>
+                          )}
+                          {hasPermission('doctor_examination', 'delete') && (
+                            <button
+                              type="button"
+                              className="bg-red-500 hover:bg-red-600 active:bg-red-700 text-white px-3 py-1 rounded text-sm cursor-pointer transition-colors"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                console.log('[DEBUG] Delete button clicked for exam:', exam.id);
+                                setSelectedExamination(exam);
+                                console.log('[DEBUG] Setting isDeleteExaminationDialogOpen to true');
+                                setIsDeleteExaminationDialogOpen(true);
+                              }}
+                            >
+                              Delete
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -2050,6 +2318,565 @@ const cancelPrescriptionMutation = useMutation({
               </table>
             </div>
           )}
+        </div>
+      )}
+
+      {/* MODALS - Rendered at root level to avoid overflow clipping */}
+
+      {/* View Examinations Modal */}
+      {isViewExaminationModalOpen && selectedExamination && (
+        <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-50 overflow-y-auto">
+          <div className="bg-white rounded-lg shadow-lg p-6 w-full max-w-4xl my-4">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-2xl font-bold">Examination Details</h3>
+              <button
+                className="text-gray-500 hover:text-gray-700 text-2xl"
+                onClick={() => {
+                  setIsViewExaminationModalOpen(false);
+                  setSelectedPatient(null);
+                  setSelectedExamination(null);
+                }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-6 max-h-96 overflow-y-auto">
+              <div className="border border-gray-200 rounded-lg p-4">
+                <div className="flex justify-between items-start mb-3">
+                  <h4 className="font-semibold text-lg">Examination Record</h4>
+                  <span className="text-sm text-gray-600">
+                    {format(new Date(selectedExamination.examination_date), 'MMM dd, yyyy HH:mm')}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4 text-sm">
+                  <div>
+                    <p className="text-gray-600">Patient</p>
+                    <p className="font-medium">{selectedExamination.patient_name}</p>
+                  </div>
+                  <div>
+                    <p className="text-gray-600">Chief Complaint</p>
+                    <p className="font-medium">{selectedExamination.chief_complaint}</p>
+                  </div>
+                  <div className="col-span-2">
+                    <p className="text-gray-600">Assessment/Diagnosis</p>
+                    <p className="font-medium">{selectedExamination.assessment_diagnosis}</p>
+                  </div>
+                  {selectedExamination.history_of_present_illness && (
+                    <div className="col-span-2">
+                      <p className="text-gray-600">History of Present Illness</p>
+                      <p className="font-medium">{selectedExamination.history_of_present_illness}</p>
+                    </div>
+                  )}
+                  {selectedExamination.triage_temperature && (
+                    <div>
+                      <p className="text-gray-600">Temperature</p>
+                      <p className="font-medium">{selectedExamination.triage_temperature}°C</p>
+                    </div>
+                  )}
+                  {selectedExamination.triage_blood_pressure && (
+                    <div>
+                      <p className="text-gray-600">Blood Pressure</p>
+                      <p className="font-medium">{selectedExamination.triage_blood_pressure}</p>
+                    </div>
+                  )}
+                  {selectedExamination.triage_pulse_rate && (
+                    <div>
+                      <p className="text-gray-600">Pulse Rate</p>
+                      <p className="font-medium">{selectedExamination.triage_pulse_rate} bpm</p>
+                    </div>
+                  )}
+                  {selectedExamination.triage_respiratory_rate && (
+                    <div>
+                      <p className="text-gray-600">Respiratory Rate</p>
+                      <p className="font-medium">{selectedExamination.triage_respiratory_rate} breaths/min</p>
+                    </div>
+                  )}
+                  {selectedExamination.triage_oxygen_saturation && (
+                    <div>
+                      <p className="text-gray-600">O₂ Saturation</p>
+                      <p className="font-medium">{selectedExamination.triage_oxygen_saturation}%</p>
+                    </div>
+                  )}
+                  {selectedExamination.plan_treatment && (
+                    <div className="col-span-2">
+                      <p className="text-gray-600">Treatment Plan</p>
+                      <p className="font-medium whitespace-pre-wrap">{selectedExamination.plan_treatment}</p>
+                    </div>
+                  )}
+                  {selectedExamination.medications_prescribed && (
+                    <div className="col-span-2">
+                      <p className="text-gray-600">Medications Prescribed</p>
+                      <p className="font-medium whitespace-pre-wrap">{selectedExamination.medications_prescribed}</p>
+                    </div>
+                  )}
+                  {selectedExamination.follow_up_date && (
+                    <div>
+                      <p className="text-gray-600">Follow-up Date</p>
+                      <p className="font-medium">{format(new Date(selectedExamination.follow_up_date), 'MMM dd, yyyy')}</p>
+                    </div>
+                  )}
+                  {selectedExamination.referrals && (
+                    <div className="col-span-2">
+                      <p className="text-gray-600">Referrals</p>
+                      <p className="font-medium">{selectedExamination.referrals}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex gap-2 justify-end mt-6">
+              <button
+                className="px-4 py-2 bg-yellow-500 hover:bg-yellow-600 text-white rounded"
+                onClick={() => {
+                  setEditingExamination(selectedExamination);
+                  setIsEditExaminationModalOpen(true);
+                }}
+              >
+                Edit
+              </button>
+              <button
+                className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded"
+                onClick={() => setIsDeleteExaminationDialogOpen(true)}
+              >
+                Delete
+              </button>
+              <button
+                className="px-4 py-2 bg-gray-300 text-gray-700 rounded hover:bg-gray-400"
+                onClick={() => {
+                  setIsViewExaminationModalOpen(false);
+                  setSelectedPatient(null);
+                  setSelectedExamination(null);
+                }}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* EDIT EXAMINATION MODAL */}
+      {isEditExaminationModalOpen && editingExamination && (
+        <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-50 overflow-y-auto">
+          <div className="bg-white rounded-lg shadow-lg p-6 w-full max-w-2xl my-4">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-2xl font-bold">Edit Examination</h3>
+              <button
+                className="text-gray-500 hover:text-gray-700 text-2xl"
+                onClick={() => {
+                  setIsEditExaminationModalOpen(false);
+                  setEditingExamination(null);
+                }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-4 max-h-96 overflow-y-auto">
+              <div>
+                <label className="block text-sm font-medium mb-1">Chief Complaint</label>
+                <textarea
+                  className="w-full border rounded px-3 py-2"
+                  value={editingExamination.chief_complaint || ''}
+                  onChange={(e) => setEditingExamination({ ...editingExamination, chief_complaint: e.target.value })}
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-1">Assessment/Diagnosis</label>
+                <textarea
+                  className="w-full border rounded px-3 py-2"
+                  value={editingExamination.assessment_diagnosis || ''}
+                  onChange={(e) => setEditingExamination({ ...editingExamination, assessment_diagnosis: e.target.value })}
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium mb-1">Blood Pressure</label>
+                  <input
+                    type="text"
+                    className="w-full border rounded px-3 py-2"
+                    value={editingExamination.triage_blood_pressure || ''}
+                    onChange={(e) => setEditingExamination({ ...editingExamination, triage_blood_pressure: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Temperature (°C)</label>
+                  <input
+                    type="number"
+                    className="w-full border rounded px-3 py-2"
+                    value={editingExamination.triage_temperature || ''}
+                    onChange={(e) => setEditingExamination({ ...editingExamination, triage_temperature: e.target.value ? parseFloat(e.target.value) : null })}
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium mb-1">Pulse Rate (bpm)</label>
+                  <input
+                    type="number"
+                    className="w-full border rounded px-3 py-2"
+                    value={editingExamination.triage_pulse_rate || ''}
+                    onChange={(e) => setEditingExamination({ ...editingExamination, triage_pulse_rate: e.target.value ? parseInt(e.target.value) : null })}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">O₂ Saturation (%)</label>
+                  <input
+                    type="number"
+                    className="w-full border rounded px-3 py-2"
+                    value={editingExamination.triage_oxygen_saturation || ''}
+                    onChange={(e) => setEditingExamination({ ...editingExamination, triage_oxygen_saturation: e.target.value ? parseFloat(e.target.value) : null })}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-1">Treatment Plan</label>
+                <textarea
+                  className="w-full border rounded px-3 py-2"
+                  value={editingExamination.plan_treatment || ''}
+                  onChange={(e) => setEditingExamination({ ...editingExamination, plan_treatment: e.target.value })}
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-1">Medications Prescribed</label>
+                <textarea
+                  className="w-full border rounded px-3 py-2"
+                  value={editingExamination.medications_prescribed || ''}
+                  onChange={(e) => setEditingExamination({ ...editingExamination, medications_prescribed: e.target.value })}
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-1">Follow-up Date</label>
+                <input
+                  type="date"
+                  className="w-full border rounded px-3 py-2"
+                  value={editingExamination.follow_up_date ? editingExamination.follow_up_date.split('T')[0] : ''}
+                  onChange={(e) => setEditingExamination({ ...editingExamination, follow_up_date: e.target.value ? new Date(e.target.value).toISOString() : null })}
+                />
+              </div>
+            </div>
+
+            <div className="flex gap-2 justify-end mt-6">
+              <button
+                className="px-4 py-2 bg-gray-300 text-gray-700 rounded hover:bg-gray-400"
+                onClick={() => {
+                  setIsEditExaminationModalOpen(false);
+                  setEditingExamination(null);
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded"
+                onClick={() => {
+                  if (editingExamination.id) {
+                    updateExaminationMutation.mutate(editingExamination as any);
+                  }
+                }}
+                disabled={updateExaminationMutation.isPending}
+              >
+                {updateExaminationMutation.isPending ? 'Saving...' : 'Save Changes'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* DELETE EXAMINATION CONFIRMATION DIALOG */}
+      {isDeleteExaminationDialogOpen && (
+        <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-50">
+          <div className="bg-white rounded-lg shadow-lg p-6 w-full max-w-md">
+            <h3 className="text-xl font-bold mb-4">Delete Examination</h3>
+            <p className="text-gray-700 mb-6">
+              Are you sure you want to delete this examination record? This action cannot be undone.
+            </p>
+            <div className="flex gap-4 justify-end">
+              <button
+                className="px-4 py-2 bg-gray-300 text-gray-700 rounded hover:bg-gray-400"
+                onClick={() => setIsDeleteExaminationDialogOpen(false)}
+              >
+                Cancel
+              </button>
+              <button
+                className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded"
+                onClick={() => {
+                  if (selectedExamination?.id) {
+                    deleteExaminationMutation.mutate(selectedExamination.id);
+                  }
+                }}
+                disabled={deleteExaminationMutation.isPending}
+              >
+                {deleteExaminationMutation.isPending ? 'Deleting...' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* NEW EXAMINATION MODAL */}
+      {isNewExaminationModalOpen && (
+        <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-50 overflow-y-auto p-4">
+          <div className="bg-white rounded-lg shadow-lg p-6 w-full max-w-6xl my-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-2xl font-bold">New Medical Examination</h3>
+              <button
+                className="text-gray-500 hover:text-gray-700 text-2xl"
+                onClick={() => {
+                  setIsNewExaminationModalOpen(false);
+                  setNewExaminationForm({
+                    patient_id: '',
+                    chief_complaint: '',
+                    assessment_diagnosis: '',
+                    history_of_present_illness: '',
+                    triage_temperature: '',
+                    triage_blood_pressure: '',
+                    triage_pulse_rate: '',
+                    triage_respiratory_rate: '',
+                    triage_oxygen_saturation: '',
+                    triage_weight: '',
+                    triage_height: '',
+                    plan_treatment: '',
+                    medications_prescribed: '',
+                    follow_up_date: '',
+                    referrals: '',
+                  });
+                }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              {/* Left Column: Consultation History */}
+              <div className="lg:col-span-1">
+                {newExaminationForm.patient_id && (
+                  <PatientConsultationHistory
+                    examinations={patientExaminations || []}
+                    isLoading={loadingPatientExaminations}
+                  />
+                )}
+                {!newExaminationForm.patient_id && (
+                  <div className="p-4 bg-gray-100 rounded-lg text-sm text-gray-600 text-center">
+                    Select a patient to view consultation history
+                  </div>
+                )}
+              </div>
+
+              {/* Right Column: Examination Form */}
+              <div className="lg:col-span-2 space-y-4 max-h-96 overflow-y-auto">
+              <div>
+                <label className="block text-sm font-medium mb-1">Patient *</label>
+                <select
+                  className="w-full border rounded px-3 py-2"
+                  value={newExaminationForm.patient_id}
+                  onChange={(e) => setNewExaminationForm({ ...newExaminationForm, patient_id: e.target.value })}
+                  required
+                >
+                  <option value="">Select a patient</option>
+                  {activePatients?.map((patient) => (
+                    <option key={patient.id} value={patient.id}>
+                      {patient.first_name} {patient.last_name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-1">Chief Complaint *</label>
+                <textarea
+                  className="w-full border rounded px-3 py-2"
+                  value={newExaminationForm.chief_complaint}
+                  onChange={(e) => setNewExaminationForm({ ...newExaminationForm, chief_complaint: e.target.value })}
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-1">Assessment/Diagnosis</label>
+                <textarea
+                  className="w-full border rounded px-3 py-2"
+                  value={newExaminationForm.assessment_diagnosis}
+                  onChange={(e) => setNewExaminationForm({ ...newExaminationForm, assessment_diagnosis: e.target.value })}
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-1">History of Present Illness</label>
+                <textarea
+                  className="w-full border rounded px-3 py-2"
+                  value={newExaminationForm.history_of_present_illness}
+                  onChange={(e) => setNewExaminationForm({ ...newExaminationForm, history_of_present_illness: e.target.value })}
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium mb-1">Blood Pressure</label>
+                  <input
+                    type="text"
+                    className="w-full border rounded px-3 py-2"
+                    value={newExaminationForm.triage_blood_pressure}
+                    onChange={(e) => setNewExaminationForm({ ...newExaminationForm, triage_blood_pressure: e.target.value })}
+                    placeholder="e.g., 120/80"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Temperature (°C)</label>
+                  <input
+                    type="number"
+                    className="w-full border rounded px-3 py-2"
+                    value={newExaminationForm.triage_temperature}
+                    onChange={(e) => setNewExaminationForm({ ...newExaminationForm, triage_temperature: e.target.value })}
+                    step="0.1"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium mb-1">Pulse Rate (bpm)</label>
+                  <input
+                    type="number"
+                    className="w-full border rounded px-3 py-2"
+                    value={newExaminationForm.triage_pulse_rate}
+                    onChange={(e) => setNewExaminationForm({ ...newExaminationForm, triage_pulse_rate: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Respiratory Rate (breaths/min)</label>
+                  <input
+                    type="number"
+                    className="w-full border rounded px-3 py-2"
+                    value={newExaminationForm.triage_respiratory_rate}
+                    onChange={(e) => setNewExaminationForm({ ...newExaminationForm, triage_respiratory_rate: e.target.value })}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-1">O₂ Saturation (%)</label>
+                <input
+                  type="number"
+                  className="w-full border rounded px-3 py-2"
+                  value={newExaminationForm.triage_oxygen_saturation}
+                  onChange={(e) => setNewExaminationForm({ ...newExaminationForm, triage_oxygen_saturation: e.target.value })}
+                  min="0"
+                  max="100"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium mb-1">Weight (kg)</label>
+                  <input
+                    type="number"
+                    className="w-full border rounded px-3 py-2"
+                    value={newExaminationForm.triage_weight}
+                    onChange={(e) => setNewExaminationForm({ ...newExaminationForm, triage_weight: e.target.value })}
+                    step="0.1"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Height (cm)</label>
+                  <input
+                    type="number"
+                    className="w-full border rounded px-3 py-2"
+                    value={newExaminationForm.triage_height}
+                    onChange={(e) => setNewExaminationForm({ ...newExaminationForm, triage_height: e.target.value })}
+                    step="0.1"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-1">Treatment Plan</label>
+                <textarea
+                  className="w-full border rounded px-3 py-2"
+                  value={newExaminationForm.plan_treatment}
+                  onChange={(e) => setNewExaminationForm({ ...newExaminationForm, plan_treatment: e.target.value })}
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-1">Medications Prescribed</label>
+                <textarea
+                  className="w-full border rounded px-3 py-2"
+                  value={newExaminationForm.medications_prescribed}
+                  onChange={(e) => setNewExaminationForm({ ...newExaminationForm, medications_prescribed: e.target.value })}
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-1">Follow-up Date</label>
+                <input
+                  type="date"
+                  className="w-full border rounded px-3 py-2"
+                  value={newExaminationForm.follow_up_date}
+                  onChange={(e) => setNewExaminationForm({ ...newExaminationForm, follow_up_date: e.target.value })}
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-1">Referrals</label>
+                <textarea
+                  className="w-full border rounded px-3 py-2"
+                  value={newExaminationForm.referrals}
+                  onChange={(e) => setNewExaminationForm({ ...newExaminationForm, referrals: e.target.value })}
+                />
+              </div>
+            </div>
+            </div>
+
+            <div className="flex gap-2 justify-end mt-6">
+              <button
+                className="px-4 py-2 bg-gray-300 text-gray-700 rounded hover:bg-gray-400"
+                onClick={() => {
+                  setIsNewExaminationModalOpen(false);
+                  setNewExaminationForm({
+                    patient_id: '',
+                    chief_complaint: '',
+                    assessment_diagnosis: '',
+                    history_of_present_illness: '',
+                    triage_temperature: '',
+                    triage_blood_pressure: '',
+                    triage_pulse_rate: '',
+                    triage_respiratory_rate: '',
+                    triage_oxygen_saturation: '',
+                    triage_weight: '',
+                    triage_height: '',
+                    plan_treatment: '',
+                    medications_prescribed: '',
+                    follow_up_date: '',
+                    referrals: '',
+                  });
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                className="px-4 py-2 bg-pink-500 hover:bg-pink-600 text-white rounded"
+                onClick={() => {
+                  if (!newExaminationForm.patient_id || !newExaminationForm.chief_complaint) {
+                    toast.error('Please fill in required fields (Patient and Chief Complaint)');
+                    return;
+                  }
+                  createExaminationMutation.mutate(newExaminationForm);
+                }}
+                disabled={createExaminationMutation.isPending}
+              >
+                {createExaminationMutation.isPending ? 'Creating...' : 'Create Examination'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

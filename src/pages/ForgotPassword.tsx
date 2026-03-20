@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
-import { getAuthRedirectUrl } from '@/utils/authRedirectUrl';
+import { getProductionAuthRedirectUrl } from '@/utils/authRedirectUrl';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -21,8 +21,9 @@ const ForgotPassword = () => {
     setIsLoading(true);
 
     try {
+      // Always send email links to production domain so they work on all devices
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: getAuthRedirectUrl('/reset-password'),
+        redirectTo: getProductionAuthRedirectUrl('/reset-password'),
       });
 
       if (error) {

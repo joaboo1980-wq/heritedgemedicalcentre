@@ -54,7 +54,6 @@ export const useScheduledDoses = (filters?: {
             frequency,
             medications!medication_id (
               name,
-              description,
               contraindications
             )
           ),
@@ -112,8 +111,7 @@ export const useDueMedications = (patientId?: string) => {
             dosage,
             frequency,
             medications!medication_id (
-              name,
-              description
+              name
             )
           ),
           prescriptions!prescription_id (
@@ -210,16 +208,12 @@ export const useMedicationAuditLog = (filters?: {
             medication_id,
             dosage,
             medications!medication_id (
-              name,
-              description
+              name
             )
           ),
           patients!patient_id (
             first_name,
             last_name
-          ),
-          auth.users!administered_by_id (
-            email
           )
         `
         );

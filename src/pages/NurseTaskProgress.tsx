@@ -384,7 +384,7 @@ const NurseTaskProgress = () => {
                           ? format(parseISO(task.completed_at), 'MMM dd, yyyy h:mm a')
                           : format(parseISO(task.created_at), 'MMM dd, yyyy')}
                       </td>
-                      <td className="px-4 py-3 text-sm text-gray-600 max-w-xs truncate">
+                      <td className="px-4 py-3 text-sm text-gray-600 word-wrap min-w-0">
                         {task.completed_notes || '-'}
                       </td>
                     </tr>

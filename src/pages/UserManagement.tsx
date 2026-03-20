@@ -1,7 +1,7 @@
 import { useState, useContext } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
-import { getAuthRedirectUrl } from '@/utils/authRedirectUrl';
+import { getProductionAuthRedirectUrl } from '@/utils/authRedirectUrl';
 import { generateStrongPassword } from '@/utils/passwordGenerator';
 import { useAuth } from '@/hooks/useAuth';
 import { AuthContext } from '@/contexts/AuthContext';
@@ -190,10 +190,9 @@ const UserManagement = () => {
             }
 
             // Send password reset email so user can set their own password
-            // The temporary password is only for initial account setup if needed
-            // The reset link allows them to set their preferred password
+            // Always send to production domain so email links work on all devices
             const { error: resetError } = await supabase.auth.resetPasswordForEmail(userData.email.trim().toLowerCase(), {
-              redirectTo: getAuthRedirectUrl('/reset-password'),
+              redirectTo: getProductionAuthRedirectUrl('/reset-password'),
             });
 
             if (resetError) {

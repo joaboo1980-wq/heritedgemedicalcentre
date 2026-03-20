@@ -5,13 +5,24 @@
 export const getAuthRedirectUrl = (path: string = '/reset-password'): string => {
   // Use window.location.origin to get the current domain
   // In development: http://localhost:8080
-  // In production (Vercel): https://your-app.vercel.app
+  // In production (Vercel): https://heritedgemedicalcentre.vercel.app
   const origin = window.location.origin;
   
   // Ensure path starts with /
   const normalizedPath = path.startsWith('/') ? path : `/${path}`;
   
   return `${origin}${normalizedPath}`;
+};
+
+/**
+ * Gets the production redirect URL for email links
+ * Always returns the Vercel production domain for password reset emails
+ * This ensures emails work on all devices (phone, tablet, etc.)
+ */
+export const getProductionAuthRedirectUrl = (path: string = '/reset-password'): string => {
+  const productionDomain = 'https://heritedgemedicalcentre.vercel.app';
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  return `${productionDomain}${normalizedPath}`;
 };
 
 /**

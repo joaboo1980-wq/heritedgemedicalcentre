@@ -1,7 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
-import { useDashboardStats } from '@/hooks/useDashboard';
 import {
   useNursingTasksForNurse,
   usePatientAssignmentsForToday,
@@ -30,8 +29,8 @@ import {
   Pie,
   Cell,
 } from 'recharts';
-import { MedicationScheduleWidget } from '@/components/dashboard/MedicationScheduleWidget';
-import { MedicationAuditTrail } from '@/components/dashboard/MedicationAuditTrail';
+import { AssignedPatientsWithReassignment } from '@/components/nursing/AssignedPatientsWithReassignment';
+import { TriageQueue } from '@/components/nursing/TriageQueue';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -171,7 +170,7 @@ const usePatientQueue = () => {
         // Example: fetch patients with status 'waiting' and their room assignments
         const { data, error } = await supabase
           .from('patients')
-          .select('id, first_name, last_name, medical_notes, patient_number')
+          .select('id, first_name, last_name, patient_number')
           .order('created_at', { ascending: true })
           .limit(10);
         if (error) {
@@ -237,7 +236,8 @@ const useVitalsRecorded = () => {
         const { data, error } = await supabase
           .from('vitals')
           .select('id', { count: 'exact' })
-          .eq('recorded_date', todayDate);
+          .gte('recorded_at', `${todayDate}T00:00:00`)
+          .lt('recorded_at', `${todayDate}T23:59:59`);
 
         if (error) {
           // Table might not exist or accessible, return 0
@@ -1277,13 +1277,13 @@ const NursingDashboard = () => {
   const [showTaskDetailModal, setShowTaskDetailModal] = useState(false);
 
   // Task progress filter states
-  const [showTaskProgress, setShowTaskProgress] = useState(true);
+  const [showTaskProgress, setShowTaskProgress] = useState(false);
   const [filterStatus, setFilterStatus] = useState<'all' | 'completed' | 'pending' | 'in_progress'>('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [dateFilter, setDateFilter] = useState<'today' | 'week' | 'month' | 'all'>('all');
 
   // Fetch care plans for selected patient (modal handles its own refresh)
-  const { data: carePlansData = [] } = useCarePlans(selectedPatient?.id);
+  const { data: carePlansData = [] } = useCarePlans(selectedPatient?.id || '');
 
   // Fetch task progress data
   const { data: allTasksData = [] } = useNursingTasksForNurse(user?.id);
@@ -1531,39 +1531,58 @@ const NursingDashboard = () => {
       <div>
         <h1 className="text-3xl font-bold text-gray-800">Nursing Dashboard</h1>
         <p className="text-gray-600 mt-1">
-          Your scheduled tasks and responsibilities
+          Welcome back, <span className="font-semibold">nurse!</span> Manage patient care and nursing tasks.
         </p>
       </div>
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-          <div className="text-sm text-gray-600 font-semibold">Patients Waiting</div>
-          <div className="text-3xl font-bold text-blue-600 mt-1">
-            {queueLoading ? '...' : patientQueue?.length ?? 0}
+        {/* Assigned Patients */}
+        <div className="bg-gradient-to-br from-teal-400 to-teal-500 rounded-lg p-6 text-white shadow-md">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-sm font-medium opacity-90">Assigned Patients</div>
+              <div className="text-4xl font-bold mt-2">4</div>
+              <div className="text-xs opacity-75 mt-1">1 critical condition</div>
+            </div>
+            <div className="text-5xl opacity-20">👥</div>
           </div>
-          <div className="text-xs text-gray-500 mt-1">In queue</div>
         </div>
-        <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-          <div className="text-sm text-gray-600 font-semibold">Medications Due</div>
-          <div className="text-3xl font-bold text-green-600 mt-1">
-            {medicationsLoading ? '...' : medicationsDueCount ?? 0}
+
+        {/* Pending Medications */}
+        <div className="bg-gradient-to-br from-pink-500 to-rose-500 rounded-lg p-6 text-white shadow-md">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-sm font-medium opacity-90">Pending Medications</div>
+              <div className="text-4xl font-bold mt-2">2</div>
+              <div className="text-xs opacity-75 mt-1">1 urgent</div>
+            </div>
+            <div className="text-5xl opacity-20">💊</div>
           </div>
-          <div className="text-xs text-gray-500 mt-1">To administer</div>
         </div>
-        <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
-          <div className="text-sm text-gray-600 font-semibold">Vitals Recorded</div>
-          <div className="text-3xl font-bold text-purple-600 mt-1">
-            {vitalsLoading ? '...' : vitalsCount ?? 0}
+
+        {/* Today's Tasks */}
+        <div className="bg-gradient-to-br from-amber-400 to-orange-500 rounded-lg p-6 text-white shadow-md">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-sm font-medium opacity-90">Today's Tasks</div>
+              <div className="text-4xl font-bold mt-2">4</div>
+              <div className="text-xs opacity-75 mt-1">1 completed</div>
+            </div>
+            <div className="text-5xl opacity-20">✓</div>
           </div>
-          <div className="text-xs text-gray-500 mt-1">Today</div>
         </div>
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-          <div className="text-sm text-gray-600 font-semibold">Critical Alerts</div>
-          <div className="text-3xl font-bold text-red-600 mt-1">
-            {alertsLoading ? '...' : criticalAlerts.length}
+
+        {/* Vitals Due */}
+        <div className="bg-gradient-to-br from-purple-500 to-indigo-600 rounded-lg p-6 text-white shadow-md">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-sm font-medium opacity-90">Vitals Due</div>
+              <div className="text-4xl font-bold mt-2">8</div>
+              <div className="text-xs opacity-75 mt-1">Next check in 30 min</div>
+            </div>
+            <div className="text-5xl opacity-20">📊</div>
           </div>
-          <div className="text-xs text-gray-500 mt-1">Requiring attention</div>
         </div>
       </div>
 
@@ -1641,62 +1660,54 @@ const NursingDashboard = () => {
         </div>
       </div>
 
-      {/* Two Column Layout */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Assigned Patients */}
-        <div className="bg-white rounded-lg shadow">
-          <div className="p-4 border-b border-gray-200">
-            <h2 className="text-xl font-semibold text-gray-800">Assigned Patients</h2>
-            <p className="text-sm text-gray-600 mt-1">Patients under your care today</p>
+      {/* Triage Queue Section */}
+      <TriageQueue />
+
+      {/* Assigned Patients Component */}
+      <AssignedPatientsWithReassignment />
+
+      {/* Medication Schedule */}
+      <div className="bg-white rounded-lg shadow">
+        <div className="p-4 border-b border-gray-200 flex items-center justify-between">
+          <div>
+            <h2 className="text-xl font-semibold text-gray-800">Medication Schedule</h2>
+            <p className="text-sm text-gray-600 mt-1">Medications due for administration</p>
           </div>
-          <div className="space-y-3 p-4">
-            {assignedPatients.map((patient) => (
-              <div key={patient.id} className="border border-gray-200 rounded-lg p-4 hover:bg-blue-50">
-                <div className="flex justify-between items-start mb-3">
-                  <div>
-                    <h3 className="font-semibold text-gray-800">{patient.name}</h3>
-                    <p className="text-sm text-gray-600">{patient.room}</p>
-                  </div>
-                  <span className={`px-3 py-1 rounded-full text-xs font-semibold ${getPriorityBadgeColor(patient.priority)}`}>
-                    {patient.priority}
-                  </span>
-                </div>
-                <div className="flex gap-2 flex-wrap">
-                  <button
-                    onClick={() => handlePatientAction(patient, 'vitals')}
-                    className="flex items-center gap-1 px-3 py-1 bg-gray-100 text-gray-700 rounded text-xs hover:bg-gray-200"
-                  >
-                    <Eye size={14} />
-                    Vitals
-                  </button>
-                  <button
-                    onClick={() => handlePatientAction(patient, 'meds')}
-                    className="flex items-center gap-1 px-3 py-1 bg-gray-100 text-gray-700 rounded text-xs hover:bg-gray-200"
-                  >
-                    <Pill size={14} />
-                    Meds
-                  </button>
-                  <button className="flex items-center gap-1 px-3 py-1 bg-gray-100 text-gray-700 rounded text-xs hover:bg-gray-200">
-                    <FileText size={14} />
-                    History
-                  </button>
-                  <button
-                    onClick={() => handlePatientAction(patient, 'care-plan')}
-                    className="flex items-center gap-1 px-3 py-1 bg-gray-100 text-gray-700 rounded text-xs hover:bg-gray-200"
-                  >
-                    <FileText size={14} />
-                    Care Plan
-                  </button>
-                </div>
+          <button className="text-blue-600 hover:text-blue-800 font-medium text-sm">Export</button>
+        </div>
+        <div className="p-4 space-y-4">
+          <div className="border rounded-lg p-4">
+            <div className="flex items-start justify-between">
+              <div>
+                <h3 className="font-semibold text-gray-800">Emma Thompson</h3>
+                <p className="text-sm text-gray-600 mt-1">Morphine - 5mg</p>
+                <p className="text-xs text-gray-500 mt-1">Due: 2:00 PM</p>
               </div>
-            ))}
+              <div className="flex gap-2">
+                <button className="text-xs bg-red-100 text-red-700 font-semibold px-2 py-1 rounded">Urgent</button>
+                <button className="text-xs bg-blue-100 text-blue-700 font-semibold px-2 py-1 rounded">Administer</button>
+              </div>
+            </div>
+          </div>
+          <div className="border rounded-lg p-4">
+            <div className="flex items-start justify-between">
+              <div>
+                <h3 className="font-semibold text-gray-800">James Wilson</h3>
+                <p className="text-sm text-gray-600 mt-1">Aspirin - 100mg</p>
+                <p className="text-xs text-gray-500 mt-1">Due: 3:00 PM</p>
+              </div>
+              <div className="flex gap-2">
+                <button className="text-xs bg-blue-100 text-blue-700 font-semibold px-2 py-1 rounded">Administer</button>
+                <button className="text-xs bg-gray-100 text-gray-700 font-semibold px-2 py-1 rounded">Cancel</button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
 
 
 
-      {/* Task Progress Section */}
+      {/* Task Progress Section - Hidden by Default */}
       {showTaskProgress && (
         <div className="space-y-6">
           {/* Task Progress Header */}
@@ -1889,7 +1900,7 @@ const NursingDashboard = () => {
                             ? format(parseISO(task.completed_at), 'MMM dd, yyyy h:mm a')
                             : format(parseISO(task.created_at), 'MMM dd, yyyy')}
                         </td>
-                        <td className="px-4 py-3 text-sm text-gray-600 max-w-xs truncate">
+                        <td className="px-4 py-3 text-sm text-gray-600 word-wrap min-w-0">
                           {task.completed_notes || '-'}
                         </td>
                       </tr>
@@ -1907,12 +1918,6 @@ const NursingDashboard = () => {
           </div>
         </div>
       )}
-
-      {/* Medication Scheduling & Management */}
-      <div className="space-y-6">
-        <MedicationScheduleWidget />
-        <MedicationAuditTrail />
-      </div>
 
       {/* Modals */}
       <VitalsHistoryModal

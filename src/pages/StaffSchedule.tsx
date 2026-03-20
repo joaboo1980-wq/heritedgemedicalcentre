@@ -470,7 +470,7 @@ const StaffSchedule = () => {
                             '-'
                           )}
                         </TableCell>
-                        <TableCell className="max-w-xs truncate text-sm text-muted-foreground">
+                        <TableCell className="word-wrap min-w-0 text-sm text-muted-foreground">
                           {roster.notes || '-'}
                         </TableCell>
                       </TableRow>

@@ -1,9 +1,10 @@
-import { useState, useContext } from 'react';
+import { useState, useContext, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { AuthContext } from '@/contexts/AuthContext';
 import { withSessionValidation } from '@/utils/sessionValidationAPI';
 import { useAuth } from '@/hooks/useAuth';
+import { usePatientLatestVitals } from '@/hooks/useNurseTriageAssignment';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -136,6 +137,29 @@ const DoctorExamination = () => {
     follow_up_date: '',
     referrals: '',
   });
+
+  // Fetch latest vitals for the selected patient
+  const { data: latestVitals } = usePatientLatestVitals(selectedPatientId || undefined);
+
+  // Auto-fill vitals when patient is selected or vitals are fetched
+  useEffect(() => {
+    if (selectedPatientId && latestVitals) {
+      const bloodPressure = latestVitals.blood_pressure_systolic && latestVitals.blood_pressure_diastolic
+        ? `${latestVitals.blood_pressure_systolic}/${latestVitals.blood_pressure_diastolic}`
+        : '';
+
+      setNewExamination((prev) => ({
+        ...prev,
+        triage_temperature: latestVitals.temperature ? String(latestVitals.temperature) : prev.triage_temperature,
+        triage_blood_pressure: bloodPressure || prev.triage_blood_pressure,
+        triage_pulse_rate: latestVitals.heart_rate ? String(latestVitals.heart_rate) : prev.triage_pulse_rate,
+        triage_respiratory_rate: latestVitals.respiratory_rate ? String(latestVitals.respiratory_rate) : prev.triage_respiratory_rate,
+        triage_oxygen_saturation: latestVitals.oxygen_saturation ? String(latestVitals.oxygen_saturation) : prev.triage_oxygen_saturation,
+        triage_weight: latestVitals.weight ? String(latestVitals.weight) : prev.triage_weight,
+        triage_height: latestVitals.height ? String(latestVitals.height) : prev.triage_height,
+      }));
+    }
+  }, [selectedPatientId, latestVitals]);
 
   // Fetch patients for selection
   const { data: patients } = useQuery({
@@ -401,7 +425,7 @@ const DoctorExamination = () => {
                     <TableCell>
                       {exam.triage_blood_pressure || '-'}
                     </TableCell>
-                    <TableCell className="max-w-xs truncate">{exam.assessment_diagnosis}</TableCell>
+                    <TableCell className="word-wrap min-w-0">{exam.assessment_diagnosis}</TableCell>
                     <TableCell>
                       <Button
                         variant="ghost"

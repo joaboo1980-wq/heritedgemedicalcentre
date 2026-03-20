@@ -29,6 +29,45 @@ const twilioAccountSid = Deno.env.get("TWILIO_ACCOUNT_SID");
 const twilioAuthToken = Deno.env.get("TWILIO_AUTH_TOKEN");
 const twilioPhoneNumber = Deno.env.get("TWILIO_PHONE_NUMBER");
 
+console.log('[STARTUP] Twilio Config Check:');
+console.log('[STARTUP] TWILIO_ACCOUNT_SID exists:', !!twilioAccountSid);
+console.log('[STARTUP] TWILIO_AUTH_TOKEN exists:', !!twilioAuthToken);
+console.log('[STARTUP] TWILIO_PHONE_NUMBER exists:', !!twilioPhoneNumber);
+console.log('[STARTUP] TWILIO_PHONE_NUMBER value:', twilioPhoneNumber);
+
+/**
+ * Convert phone number to E.164 format (required by Twilio)
+ * Handles local formats like 0777705668 → +256777705668
+ */
+function formatPhoneNumberE164(phone: string): string {
+  // Remove any whitespace or special characters except digits and +
+  let cleaned = phone.replace(/[^\d+]/g, '');
+  
+  // If already starts with +, return as is
+  if (cleaned.startsWith('+')) {
+    return cleaned;
+  }
+  
+  // If starts with 0 (local format), replace with country code
+  if (cleaned.startsWith('0')) {
+    // Uganda country code is +256
+    // Replace leading 0 with +256
+    return '+256' + cleaned.substring(1);
+  }
+  
+  // If just digits without country code, assume Uganda
+  if (!/^\d+$/.test(cleaned)) {
+    return '+256' + cleaned;
+  }
+  
+  // Fallback: prepend +256 if no country code detected
+  if (!cleaned.startsWith('+') && !cleaned.startsWith('256')) {
+    return '+256' + cleaned;
+  }
+  
+  return cleaned;
+}
+
 /**
  * Generate message content based on message type
  */
@@ -56,20 +95,29 @@ async function sendViaTwilio(
   toPhone: string,
   messageContent: string
 ): Promise<{ sid?: string; error?: string }> {
+  console.log('[Twilio] Starting sendViaTwilio with phone:', toPhone);
+  
   if (!twilioAccountSid || !twilioAuthToken || !twilioPhoneNumber) {
-    return {
-      error: "Twilio credentials not configured in environment variables",
-    };
+    const error = `Twilio credentials not configured: SID=${!!twilioAccountSid}, Token=${!!twilioAuthToken}, Phone=${!!twilioPhoneNumber}`;
+    console.error('[Twilio] ' + error);
+    return { error };
   }
+
+  console.log('[Twilio] Using Twilio Account:', twilioAccountSid?.substring(0, 5) + '...');
+  console.log('[Twilio] Using Twilio Phone:', twilioPhoneNumber);
 
   const auth = btoa(`${twilioAccountSid}:${twilioAuthToken}`);
   const url = `https://api.twilio.com/2010-04-01/Accounts/${twilioAccountSid}/Messages.json`;
+
+  console.log('[Twilio] URL:', url);
 
   try {
     const formData = new URLSearchParams();
     formData.append("From", twilioPhoneNumber);
     formData.append("To", toPhone);
     formData.append("Body", messageContent);
+
+    console.log('[Twilio] Sending request to Twilio API');
 
     const response = await fetch(url, {
       method: "POST",
@@ -80,14 +128,19 @@ async function sendViaTwilio(
       body: formData,
     });
 
+    console.log('[Twilio] Response status:', response.status);
+
     if (!response.ok) {
       const errorText = await response.text();
+      console.error('[Twilio] Error response body:', errorText);
       return { error: `Twilio API error: ${response.status} - ${errorText}` };
     }
 
     const data = (await response.json()) as TwilioResponse;
+    console.log('[Twilio] Success! Message SID:', data.sid);
     return { sid: data.sid };
   } catch (error) {
+    console.error('[Twilio] Exception:', error);
     return { error: `Failed to send SMS: ${String(error)}` };
   }
 }
@@ -134,8 +187,9 @@ Deno.serve(async (req: Request) => {
     return new Response("ok", {
       headers: {
         "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "POST",
-        "Access-Control-Allow-Headers": "Content-Type",
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization, x-client-info, apikey",
+        "Access-Control-Max-Age": "86400",
       },
     });
   }
@@ -144,20 +198,36 @@ Deno.serve(async (req: Request) => {
     if (req.method !== "POST") {
       return new Response(JSON.stringify({ error: "Method not allowed" }), {
         status: 405,
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Methods": "POST, OPTIONS",
+          "Access-Control-Allow-Headers": "Content-Type, Authorization, x-client-info, apikey",
+        },
       });
     }
 
+    console.log("[Main] Parsing request body...");
     const body: SendReminderRequest = await req.json();
+    console.log("[Main] Request body parsed successfully:", { hasPhone: !!body.phone, hasAppointmentId: !!body.appointmentId });
+    
+    // Format phone number to E.164 format
+    const formattedPhone = formatPhoneNumberE164(body.phone);
+    console.log("[Main] Phone formatting:", { original: body.phone, formatted: formattedPhone });
 
-    if (!body.phone || !body.appointmentId) {
+    if (!formattedPhone || !body.appointmentId) {
       return new Response(
         JSON.stringify({
           error: "Missing required fields: phone, appointmentId",
         }),
         {
           status: 400,
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization, x-client-info, apikey",
+          },
         }
       );
     }
@@ -168,10 +238,13 @@ Deno.serve(async (req: Request) => {
       body.appointmentDetails || {}
     );
 
-    console.log(`Sending ${messageType} SMS to ${body.phone}`);
+    console.log(`[Handler] Sending ${messageType} SMS to ${formattedPhone}`);
+    console.log(`[Handler] Message content preview: ${messageContent.substring(0, 50)}...`);
 
     // Send SMS via Twilio
-    const twilioResult = await sendViaTwilio(body.phone, messageContent);
+    console.log('[Handler] Calling sendViaTwilio...');
+    const twilioResult = await sendViaTwilio(formattedPhone, messageContent);
+    console.log('[Handler] Twilio result:', { hasSid: !!twilioResult.sid, hasError: !!twilioResult.error });
 
     // Get patient ID for logging
     let patientId = "";
@@ -192,7 +265,7 @@ Deno.serve(async (req: Request) => {
     await logSmsAttempt(
       body.appointmentId,
       patientId,
-      body.phone,
+      formattedPhone,
       messageType,
       messageContent,
       twilioResult.sid,
@@ -209,7 +282,12 @@ Deno.serve(async (req: Request) => {
         }),
         {
           status: 500,
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization, x-client-info, apikey",
+          },
         }
       );
     }
@@ -225,19 +303,42 @@ Deno.serve(async (req: Request) => {
         headers: {
           "Content-Type": "application/json",
           "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Methods": "POST, OPTIONS",
+          "Access-Control-Allow-Headers": "Content-Type, Authorization, x-client-info, apikey",
         },
       }
     );
   } catch (error) {
-    console.error("Error in send-appointment-reminder function:", error);
+    console.error("[Catch] Error in send-appointment-reminder function:", error);
+    console.error("[Catch] Error type:", typeof error);
+    console.error("[Catch] Error string:", String(error));
+    if (error instanceof Error) {
+      console.error("[Catch] Error message:", error.message);
+      console.error("[Catch] Error stack:", error.stack);
+    }
+    
+    const errorDetails = error instanceof Error ? {
+      message: error.message,
+      stack: error.stack,
+      name: error.name,
+    } : {
+      message: String(error),
+      type: typeof error,
+    };
+    
     return new Response(
       JSON.stringify({
         error: "Internal server error",
-        details: String(error),
+        details: errorDetails,
       }),
       {
         status: 500,
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Methods": "POST, OPTIONS",
+          "Access-Control-Allow-Headers": "Content-Type, Authorization, x-client-info, apikey",
+        },
       }
     );
   }

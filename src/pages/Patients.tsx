@@ -50,6 +50,7 @@ import { toast } from 'sonner';
 import { Plus, Search, Eye, Edit, Users, MoreHorizontal, Calendar, History, Trash2 } from 'lucide-react';
 import { format } from 'date-fns';
 import PermissionGuard from '@/components/layout/PermissionGuard';
+import { AssignPatientModal } from '@/components/nursing/AssignPatientModal';
 
 interface Patient {
   id: string;
@@ -92,6 +93,8 @@ const Patients = () => {
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isMedicalHistoryDialogOpen, setIsMedicalHistoryDialogOpen] = useState(false);
   const [isScheduleAppointmentDialogOpen, setIsScheduleAppointmentDialogOpen] = useState(false);
+  const [isAssignNurseDialogOpen, setIsAssignNurseDialogOpen] = useState(false);
+  const [newlyCreatedPatientId, setNewlyCreatedPatientId] = useState<string | null>(null);
   const [medicalExaminations, setMedicalExaminations] = useState<MedicalExamination[]>([]);
   const [appointmentForm, setAppointmentForm] = useState({
     doctor_id: '',
@@ -330,6 +333,13 @@ const Patients = () => {
         insurance_provider: '',
         insurance_number: '',
       });
+      
+      // Store the newly created patient ID and show assignment dialog
+      if (data?.id) {
+        setNewlyCreatedPatientId(data.id);
+        setIsAssignNurseDialogOpen(true);
+      }
+      
       toast.success('Patient registered successfully');
     },
     onError: (error: Error) => {
@@ -1363,6 +1373,19 @@ const Patients = () => {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Assign Patient to Nurse Dialog */}
+      <AssignPatientModal
+        isOpen={isAssignNurseDialogOpen}
+        onClose={() => {
+          setIsAssignNurseDialogOpen(false);
+          setNewlyCreatedPatientId(null);
+        }}
+        patientId={newlyCreatedPatientId || undefined}
+        onSuccess={() => {
+          toast.success('Patient assigned to nurse successfully');
+        }}
+      />
     </div>
   );
 };

@@ -33,6 +33,7 @@ const MODULES: { value: ModuleName; label: string; description: string }[] = [
   { value: 'staff', label: 'Staff', description: 'Staff directory' },
   { value: 'staff_schedule', label: 'Staff Schedule', description: 'Work schedules and assignments' },
   { value: 'user_management', label: 'User Management', description: 'User accounts and roles' },
+  { value: 'doctor_examination', label: 'Doctor Examination', description: 'Medical examinations and consultations' },
 ];
 
 const RolePermissionsManager = () => {

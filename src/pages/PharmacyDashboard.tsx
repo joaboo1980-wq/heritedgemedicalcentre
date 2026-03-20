@@ -711,7 +711,7 @@ const PharmacyDashboard = () => {
                                 <Badge variant="outline">{record.prescription_number}</Badge>
                               </TableCell>
                               <TableCell className="font-medium">{record.patient_name}</TableCell>
-                              <TableCell className="max-w-xs">{record.medication}</TableCell>
+                              <TableCell className="word-wrap min-w-0">{record.medication}</TableCell>
                               <TableCell>{record.quantity}</TableCell>
                               <TableCell>{record.doctor}</TableCell>
                               <TableCell className="text-sm">{record.dispensed_date}</TableCell>

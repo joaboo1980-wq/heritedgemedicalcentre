@@ -132,28 +132,28 @@ CREATE POLICY "nurses_view_own_assignments" ON public.patient_assignments
     )
   );
 
--- Allow charge nurses and doctors to create assignments
+-- Allow charge nurses, doctors, and receptionists to create assignments
 DROP POLICY IF EXISTS "charge_nurses_create_assignments" ON public.patient_assignments;
 CREATE POLICY "charge_nurses_create_assignments" ON public.patient_assignments
   FOR INSERT WITH CHECK (
     EXISTS (
       SELECT 1 FROM public.user_roles ur
-      WHERE ur.user_id = auth.uid() AND ur.role IN ('admin', 'doctor')
+      WHERE ur.user_id = auth.uid() AND ur.role IN ('admin', 'doctor', 'receptionist')
     )
   );
 
--- Allow charge nurses and doctors to update assignments
+-- Allow charge nurses, doctors, and receptionists to update assignments
 DROP POLICY IF EXISTS "charge_nurses_update_assignments" ON public.patient_assignments;
 CREATE POLICY "charge_nurses_update_assignments" ON public.patient_assignments
   FOR UPDATE USING (
     EXISTS (
       SELECT 1 FROM public.user_roles ur
-      WHERE ur.user_id = auth.uid() AND ur.role IN ('admin', 'doctor')
+      WHERE ur.user_id = auth.uid() AND ur.role IN ('admin', 'doctor', 'receptionist')
     )
   ) WITH CHECK (
     EXISTS (
       SELECT 1 FROM public.user_roles ur
-      WHERE ur.user_id = auth.uid() AND ur.role IN ('admin', 'doctor')
+      WHERE ur.user_id = auth.uid() AND ur.role IN ('admin', 'doctor', 'receptionist')
     )
   );
 

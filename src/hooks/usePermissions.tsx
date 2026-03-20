@@ -13,7 +13,8 @@ export type ModuleName =
   | 'generate_reports'
   | 'accounts'
   | 'staff' 
-  | 'user_management';
+  | 'user_management'
+  | 'doctor_examination';
 
 export interface RolePermission {
   id: string;
@@ -57,6 +58,7 @@ export const usePermissions = () => {
           { role: 'admin', module: 'accounts', can_view: true, can_create: true, can_edit: true, can_delete: true },
           { role: 'admin', module: 'staff', can_view: true, can_create: true, can_edit: true, can_delete: true },
           { role: 'admin', module: 'user_management', can_view: true, can_create: true, can_edit: true, can_delete: true },
+          { role: 'admin', module: 'doctor_examination', can_view: true, can_create: true, can_edit: true, can_delete: true },
         ] as RolePermission[];
       }
       

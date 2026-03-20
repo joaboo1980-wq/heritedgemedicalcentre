@@ -426,41 +426,96 @@ const Appointments = () => {
   const sendSmsReminderMutation = useMutation({
     mutationFn: async ({ appointmentId, patientId }: { appointmentId: string; patientId: string }) => {
       try {
-        console.log('Sending SMS reminder for appointment:', appointmentId, 'patient:', patientId);
+        console.log('[SMS] 1. Starting SMS reminder mutation for appointment:', appointmentId, 'patient:', patientId);
+        
         // Get patient phone number
+        console.log('[SMS] 2. Fetching patient phone number...');
         const { data: patientData, error: patientError } = await supabase
           .from('patients')
           .select('phone')
           .eq('id', patientId)
           .single();
+        
+        console.log('[SMS] 3. Patient fetch response:', { patientData, patientError });
+        
         if (patientError) {
-          console.error('Error fetching patient phone:', patientError);
+          console.error('[SMS] 4. Error fetching patient phone:', patientError);
           throw patientError;
         }
+        
         if (!patientData?.phone) {
-          console.error('Patient phone number not found for', patientId);
+          console.error('[SMS] 5. Patient phone number not found for', patientId);
           throw new Error('Patient phone number not found');
         }
+        
+        console.log('[SMS] 6. Patient phone:', patientData.phone);
+        
         // Call Edge Function to send SMS
-        const { error } = await supabase.functions.invoke('send-appointment-reminder', {
-          body: {
-            phone: patientData.phone,
-            appointmentId,
+        console.log('[SMS] 7. Calling Edge Function send-appointment-reminder...');
+        
+        // Get appointment details to include in message
+        const { data: appointmentData } = await supabase
+          .from('appointments')
+          .select('appointment_date, appointment_time, doctor_id')
+          .eq('id', appointmentId)
+          .single();
+        
+        console.log('[SMS] 7a. Appointment data:', appointmentData);
+        
+        // Get doctor name
+        let doctorName = 'your doctor';
+        if (appointmentData?.doctor_id) {
+          const { data: doctorData } = await supabase
+            .from('profiles')
+            .select('full_name')
+            .eq('id', appointmentData.doctor_id)
+            .single();
+          if (doctorData?.full_name) {
+            doctorName = doctorData.full_name;
+          }
+        }
+        
+        const requestBody = {
+          phone: patientData.phone,
+          appointmentId,
+          messageType: 'confirmation',
+          appointmentDetails: {
+            date: appointmentData?.appointment_date || '',
+            time: appointmentData?.appointment_time || '',
+            doctorName: doctorName,
           },
+        };
+        
+        console.log('[SMS] 8. Request body:', requestBody);
+        
+        const { data, error } = await supabase.functions.invoke('send-appointment-reminder', {
+          body: requestBody,
         });
+        
+        console.log('[SMS] 9. Edge Function response:', { data, error });
+        
         if (error) {
-          console.error('Error sending SMS reminder:', error);
+          console.error('[SMS] 10. Error from Edge Function:', error);
+          console.error('[SMS] 10a. Error type:', typeof error);
+          console.error('[SMS] 10b. Error keys:', Object.keys(error));
           throw error;
         }
+        
+        console.log('[SMS] 11. SMS sent successfully!', data);
+        return data;
       } catch (err) {
-        console.error('Exception in sendSmsReminderMutation:', err);
+        console.error('[SMS] 12. Exception in sendSmsReminderMutation:', err);
+        console.error('[SMS] 12a. Error message:', err instanceof Error ? err.message : String(err));
+        console.error('[SMS] 12b. Full error object:', err);
         throw err;
       }
     },
     onSuccess: () => {
+      console.log('[SMS] 13. onSuccess - SMS sent successfully');
       toast.success('Reminder SMS sent successfully');
     },
     onError: (error: Error) => {
+      console.error('[SMS] 14. onError - Failed with error:', error.message);
       toast.error(error.message);
     },
   });
@@ -877,7 +932,7 @@ const Appointments = () => {
                             )}
                           </div>
                         </TableCell>
-                        <TableCell className="text-sm max-w-xs">
+                        <TableCell className="text-sm word-wrap min-w-0">
                           {apt.reason ? (
                             <span className="text-muted-foreground">{apt.reason}</span>
                           ) : (

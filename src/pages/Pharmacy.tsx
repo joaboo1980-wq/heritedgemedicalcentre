@@ -1554,7 +1554,7 @@ const Pharmacy = () => {
                           }
                         </TableCell>
                         <TableCell>{prescription.prescribed_by}</TableCell>
-                        <TableCell className="max-w-xs truncate">{prescription.notes || '-'}</TableCell>
+                        <TableCell className="word-wrap min-w-0">{prescription.notes || '-'}</TableCell>
                         <TableCell>
                           <Badge
                             className={

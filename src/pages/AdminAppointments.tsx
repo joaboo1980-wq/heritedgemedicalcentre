@@ -262,7 +262,7 @@ const AdminAppointments = () => {
                             <div className="text-xs text-muted-foreground">{apt.appointment_time}</div>
                           </TableCell>
                           <TableCell>{apt.department || '-'}</TableCell>
-                          <TableCell className="max-w-xs truncate">{apt.reason || '-'}</TableCell>
+                          <TableCell className="word-wrap min-w-0">{apt.reason || '-'}</TableCell>
                           <TableCell>
                             <Badge className={statusColors[apt.status] || 'bg-gray-100 text-gray-800'}>
                               {apt.status}

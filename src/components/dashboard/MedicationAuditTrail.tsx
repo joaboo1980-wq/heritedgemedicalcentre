@@ -282,7 +282,7 @@ export const MedicationAuditTrail = ({
                           </p>
                         </div>
                       </TableCell>
-                      <TableCell className="text-sm max-w-xs">
+                      <TableCell className="text-sm word-wrap min-w-0">
                         {log.status !== 'administered' && log.reason_if_skipped ? (
                           <div className="text-yellow-700 dark:text-yellow-300">
                             <p className="font-medium text-xs mb-1">Reason:</p>

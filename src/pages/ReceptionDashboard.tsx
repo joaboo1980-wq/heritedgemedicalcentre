@@ -45,8 +45,12 @@ import {
   AlertCircle,
   Search,
   RefreshCw,
+  Stethoscope,
 } from 'lucide-react';
 import WaitingRoom from '@/components/dashboard/WaitingRoom';
+import { AddToTriageQueueButton } from '@/components/dashboard/AddToTriageQueueDialog';
+import { CheckInAndAssignDialog } from '@/components/dashboard/CheckInAndAssignDialog';
+import { useTriageQueueStats } from '@/hooks/useTriageQueue';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -61,6 +65,10 @@ const ReceptionDashboard = () => {
   const [isRegisterDialogOpen, setIsRegisterDialogOpen] = useState(false);
   const [isScheduleDialogOpen, setIsScheduleDialogOpen] = useState(false);
   const [isPaymentDialogOpen, setIsPaymentDialogOpen] = useState(false);
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [isRescheduleDialogOpen, setIsRescheduleDialogOpen] = useState(false);
+  const [isCheckInAndAssignDialogOpen, setIsCheckInAndAssignDialogOpen] = useState(false);
+  const [selectedAppointment, setSelectedAppointment] = useState<any>(null);
   const [selectedPaymentInvoice, setSelectedPaymentInvoice] = useState<any>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   
@@ -75,6 +83,15 @@ const ReceptionDashboard = () => {
   });
 
   const [scheduleForm, setScheduleForm] = useState({
+    patient_id: '',
+    doctor_id: '',
+    appointment_date: '',
+    appointment_time: '',
+    reason: '',
+  });
+
+  const [editForm, setEditForm] = useState({
+    appointment_id: '',
     patient_id: '',
     doctor_id: '',
     appointment_date: '',
@@ -231,6 +248,75 @@ const ReceptionDashboard = () => {
     },
   });
 
+  // Edit appointment mutation
+  const editAppointmentMutation = useMutation({
+    mutationFn: async (data: typeof editForm) => {
+      if (!userId || !sessionToken) {
+        throw new Error('Session not found. Please log in again.');
+      }
+
+      return withSessionValidation(
+        userId,
+        sessionToken,
+        async () => {
+          const { appointment_id, ...updateData } = data;
+          const { error } = await supabase
+            .from('appointments')
+            .update(updateData)
+            .eq('id', appointment_id);
+          if (error) throw error;
+          return { success: true };
+        },
+        'Edit Appointment'
+      );
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['reception-today-appointments'] });
+      toast.success('Appointment updated successfully');
+      setIsEditDialogOpen(false);
+      setEditForm({
+        appointment_id: '',
+        patient_id: '',
+        doctor_id: '',
+        appointment_date: '',
+        appointment_time: '',
+        reason: '',
+      });
+    },
+    onError: (error: Error) => toast.error(`Failed to update appointment: ${error.message}`),
+  });
+
+  // Reschedule appointment mutation
+  const rescheduleAppointmentMutation = useMutation({
+    mutationFn: async (data: { appointment_id: string; appointment_date: string; appointment_time: string }) => {
+      if (!userId || !sessionToken) {
+        throw new Error('Session not found. Please log in again.');
+      }
+
+      return withSessionValidation(
+        userId,
+        sessionToken,
+        async () => {
+          const { appointment_id, ...updateData } = data;
+          const { error } = await supabase
+            .from('appointments')
+            .update(updateData)
+            .eq('id', appointment_id);
+          if (error) throw error;
+          return { success: true };
+        },
+        'Reschedule Appointment'
+      );
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['reception-today-appointments'] });
+      toast.success('Appointment rescheduled successfully');
+      setIsRescheduleDialogOpen(false);
+      setSelectedAppointment(null);
+    },
+    onError: (error: Error) => toast.error(`Failed to reschedule appointment: ${error.message}`),
+  });
+
   // Process payment mutation
   const processPaymentMutation = useMutation({
     mutationFn: async (invoiceId: string) => {
@@ -254,7 +340,7 @@ const ReceptionDashboard = () => {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('appointments')
-        .select('id, appointment_time, status, patient_id, doctor_id')
+        .select('id, appointment_time, appointment_date, status, patient_id, doctor_id, reason')
         .eq('appointment_date', today)
         .order('appointment_time', { ascending: true }) as { data: any; error: any };
       if (error) throw error;
@@ -294,9 +380,13 @@ const ReceptionDashboard = () => {
         const doctor = doctors[apt.doctor_id];
         return {
           id: apt.id,
+          patient_id: apt.patient_id,
+          doctor_id: apt.doctor_id,
           patient_name: patient ? `${patient.first_name} ${patient.last_name}` : 'Unknown',
           doctor_name: doctor?.full_name || 'Unknown',
           appointment_time: apt.appointment_time,
+          appointment_date: apt.appointment_date,
+          reason: apt.reason,
           status: apt.status,
         };
       });
@@ -388,7 +478,7 @@ const ReceptionDashboard = () => {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('invoices')
-        .select('id, total_amount, status, patient_id')
+        .select('id, total_amount, status, patient_id, created_at')
         .eq('status', 'pending') as { data: any; error: any };
       if (error) throw error;
       
@@ -497,6 +587,7 @@ const ReceptionDashboard = () => {
   });
 
   // Calculate stats
+  const { data: triageStats } = useTriageQueueStats();
   const stats = {
     todayAppointments: appointments?.length || 0,
     confirmedAppointments: appointments?.filter(a => a.status === 'confirmed').length || 0,
@@ -505,6 +596,9 @@ const ReceptionDashboard = () => {
     newRegistrations: newRegistrations || 0,
     pendingPayments: pendingPayments?.length || 0,
     pendingPaymentsAmount: pendingPayments?.reduce((sum, p) => sum + Number(p.total_amount), 0) || 0,
+    triageWaiting: triageStats?.waiting || 0,
+    triageInProgress: triageStats?.in_progress || 0,
+    triageCritical: triageStats?.critical || 0,
   };
 
   const getStatusColor = (status: string) => {
@@ -573,198 +667,358 @@ const ReceptionDashboard = () => {
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Today's Appointments */}
-        <Card className="overflow-hidden border-0 shadow-lg bg-gradient-to-br from-pink-500 to-rose-500 text-white">
+        <Card className="overflow-hidden border-0 shadow-md bg-gradient-to-br from-pink-500 to-rose-500 text-white">
           <CardContent className="p-6">
-            <div className="flex items-start justify-between">
+            <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-white/80">Today's Appointments</p>
-                <p className="text-4xl font-bold mt-2">{loadingAppointments ? '...' : stats.todayAppointments}</p>
-                <p className="text-xs text-white/70 mt-1">{stats.confirmedAppointments} confirmed</p>
+                <p className="text-sm text-white/90">Today's Appointments</p>
+                <p className="text-3xl font-bold mt-2">{loadingAppointments ? '...' : stats.todayAppointments}</p>
+                <p className="text-xs text-white/80 mt-1">{stats.confirmedAppointments} confirmed</p>
               </div>
-              <Calendar className="h-8 w-8 text-white/40" />
+              <Calendar className="h-10 w-10 text-white/30" />
             </div>
           </CardContent>
         </Card>
 
         {/* Waiting Patients */}
-        <Card className="overflow-hidden border-0 shadow-lg bg-gradient-to-br from-blue-500 to-cyan-500 text-white">
+        <Card className="overflow-hidden border-0 shadow-md bg-gradient-to-br from-blue-500 to-blue-600 text-white">
           <CardContent className="p-6">
-            <div className="flex items-start justify-between">
+            <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-white/80">Waiting Patients</p>
-                <p className="text-4xl font-bold mt-2">{loadingWaiting ? '...' : stats.waitingPatients}</p>
-                <p className="text-xs text-white/70 mt-1">Avg wait: {stats.avgWait}</p>
+                <p className="text-sm text-white/90">Waiting Patients</p>
+                <p className="text-3xl font-bold mt-2">{loadingWaiting ? '...' : stats.waitingPatients}</p>
+                <p className="text-xs text-white/80 mt-1">Average wait: {stats.avgWait}</p>
               </div>
-              <Users className="h-8 w-8 text-white/40" />
+              <Users className="h-10 w-10 text-white/30" />
             </div>
           </CardContent>
         </Card>
 
         {/* New Registrations */}
-        <Card className="overflow-hidden border-0 shadow-lg bg-gradient-to-br from-purple-500 to-indigo-500 text-white">
+        <Card className="overflow-hidden border-0 shadow-md bg-gradient-to-br from-purple-500 to-purple-600 text-white">
           <CardContent className="p-6">
-            <div className="flex items-start justify-between">
+            <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-white/80">New Registrations</p>
-                <p className="text-4xl font-bold mt-2">{newRegistrations}</p>
-                <p className="text-xs text-white/70 mt-1">Today</p>
+                <p className="text-sm text-white/90">New Registrations</p>
+                <p className="text-3xl font-bold mt-2">{newRegistrations}</p>
+                <p className="text-xs text-white/80 mt-1">Total registered</p>
               </div>
-              <Plus className="h-8 w-8 text-white/40" />
+              <Users className="h-10 w-10 text-white/30" />
             </div>
           </CardContent>
         </Card>
 
         {/* Pending Payments */}
-        <Card className="overflow-hidden border-0 shadow-lg bg-gradient-to-br from-green-500 to-emerald-500 text-white">
+        <Card className="overflow-hidden border-0 shadow-md bg-gradient-to-br from-green-500 to-green-600 text-white">
           <CardContent className="p-6">
-            <div className="flex items-start justify-between">
+            <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-white/80">Pending Payments</p>
-                <p className="text-4xl font-bold mt-2">{loadingPayments ? '...' : stats.pendingPayments}</p>
-                <p className="text-xs text-white/70 mt-1">UGX {(stats.pendingPaymentsAmount || 0).toLocaleString()}</p>
+                <p className="text-sm text-white/90">Pending Payments</p>
+                <p className="text-3xl font-bold mt-2">{loadingPayments ? '...' : stats.pendingPayments}</p>
+                <p className="text-xs text-white/80 mt-1">UGX {(stats.pendingPaymentsAmount || 0).toLocaleString()}</p>
               </div>
-              <DollarSign className="h-8 w-8 text-white/40" />
+              <DollarSign className="h-10 w-10 text-white/30" />
             </div>
           </CardContent>
         </Card>
       </div>
 
       {/* Quick Actions */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Dialog open={isRegisterDialogOpen} onOpenChange={setIsRegisterDialogOpen}>
-          <DialogTrigger asChild>
-            <Button className="w-full bg-blue-600 hover:bg-blue-700 text-white" size="lg">
-              <Plus className="h-4 w-4 mr-2" />
-              Register Patient
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="max-w-md">
-            <DialogHeader>
-              <DialogTitle>Register New Patient</DialogTitle>
-              <DialogDescription>
-                Enter the patient's personal information to register them in the system.
-              </DialogDescription>
-            </DialogHeader>
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                registerPatientMutation.mutate(registerForm);
-              }}
-              className="space-y-4"
-            >
-              <div className="grid grid-cols-2 gap-4">
+      <div>
+        <h3 className="text-lg font-semibold mb-4">Quick Actions</h3>
+        <p className="text-sm text-muted-foreground mb-4">Common front desk tasks</p>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <Dialog open={isRegisterDialogOpen} onOpenChange={setIsRegisterDialogOpen}>
+            <DialogTrigger asChild>
+              <Button className="w-full h-24 bg-blue-600 hover:bg-blue-700 text-white flex flex-col items-center justify-center gap-2" size="lg">
+                <Users className="h-6 w-6" />
+                <span>Register New Patient</span>
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-md">
+              <DialogHeader>
+                <DialogTitle>Register New Patient</DialogTitle>
+                <DialogDescription>
+                  Enter the patient's personal information to register them in the system.
+                </DialogDescription>
+              </DialogHeader>
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  registerPatientMutation.mutate(registerForm);
+                }}
+                className="space-y-4"
+              >
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>First Name *</Label>
+                    <Input
+                      placeholder="First name"
+                      value={registerForm.first_name}
+                      onChange={(e) => setRegisterForm({ ...registerForm, first_name: e.target.value })}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Last Name *</Label>
+                    <Input
+                      placeholder="Last name"
+                      value={registerForm.last_name}
+                      onChange={(e) => setRegisterForm({ ...registerForm, last_name: e.target.value })}
+                      required
+                    />
+                  </div>
+                </div>
                 <div className="space-y-2">
-                  <Label>First Name *</Label>
+                  <Label>Email</Label>
                   <Input
-                    placeholder="First name"
-                    value={registerForm.first_name}
-                    onChange={(e) => setRegisterForm({ ...registerForm, first_name: e.target.value })}
-                    required
+                    type="email"
+                    placeholder="Email address"
+                    value={registerForm.email}
+                    onChange={(e) => setRegisterForm({ ...registerForm, email: e.target.value })}
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label>Last Name *</Label>
+                  <Label>Phone</Label>
                   <Input
-                    placeholder="Last name"
-                    value={registerForm.last_name}
-                    onChange={(e) => setRegisterForm({ ...registerForm, last_name: e.target.value })}
-                    required
+                    placeholder="Phone number"
+                    value={registerForm.phone}
+                    onChange={(e) => setRegisterForm({ ...registerForm, phone: e.target.value })}
                   />
                 </div>
-              </div>
-              <div className="space-y-2">
-                <Label>Email</Label>
-                <Input
-                  type="email"
-                  placeholder="Email address"
-                  value={registerForm.email}
-                  onChange={(e) => setRegisterForm({ ...registerForm, email: e.target.value })}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Phone</Label>
-                <Input
-                  placeholder="Phone number"
-                  value={registerForm.phone}
-                  onChange={(e) => setRegisterForm({ ...registerForm, phone: e.target.value })}
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Gender</Label>
+                    <Select value={registerForm.gender} onValueChange={(v) => setRegisterForm({ ...registerForm, gender: v })}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="male">Male</SelectItem>
+                        <SelectItem value="female">Female</SelectItem>
+                        <SelectItem value="other">Other</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Date of Birth</Label>
+                    <Input
+                      type="date"
+                      value={registerForm.date_of_birth}
+                      onChange={(e) => setRegisterForm({ ...registerForm, date_of_birth: e.target.value })}
+                    />
+                  </div>
+                </div>
+                <Button
+                  type="submit"
+                  className="w-full"
+                  disabled={registerPatientMutation.isPending || !registerForm.first_name || !registerForm.last_name}
+                >
+                  {registerPatientMutation.isPending ? 'Registering...' : 'Register Patient'}
+                </Button>
+              </form>
+            </DialogContent>
+          </Dialog>
+
+          <Dialog open={isScheduleDialogOpen} onOpenChange={setIsScheduleDialogOpen}>
+            <DialogTrigger asChild>
+              <Button className="w-full h-24 bg-purple-600 hover:bg-purple-700 text-white flex flex-col items-center justify-center gap-2" size="lg">
+                <Calendar className="h-6 w-6" />
+                <span>Schedule Appointment</span>
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-md">
+              <DialogHeader>
+                <DialogTitle>Schedule Appointment</DialogTitle>
+                <DialogDescription>
+                  Select a patient and doctor to create a new appointment.
+                </DialogDescription>
+              </DialogHeader>
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  // Validate all required fields
+                  if (!scheduleForm.patient_id) {
+                    toast.error('Please select a patient');
+                    return;
+                  }
+                  if (!scheduleForm.doctor_id) {
+                    toast.error('Please select a doctor');
+                    return;
+                  }
+                  if (!scheduleForm.appointment_date) {
+                    toast.error('Please select an appointment date');
+                    return;
+                  }
+                  if (!scheduleForm.appointment_time) {
+                    toast.error('Please select an appointment time');
+                    return;
+                  }
+                  console.log('[ReceptionDashboard] Form validation passed, submitting:', scheduleForm);
+                  scheduleAppointmentMutation.mutate(scheduleForm);
+                }}
+                className="space-y-4"
+              >
                 <div className="space-y-2">
-                  <Label>Gender</Label>
-                  <Select value={registerForm.gender} onValueChange={(v) => setRegisterForm({ ...registerForm, gender: v })}>
+                  <Label>Patient *</Label>
+                  <Select value={scheduleForm.patient_id} onValueChange={(v) => setScheduleForm({ ...scheduleForm, patient_id: v })}>
                     <SelectTrigger>
-                      <SelectValue placeholder="Select" />
+                      <SelectValue placeholder="Select patient" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="male">Male</SelectItem>
-                      <SelectItem value="female">Female</SelectItem>
-                      <SelectItem value="other">Other</SelectItem>
+                      {patients.map((p: any) => (
+                        <SelectItem key={p.id} value={p.id}>
+                          {p.first_name} {p.last_name}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <Label>Date of Birth</Label>
+                  <Label>Doctor *</Label>
+                  <Select value={scheduleForm.doctor_id} onValueChange={(v) => setScheduleForm({ ...scheduleForm, doctor_id: v })}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select doctor" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {doctors.map((d: any) => (
+                        <SelectItem key={d.id} value={d.id}>
+                          {d.full_name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Date *</Label>
+                    <Input
+                      type="date"
+                      value={scheduleForm.appointment_date}
+                      onChange={(e) => setScheduleForm({ ...scheduleForm, appointment_date: e.target.value })}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Time *</Label>
+                    <Input
+                      type="time"
+                      value={scheduleForm.appointment_time}
+                      onChange={(e) => setScheduleForm({ ...scheduleForm, appointment_time: e.target.value })}
+                      required
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label>Reason for Visit</Label>
                   <Input
-                    type="date"
-                    value={registerForm.date_of_birth}
-                    onChange={(e) => setRegisterForm({ ...registerForm, date_of_birth: e.target.value })}
+                    placeholder="Reason"
+                    value={scheduleForm.reason}
+                    onChange={(e) => setScheduleForm({ ...scheduleForm, reason: e.target.value })}
                   />
                 </div>
-              </div>
-              <Button
-                type="submit"
-                className="w-full"
-                disabled={registerPatientMutation.isPending || !registerForm.first_name || !registerForm.last_name}
-              >
-                {registerPatientMutation.isPending ? 'Registering...' : 'Register Patient'}
-              </Button>
-            </form>
-          </DialogContent>
-        </Dialog>
+                <Button
+                  type="submit"
+                  className="w-full"
+                  disabled={scheduleAppointmentMutation.isPending || !scheduleForm.patient_id || !scheduleForm.doctor_id}
+                >
+                  {scheduleAppointmentMutation.isPending ? 'Scheduling...' : 'Schedule'}
+                </Button>
+              </form>
+            </DialogContent>
+          </Dialog>
 
-        <Dialog open={isScheduleDialogOpen} onOpenChange={setIsScheduleDialogOpen}>
-          <DialogTrigger asChild>
-            <Button className="w-full bg-purple-600 hover:bg-purple-700 text-white" size="lg">
-              <Calendar className="h-4 w-4 mr-2" />
-              Schedule Appointment
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="max-w-md">
-            <DialogHeader>
-              <DialogTitle>Schedule Appointment</DialogTitle>
-              <DialogDescription>
-                Select a patient and doctor to create a new appointment.
-              </DialogDescription>
-            </DialogHeader>
+          <Button className="w-full h-24 bg-green-600 hover:bg-green-700 text-white flex flex-col items-center justify-center gap-2" size="lg">
+            <Phone className="h-6 w-6" />
+            <span>Answer Calls</span>
+          </Button>
+
+          <Dialog open={isPaymentDialogOpen} onOpenChange={setIsPaymentDialogOpen}>
+            <DialogTrigger asChild>
+              <Button className="w-full h-24 bg-pink-600 hover:bg-pink-700 text-white flex flex-col items-center justify-center gap-2" size="lg">
+                <DollarSign className="h-6 w-6" />
+                <span>Process Payment</span>
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-md">
+              <DialogHeader>
+                <DialogTitle>Process Payment</DialogTitle>
+                <DialogDescription>
+                  Select a pending invoice and confirm payment to mark it as paid.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4">
+                {loadingPayments ? (
+                  <div className="text-center py-8">Loading pending invoices...</div>
+                ) : pendingPayments && pendingPayments.length > 0 ? (
+                  <>
+                    <div className="space-y-2">
+                      <Label>Select Invoice</Label>
+                      <Select value={selectedPaymentInvoice?.id || ''} onValueChange={(invoiceId) => {
+                        const inv = pendingPayments.find((p: any) => p.id === invoiceId);
+                        setSelectedPaymentInvoice(inv);
+                      }}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select invoice" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {pendingPayments.map((inv: any) => (
+                            <SelectItem key={inv.id} value={inv.id}>
+                              {inv.patient_name} - UGX {Number(inv.total_amount).toLocaleString()}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {selectedPaymentInvoice && (
+                      <div className="border-t pt-4">
+                        <div className="flex justify-between mb-2">
+                          <span>Patient:</span>
+                          <span className="font-semibold">{selectedPaymentInvoice.patient_name}</span>
+                        </div>
+                        <div className="flex justify-between mb-4">
+                          <span>Amount:</span>
+                          <span className="font-bold text-lg">UGX {Number(selectedPaymentInvoice.total_amount).toLocaleString()}</span>
+                        </div>
+                        <Button
+                          className="w-full bg-green-600 hover:bg-green-700"
+                          onClick={() => processPaymentMutation.mutate(selectedPaymentInvoice.id)}
+                          disabled={processPaymentMutation.isPending}
+                        >
+                          {processPaymentMutation.isPending ? 'Processing...' : 'Confirm Payment'}
+                        </Button>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="text-center py-8 text-muted-foreground">No pending invoices</div>
+                )}
+              </div>
+            </DialogContent>
+          </Dialog>
+        </div>
+      </div>
+
+      {/* Edit Appointment Modal */}
+      <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Edit Appointment</DialogTitle>
+            <DialogDescription>
+              Update the appointment details below.
+            </DialogDescription>
+          </DialogHeader>
+          {selectedAppointment && (
             <form
               onSubmit={(e) => {
                 e.preventDefault();
-                // Validate all required fields
-                if (!scheduleForm.patient_id) {
-                  toast.error('Please select a patient');
-                  return;
-                }
-                if (!scheduleForm.doctor_id) {
-                  toast.error('Please select a doctor');
-                  return;
-                }
-                if (!scheduleForm.appointment_date) {
-                  toast.error('Please select an appointment date');
-                  return;
-                }
-                if (!scheduleForm.appointment_time) {
-                  toast.error('Please select an appointment time');
-                  return;
-                }
-                console.log('[ReceptionDashboard] Form validation passed, submitting:', scheduleForm);
-                scheduleAppointmentMutation.mutate(scheduleForm);
+                editAppointmentMutation.mutate(editForm);
               }}
               className="space-y-4"
             >
               <div className="space-y-2">
-                <Label>Patient *</Label>
-                <Select value={scheduleForm.patient_id} onValueChange={(v) => setScheduleForm({ ...scheduleForm, patient_id: v })}>
+                <Label>Patient</Label>
+                <Select value={editForm.patient_id} onValueChange={(v) => setEditForm({ ...editForm, patient_id: v })}>
                   <SelectTrigger>
                     <SelectValue placeholder="Select patient" />
                   </SelectTrigger>
@@ -778,8 +1032,8 @@ const ReceptionDashboard = () => {
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label>Doctor *</Label>
-                <Select value={scheduleForm.doctor_id} onValueChange={(v) => setScheduleForm({ ...scheduleForm, doctor_id: v })}>
+                <Label>Doctor</Label>
+                <Select value={editForm.doctor_id} onValueChange={(v) => setEditForm({ ...editForm, doctor_id: v })}>
                   <SelectTrigger>
                     <SelectValue placeholder="Select doctor" />
                   </SelectTrigger>
@@ -794,20 +1048,20 @@ const ReceptionDashboard = () => {
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label>Date *</Label>
+                  <Label>Date</Label>
                   <Input
                     type="date"
-                    value={scheduleForm.appointment_date}
-                    onChange={(e) => setScheduleForm({ ...scheduleForm, appointment_date: e.target.value })}
+                    value={editForm.appointment_date}
+                    onChange={(e) => setEditForm({ ...editForm, appointment_date: e.target.value })}
                     required
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label>Time *</Label>
+                  <Label>Time</Label>
                   <Input
                     type="time"
-                    value={scheduleForm.appointment_time}
-                    onChange={(e) => setScheduleForm({ ...scheduleForm, appointment_time: e.target.value })}
+                    value={editForm.appointment_time}
+                    onChange={(e) => setEditForm({ ...editForm, appointment_time: e.target.value })}
                     required
                   />
                 </div>
@@ -816,90 +1070,90 @@ const ReceptionDashboard = () => {
                 <Label>Reason for Visit</Label>
                 <Input
                   placeholder="Reason"
-                  value={scheduleForm.reason}
-                  onChange={(e) => setScheduleForm({ ...scheduleForm, reason: e.target.value })}
+                  value={editForm.reason}
+                  onChange={(e) => setEditForm({ ...editForm, reason: e.target.value })}
                 />
               </div>
               <Button
                 type="submit"
                 className="w-full"
-                disabled={scheduleAppointmentMutation.isPending || !scheduleForm.patient_id || !scheduleForm.doctor_id}
+                disabled={editAppointmentMutation.isPending}
               >
-                {scheduleAppointmentMutation.isPending ? 'Scheduling...' : 'Schedule'}
+                {editAppointmentMutation.isPending ? 'Updating...' : 'Update Appointment'}
               </Button>
             </form>
-          </DialogContent>
-        </Dialog>
+          )}
+        </DialogContent>
+      </Dialog>
 
-        <Dialog open={isPaymentDialogOpen} onOpenChange={setIsPaymentDialogOpen}>
-          <DialogTrigger asChild>
-            <Button className="w-full bg-green-600 hover:bg-green-700 text-white" size="lg">
-              <DollarSign className="h-4 w-4 mr-2" />
-              Process Payment
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="max-w-md">
-            <DialogHeader>
-              <DialogTitle>Process Payment</DialogTitle>
-              <DialogDescription>
-                Select a pending invoice and confirm payment to mark it as paid.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4">
-              {loadingPayments ? (
-                <div className="text-center py-8">Loading pending invoices...</div>
-              ) : pendingPayments && pendingPayments.length > 0 ? (
-                <>
-                  <div className="space-y-2">
-                    <Label>Select Invoice</Label>
-                    <Select value={selectedPaymentInvoice?.id || ''} onValueChange={(invoiceId) => {
-                      const inv = pendingPayments.find((p: any) => p.id === invoiceId);
-                      setSelectedPaymentInvoice(inv);
-                    }}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select invoice" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {pendingPayments.map((inv: any) => (
-                          <SelectItem key={inv.id} value={inv.id}>
-                            {inv.patient_name} - UGX {Number(inv.total_amount).toLocaleString()}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  {selectedPaymentInvoice && (
-                    <div className="border-t pt-4">
-                      <div className="flex justify-between mb-2">
-                        <span>Patient:</span>
-                        <span className="font-semibold">{selectedPaymentInvoice.patient_name}</span>
-                      </div>
-                      <div className="flex justify-between mb-4">
-                        <span>Amount:</span>
-                        <span className="font-bold text-lg">UGX {Number(selectedPaymentInvoice.total_amount).toLocaleString()}</span>
-                      </div>
-                      <Button
-                        className="w-full bg-green-600 hover:bg-green-700"
-                        onClick={() => processPaymentMutation.mutate(selectedPaymentInvoice.id)}
-                        disabled={processPaymentMutation.isPending}
-                      >
-                        {processPaymentMutation.isPending ? 'Processing...' : 'Confirm Payment'}
-                      </Button>
-                    </div>
-                  )}
-                </>
-              ) : (
-                <div className="text-center py-8 text-muted-foreground">No pending invoices</div>
-              )}
-            </div>
-          </DialogContent>
-        </Dialog>
-
-        <Button className="w-full bg-orange-600 hover:bg-orange-700 text-white" size="lg" disabled>
-          <Phone className="h-4 w-4 mr-2" />
-          Call Logs
-        </Button>
-      </div>
+      {/* Reschedule Appointment Modal */}
+      <Dialog open={isRescheduleDialogOpen} onOpenChange={setIsRescheduleDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Reschedule Appointment</DialogTitle>
+            <DialogDescription>
+              Select a new date and time for the appointment.
+            </DialogDescription>
+          </DialogHeader>
+          {selectedAppointment && (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!selectedAppointment.appointment_date || !selectedAppointment.appointment_time) {
+                  toast.error('Please select both date and time');
+                  return;
+                }
+                rescheduleAppointmentMutation.mutate({
+                  appointment_id: selectedAppointment.id,
+                  appointment_date: selectedAppointment.appointment_date,
+                  appointment_time: selectedAppointment.appointment_time,
+                });
+              }}
+              className="space-y-4"
+            >
+              <div className="space-y-2">
+                <Label>Patient</Label>
+                <div className="p-2 bg-muted rounded border text-sm">
+                  {selectedAppointment.patient_name}
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label>Doctor</Label>
+                <div className="p-2 bg-muted rounded border text-sm">
+                  {selectedAppointment.doctor_name}
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>New Date *</Label>
+                  <Input
+                    type="date"
+                    value={selectedAppointment.appointment_date || ''}
+                    onChange={(e) => setSelectedAppointment({ ...selectedAppointment, appointment_date: e.target.value })}
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>New Time *</Label>
+                  <Input
+                    type="time"
+                    value={selectedAppointment.appointment_time || ''}
+                    onChange={(e) => setSelectedAppointment({ ...selectedAppointment, appointment_time: e.target.value })}
+                    required
+                  />
+                </div>
+              </div>
+              <Button
+                type="submit"
+                className="w-full"
+                disabled={rescheduleAppointmentMutation.isPending}
+              >
+                {rescheduleAppointmentMutation.isPending ? 'Rescheduling...' : 'Reschedule Appointment'}
+              </Button>
+            </form>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Today's Schedule & Waiting Room */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -910,6 +1164,7 @@ const ReceptionDashboard = () => {
               <Calendar className="h-5 w-5" />
               Today's Schedule
             </CardTitle>
+            <p className="text-sm text-muted-foreground mt-1">Appointments for today</p>
           </CardHeader>
           <CardContent>
             {loadingAppointments ? (
@@ -925,33 +1180,63 @@ const ReceptionDashboard = () => {
                   )
                   .map((apt: any) => (
                     <div key={apt.id} className="border rounded-lg p-4 hover:bg-muted/50 transition">
-                      <div className="flex items-start justify-between mb-2">
-                        <div>
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex-1">
                           <p className="font-semibold">{apt.patient_name}</p>
                           <p className="text-sm text-muted-foreground flex items-center gap-1 mt-1">
                             <Clock className="h-3 w-3" />
-                            {apt.appointment_time} • {apt.doctor_name}
+                            {apt.appointment_time} • Dr. {apt.doctor_name}
                           </p>
                         </div>
                         <Badge className={getStatusColor(apt.status)}>{apt.status}</Badge>
                       </div>
-                      <div className="flex gap-2 flex-wrap">
-                        {apt.status === 'confirmed' && (
+                      <div className="flex gap-2 flex-wrap mt-3">
+                        {apt.status !== 'waiting' && apt.status !== 'cancelled' && (
                           <Button
                             size="sm"
-                            className="bg-green-600 hover:bg-green-700"
-                            onClick={() => updateStatusMutation.mutate({ id: apt.id, status: 'waiting' })}
-                            disabled={updateStatusMutation.isPending}
+                            className="bg-slate-900 hover:bg-slate-800 text-white"
+                            onClick={() => {
+                              setSelectedAppointment(apt);
+                              setIsCheckInAndAssignDialogOpen(true);
+                            }}
                           >
                             <CheckCircle className="h-3 w-3 mr-1" />
                             Check In
                           </Button>
                         )}
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            setSelectedAppointment(apt);
+                            setEditForm({
+                              appointment_id: apt.id,
+                              patient_id: apt.patient_id,
+                              doctor_id: apt.doctor_id,
+                              appointment_date: apt.appointment_date,
+                              appointment_time: apt.appointment_time,
+                              reason: apt.reason || '',
+                            });
+                            setIsEditDialogOpen(true);
+                          }}
+                        >
+                          Edit
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            setSelectedAppointment(apt);
+                            setIsRescheduleDialogOpen(true);
+                          }}
+                        >
+                          Reschedule
+                        </Button>
                         {apt.status !== 'cancelled' && apt.status !== 'completed' && (
                           <Button
                             size="sm"
                             variant="outline"
-                            className="text-red-600"
+                            className="text-red-600 hover:text-red-700"
                             onClick={() => updateStatusMutation.mutate({ id: apt.id, status: 'cancelled' })}
                             disabled={updateStatusMutation.isPending}
                           >
@@ -971,11 +1256,9 @@ const ReceptionDashboard = () => {
           </CardContent>
         </Card>
 
-        {/* Waiting Room - Replaced with new comprehensive component below */}
+        {/* Waiting Room Component */}
+        <WaitingRoom hideReadyToCheckIn={true} />
       </div>
-
-      {/* Comprehensive Waiting Room Component */}
-      <WaitingRoom />
 
       {/* Pending Payments Table */}
       {pendingPayments && pendingPayments.length > 0 && (
@@ -985,45 +1268,76 @@ const ReceptionDashboard = () => {
               <DollarSign className="h-5 w-5" />
               Pending Payments
             </CardTitle>
+            <p className="text-sm text-muted-foreground mt-2">Outstanding bills and payment processing</p>
           </CardHeader>
           <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Patient</TableHead>
-                  <TableHead>Amount (UGX)</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Action</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {pendingPayments.map((payment: any) => (
-                  <TableRow key={payment.id}>
-                    <TableCell className="font-medium">{payment.patient_name}</TableCell>
-                    <TableCell>{Number(payment.total_amount).toLocaleString()}</TableCell>
-                    <TableCell>
-                      <Badge className="bg-orange-100 text-orange-800">
-                        {payment.status}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <Button
-                        size="sm"
-                        className="bg-green-600 hover:bg-green-700"
-                        onClick={() => {
-                          setSelectedPaymentInvoice(payment);
-                          setIsPaymentDialogOpen(true);
-                        }}
-                      >
-                        Process
-                      </Button>
-                    </TableCell>
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow className="border-b-2">
+                    <TableHead className="font-semibold">Patient</TableHead>
+                    <TableHead className="font-semibold">Service</TableHead>
+                    <TableHead className="font-semibold">Amount</TableHead>
+                    <TableHead className="font-semibold">Date</TableHead>
+                    <TableHead className="font-semibold">Status</TableHead>
+                    <TableHead className="font-semibold">Actions</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {pendingPayments.map((payment: any) => (
+                    <TableRow key={payment.id} className="hover:bg-muted/50">
+                      <TableCell className="font-medium">{payment.patient_name}</TableCell>
+                      <TableCell className="text-sm">Consultation</TableCell>
+                      <TableCell className="font-semibold">UGX {Number(payment.total_amount).toLocaleString()}</TableCell>
+                      <TableCell className="text-sm">{payment.created_at ? format(parseISO(payment.created_at), 'MMM dd, yyyy') : 'Today'}</TableCell>
+                      <TableCell>
+                        <Badge className="bg-pink-100 text-pink-800 dark:bg-pink-900/30 dark:text-pink-300">
+                          {payment.status}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="space-x-2">
+                        <Button
+                          size="sm"
+                          className="bg-green-600 hover:bg-green-700 text-white"
+                          onClick={() => {
+                            setSelectedPaymentInvoice(payment);
+                            setIsPaymentDialogOpen(true);
+                          }}
+                        >
+                          Process Payment
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                        >
+                          View Details
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
           </CardContent>
         </Card>
+      )}
+
+      {/* Check In & Assign Dialog */}
+      {selectedAppointment && (
+        <CheckInAndAssignDialog
+          patientId={selectedAppointment.patient_id}
+          patientName={selectedAppointment.patient_name}
+          appointmentReason={selectedAppointment.reason}
+          appointmentId={selectedAppointment.id}
+          isOpen={isCheckInAndAssignDialogOpen}
+          onClose={() => {
+            setIsCheckInAndAssignDialogOpen(false);
+            setSelectedAppointment(null);
+          }}
+          onSuccess={() => {
+            queryClient.invalidateQueries({ queryKey: ['reception-today-appointments'] });
+          }}
+        />
       )}
     </div>
   );
