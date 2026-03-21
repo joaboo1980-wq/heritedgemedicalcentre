@@ -6,7 +6,7 @@ import {
   ClipboardDocumentListIcon,
   BeakerIcon,
   ChatBubbleLeftRightIcon,
-  EnvelopeIcon,
+
 } from '@heroicons/react/24/solid';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
@@ -14,6 +14,23 @@ import { useAuth } from '@/hooks/useAuth';
 import { usePermissions } from '@/hooks/usePermissions';
 import { usePatientLatestVitals } from '@/hooks/useNurseTriageAssignment';
 import { Badge } from '@/components/ui/badge';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Button } from '@/components/ui/button';
 import { PatientConsultationHistory } from '@/components/doctor/PatientConsultationHistory';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
@@ -65,7 +82,8 @@ interface LabResult {
   patient_id: string;
   patient_name: string;
   test_type: string;
-  result_date: string;
+  result_date: string | null;
+  created_at: string;
   status: string;
   priority: string;
   result_value: string | null;
@@ -120,7 +138,7 @@ const DoctorDashboard = () => {
   const today = new Date().toISOString().split('T')[0];
 
   // State for UI
-  const [activeTab, setActiveTab] = useState<'appointments' | 'patients' | 'prescriptions' | 'lab-results' | 'consultations'>(
+  const [activeTab, setActiveTab] = useState<'appointments' | 'patients' | 'prescriptions' | 'lab-tests' | 'lab-results' | 'consultations'>(
     'appointments'
   );
   const [selectedAppointment, setSelectedAppointment] = useState<any>(null);
@@ -160,13 +178,18 @@ const DoctorDashboard = () => {
   const [isPrescriptionModalOpen, setIsPrescriptionModalOpen] = useState(false);
   const [selectedPrescriptionPatient, setSelectedPrescriptionPatient] = useState<Patient | null>(null);
   const [selectedEditingPrescription, setSelectedEditingPrescription] = useState<Prescription | null>(null);
+  const [medicationSearch, setMedicationSearch] = useState('');
+  const [showMedicationList, setShowMedicationList] = useState(false);
   const [prescriptionForm, setPrescriptionForm] = useState({
     patient_id: '',
-    medicine_id: '',
-    dosage: '',
-    frequency: '',
-    duration: '',
+    medicines: [] as Array<{
+      medicine_id: string;
+      dosage: string;
+      frequency: string;
+      duration: string;
+    }>,
   });
+  const [selectedMedicationDetails, setSelectedMedicationDetails] = useState<Array<{ id: string; name: string; strength: string; form: string }>>([]);
 
   // Diagnosis form state
   const [diagnosisForm, setDiagnosisForm] = useState({
@@ -202,6 +225,28 @@ const DoctorDashboard = () => {
     follow_up_date: '',
     referrals: '',
   });
+
+  // ===== LAB ORDER FORM STATE =====
+  const [isAddLabOrderDialogOpen, setIsAddLabOrderDialogOpen] = useState(false);
+  const [isViewLabOrderModalOpen, setIsViewLabOrderModalOpen] = useState(false);
+  const [isEditLabOrderModalOpen, setIsEditLabOrderModalOpen] = useState(false);
+  const [isCancelLabOrderDialogOpen, setIsCancelLabOrderDialogOpen] = useState(false);
+  const [testSearch, setTestSearch] = useState('');
+  const [showTestList, setShowTestList] = useState(false);
+  const [selectedLabOrder, setSelectedLabOrder] = useState<LabResult | null>(null);
+  const [newLabOrder, setNewLabOrder] = useState({
+    patient_id: '',
+    test_ids: [] as string[], // Array for multiple tests
+    priority: 'normal',
+  });
+  const [editLabOrderForm, setEditLabOrderForm] = useState({
+    priority: 'normal',
+    result_value: '',
+    result_notes: '',
+    is_abnormal: false,
+  });
+  const [selectedTestDetails, setSelectedTestDetails] = useState<Array<{ id: string; name: string; code: string; price: number }>>([]);
+  const [expandedPatients, setExpandedPatients] = useState<Set<string>>(new Set());
 
   const doctorId = user?.id;
   const doctorName = user?.user_metadata?.full_name || '';
@@ -283,21 +328,20 @@ const DoctorDashboard = () => {
         console.error('[DoctorDashboard] Error fetching prescriptions:', error);
         throw error;
       }
-      return (data || []).map((p: any) => {
-        const item = p.prescription_items?.[0];
-        return {
+      return (data || []).flatMap((p: any) => 
+        (p.prescription_items || []).map((item: any) => ({
           id: p.id,
           patient_id: p.patient_id,
-          medicine_id: item?.medication_id,
-          dosage: item?.dosage,
-          frequency: item?.frequency,
-          duration: item?.duration,
+          medicine_id: item.medication_id,
+          dosage: item.dosage,
+          frequency: item.frequency,
+          duration: item.duration,
           status: p.status,
           prescribed_date: p.created_at,
           patient_name: p.patients ? `${p.patients.first_name} ${p.patients.last_name}` : 'Unknown',
-          medicine_name: item?.medications?.name || 'Unknown',
-        };
-      });
+          medicine_name: item.medications?.name || 'Unknown',
+        }))
+      );
     } catch (err) {
       console.error('[DoctorDashboard] Prescriptions query failed:', err);
       throw err;
@@ -317,7 +361,7 @@ const DoctorDashboard = () => {
           .from('lab_orders')
           .select(
             `id, order_number, patient_id, status, priority, result_value, result_notes, 
-             is_abnormal, completed_at, sample_collected_at,
+             is_abnormal, completed_at, sample_collected_at, created_at,
              patients(first_name, last_name), lab_tests(test_name)`
           )
           .order('created_at', { ascending: false })
@@ -333,7 +377,8 @@ const DoctorDashboard = () => {
           patient_id: lr.patient_id,
           patient_name: lr.patients ? `${lr.patients.first_name} ${lr.patients.last_name}` : 'Unknown',
           test_type: lr.lab_tests?.test_name || 'Unknown',
-          result_date: lr.completed_at ? new Date(lr.completed_at).toLocaleDateString() : 'Pending',
+          result_date: lr.completed_at,
+          created_at: lr.created_at,
           status: lr.status,
           priority: lr.priority,
           result_value: lr.result_value,
@@ -348,6 +393,152 @@ const DoctorDashboard = () => {
     },
     enabled: !!doctorId,
     refetchInterval: 60000,
+  });
+
+  // ===== LAB TESTS CATALOG QUERY =====
+  const { data: labTests, isLoading: testsLoading } = useQuery({
+    queryKey: ['lab-tests'],
+    queryFn: async () => {
+      try {
+        const { data, error } = await supabase
+          .from('lab_tests')
+          .select('id, test_code, test_name, category, price')
+          .order('test_code');
+        
+        if (error) {
+          console.error('[DoctorDashboard] Lab tests fetch error:', error);
+          throw error;
+        }
+        
+        return data || [];
+      } catch (err) {
+        console.error('[DoctorDashboard] Lab tests query failed:', err);
+        return [];
+      }
+    },
+  });
+
+  // Filter tests based on search term
+  const filteredTests = labTests?.filter(t =>
+    t.test_name.toLowerCase().includes(testSearch.toLowerCase()) ||
+    t.test_code.toLowerCase().includes(testSearch.toLowerCase()) ||
+    t.category.toLowerCase().includes(testSearch.toLowerCase())
+  ) || [];
+
+  // ===== PATIENTS LIST QUERY =====
+  const { data: patientsList } = useQuery({
+    queryKey: ['patients-list-for-lab'],
+    queryFn: async () => {
+      try {
+        const { data, error } = await supabase
+          .from('patients')
+          .select('id, first_name, last_name, patient_number')
+          .order('first_name');
+        
+        if (error) {
+          console.error('[DoctorDashboard] Patients list fetch error:', error);
+          throw error;
+        }
+        
+        return data || [];
+      } catch (err) {
+        console.error('[DoctorDashboard] Patients list query failed:', err);
+        return [];
+      }
+    },
+  });
+
+  // ===== PATIENT LAB ORDERS QUERY =====
+  const { data: patientLabOrders } = useQuery({
+    queryKey: ['patient-lab-orders', selectedLabOrder?.patient_id],
+    queryFn: async () => {
+      if (!selectedLabOrder?.patient_id) return [];
+      try {
+        const { data, error } = await supabase
+          .from('lab_orders')
+          .select('id, order_number, patient_id, status, priority, result_value, result_notes, is_abnormal, created_at, patients(first_name, last_name), lab_tests(test_name, test_code, category)')
+          .eq('patient_id', selectedLabOrder.patient_id)
+          .order('created_at', { ascending: false });
+        
+        if (error) {
+          console.error('[DoctorDashboard] Patient lab orders fetch error:', error);
+          throw error;
+        }
+        
+        return data || [];
+      } catch (err) {
+        console.error('[DoctorDashboard] Patient lab orders query failed:', err);
+        return [];
+      }
+    },
+    enabled: !!selectedLabOrder?.patient_id,
+  });
+
+  // ===== CANCEL LAB ORDER MUTATION =====
+  const cancelLabOrderMutation = useMutation({
+    mutationFn: async (orderId: string) => {
+      try {
+        const { error } = await supabase
+          .from('lab_orders')
+          .update({ status: 'cancelled' })
+          .eq('id', orderId);
+        
+        if (error) {
+          console.error('[DoctorDashboard] Error cancelling lab order:', error);
+          throw error;
+        }
+        console.log('[DoctorDashboard] Lab order cancelled successfully');
+      } catch (err) {
+        console.error('[DoctorDashboard] Lab order cancellation failed:', err);
+        throw err;
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['doctor-lab-results'] });
+      queryClient.invalidateQueries({ queryKey: ['patient-lab-orders'] });
+      setIsCancelLabOrderDialogOpen(false);
+      setSelectedLabOrder(null);
+      toast.success('Lab order cancelled successfully');
+    },
+    onError: (error: Error) => {
+      toast.error(`Failed to cancel lab order: ${error.message}`);
+    },
+  });
+
+  const editLabOrderMutation = useMutation({
+    mutationFn: async ({ orderId, updates }: { orderId: string; updates: any }) => {
+      try {
+        const { error } = await supabase
+          .from('lab_orders')
+          .update(updates)
+          .eq('id', orderId);
+        
+        if (error) {
+          console.error('[DoctorDashboard] Error updating lab order:', error);
+          throw error;
+        }
+        console.log('[DoctorDashboard] Lab order updated successfully');
+      } catch (err) {
+        console.error('[DoctorDashboard] Lab order update failed:', err);
+        throw err;
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['doctor-lab-results'] });
+      queryClient.invalidateQueries({ queryKey: ['patient-lab-orders'] });
+      setIsEditLabOrderModalOpen(false);
+      setSelectedLabOrder(null);
+      setEditLabOrderForm({
+        priority: 'normal',
+        result_value: '',
+        result_notes: '',
+        is_abnormal: false,
+      });
+      toast.success('Lab order updated successfully');
+    },
+    onError: (error: Error) => {
+      toast.error(`Failed to update lab order: ${error.message}`);
+    },
   });
 
   // ===== MEDICAL EXAMINATIONS QUERY =====
@@ -394,9 +585,9 @@ const DoctorDashboard = () => {
 
   // ===== PATIENT EXAMINATIONS QUERY =====
   const { data: patientExaminations, isLoading: loadingPatientExaminations } = useQuery<MedicalExamination[]>({
-    queryKey: ['patient-examinations', selectedPatient?.id],
+    queryKey: ['patient-examinations', newExaminationForm.patient_id],
     queryFn: async () => {
-      if (!selectedPatient?.id) return [];
+      if (!newExaminationForm.patient_id) return [];
       try {
         const { data, error } = await (supabase as any)
           .from('medical_examinations')
@@ -413,7 +604,7 @@ const DoctorDashboard = () => {
              medications_prescribed, follow_up_date, referrals,
              patients(first_name, last_name)`
           )
-          .eq('patient_id', selectedPatient.id)
+          .eq('patient_id', newExaminationForm.patient_id)
           .order('examination_date', { ascending: false });
 
         if (error) {
@@ -429,7 +620,7 @@ const DoctorDashboard = () => {
         throw err;
       }
     },
-    enabled: !!selectedPatient?.id,
+    enabled: !!newExaminationForm.patient_id,
   });
 
   // ===== VITALS QUERY FOR NEW EXAMINATION FORM =====
@@ -538,7 +729,7 @@ const DoctorDashboard = () => {
       try {
         const { error } = await supabase
           .from('appointments')
-          .update({ appointment_date: date, appointment_time: time + ':00', status: 'rescheduled' })
+          .update({ appointment_date: date, appointment_time: time + ':00', status: 'scheduled' })
           .eq('id', appointmentId);
         if (error) throw error;
       } catch (err) {
@@ -628,6 +819,13 @@ const { data: availableMedications, isLoading: loadingMedications } = useQuery({
   },
 });
 
+  // Filter medications based on search term
+  const filteredMedications = availableMedications?.filter(m =>
+    m.name.toLowerCase().includes(medicationSearch.toLowerCase()) ||
+    m.strength.toLowerCase().includes(medicationSearch.toLowerCase()) ||
+    m.form.toLowerCase().includes(medicationSearch.toLowerCase())
+  ) || [];
+
 
 const createPrescriptionMutation = useMutation({
   mutationFn: async (prescriptionData: any) => {
@@ -640,8 +838,8 @@ const createPrescriptionMutation = useMutation({
       throw new Error('Patient ID is required');
     }
 
-    if (!prescriptionData.medicine_id) {
-      throw new Error('Medicine/Medication is required');
+    if (!prescriptionData.medicines || prescriptionData.medicines.length === 0) {
+      throw new Error('At least one medication is required');
     }
 
     // Create the prescription record
@@ -663,19 +861,21 @@ const createPrescriptionMutation = useMutation({
       throw prescriptionError;
     }
 
-    // Now create the prescription item with medication details
+    // Now create prescription items for each medicine
+    const prescriptionItems = prescriptionData.medicines.map((med: any) => ({
+      prescription_id: prescriptionResponse.id,
+      medication_id: med.medicine_id,
+      dosage: med.dosage || null,
+      frequency: med.frequency || null,
+      duration: med.duration || null,
+    }));
+
     const { error: itemError } = await (supabase as any)
       .from('prescription_items')
-      .insert({
-        prescription_id: prescriptionResponse.id,
-        medication_id: prescriptionData.medicine_id,
-        dosage: prescriptionData.dosage || null,
-        frequency: prescriptionData.frequency || null,
-        duration: prescriptionData.duration || null,
-      });
+      .insert(prescriptionItems);
 
     if (itemError) {
-      console.error('[DoctorDashboard] Prescription item insert error:', itemError);
+      console.error('[DoctorDashboard] Prescription items insert error:', itemError);
       throw itemError;
     }
 
@@ -683,15 +883,15 @@ const createPrescriptionMutation = useMutation({
   },
   onSuccess: () => {
     queryClient.invalidateQueries({ queryKey: ['doctor-active-prescriptions', doctorId] });
-    toast.success('Prescription created successfully');
+    toast.success('Prescriptions created successfully');
     setIsPrescriptionModalOpen(false);
     setPrescriptionForm({
       patient_id: '',
-      medicine_id: '',
-      dosage: '',
-      frequency: '',
-      duration: '',
+      medicines: [],
     });
+    setSelectedMedicationDetails([]);
+    setMedicationSearch('');
+    setShowMedicationList(false);
     setSelectedPrescriptionPatient(null);
   },
   onError: (error: Error) => {
@@ -731,11 +931,9 @@ const updatePrescriptionMutation = useMutation({
     setSelectedEditingPrescription(null);
     setPrescriptionForm({
       patient_id: '',
-      medicine_id: '',
-      dosage: '',
-      frequency: '',
-      duration: '',
+      medicines: [],
     });
+    setSelectedMedicationDetails([]);
   },
   onError: (error: Error) => {
     console.error('[DoctorDashboard] Prescription update error:', error);
@@ -884,72 +1082,93 @@ const cancelPrescriptionMutation = useMutation({
     },
   });
 
-  // Send SMS reminder mutation
-  const sendSmsReminderMutation = useMutation({
-    mutationFn: async ({ appointmentId, patientId }: { appointmentId: string; patientId: string }) => {
+  // ===== CREATE LAB ORDER MUTATION =====
+  const createLabOrderMutation = useMutation({
+    mutationFn: async (data: { patient_id: string; test_ids: string[]; priority: string }) => {
+      // Validate required fields
+      if (!data.patient_id?.trim()) {
+        throw new Error('Patient is required');
+      }
+      if (!data.test_ids || data.test_ids.length === 0) {
+        throw new Error('At least one test is required');
+      }
+
       try {
-        console.log('[SMS-Doctor] 1. Starting SMS reminder mutation for appointment:', appointmentId, 'patient:', patientId);
+        // Check for duplicate/existing pending orders
+        const { data: existingOrders, error: checkError } = await supabase
+          .from('lab_orders')
+          .select('test_id, status')
+          .eq('patient_id', data.patient_id)
+          .in('status', ['pending', 'sample_collected', 'processing']);
         
-        // Get patient phone number
-        console.log('[SMS-Doctor] 2. Fetching patient phone number...');
-        const { data: patientData, error: patientError } = await supabase
-          .from('patients')
-          .select('phone')
-          .eq('id', patientId)
-          .single();
-        
-        console.log('[SMS-Doctor] 3. Patient fetch response:', { patientData, patientError });
-        
-        if (patientError) {
-          console.error('[SMS-Doctor] 4. Error fetching patient phone:', patientError);
-          throw patientError;
+        if (checkError) {
+          console.error('[DoctorDashboard] Error checking existing orders:', checkError);
+          throw checkError;
         }
-        
-        if (!patientData?.phone) {
-          console.error('[SMS-Doctor] 5. Patient phone number not found for', patientId);
-          throw new Error('Patient phone number not found');
+
+        const existingTestIds = new Set(existingOrders?.map((o: any) => o.test_id) || []);
+        const duplicateTests = data.test_ids.filter(testId => existingTestIds.has(testId));
+
+        if (duplicateTests.length > 0) {
+          const duplicateTestNames = duplicateTests
+            .map(id => labTests?.find(t => t.id === id)?.test_name)
+            .filter(Boolean)
+            .join(', ');
+          throw new Error(`These tests are already pending for this patient: ${duplicateTestNames}`);
         }
-        
-        console.log('[SMS-Doctor] 6. Patient phone:', patientData.phone);
-        
-        // Call Edge Function to send SMS
-        console.log('[SMS-Doctor] 7. Calling Edge Function send-appointment-reminder...');
-        console.log('[SMS-Doctor] 8. Request body:', { phone: patientData.phone, appointmentId });
-        
-        const { data, error } = await supabase.functions.invoke('send-appointment-reminder', {
-          body: {
-            phone: patientData.phone,
-            appointmentId,
-          },
-        });
-        
-        console.log('[SMS-Doctor] 9. Edge Function response:', { data, error });
+
+        // Generate unique order numbers (format: LAB + YYYYMMDD + unique counter)
+        const today = new Date();
+        const dateStr = today.toISOString().split('T')[0].replace(/-/g, '');
+        const generateOrderNumber = (index: number) => {
+          // Use timestamp milliseconds + random + index to ensure uniqueness even in batch inserts
+          const timestamp = Date.now().toString().slice(-4); // Last 4 digits of timestamp
+          const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
+          const counter = index.toString().padStart(2, '0');
+          return `LAB${dateStr}-${timestamp}${random}${counter}`;
+        };
+
+        // Create orders for all tests with unique order numbers
+        const ordersToInsert = data.test_ids.map((testId, index) => ({
+          patient_id: data.patient_id,
+          test_id: testId,
+          priority: data.priority,
+          ordered_by: doctorId,
+          order_number: generateOrderNumber(index),
+        }));
+
+        const { error } = await supabase.from('lab_orders').insert(ordersToInsert);
         
         if (error) {
-          console.error('[SMS-Doctor] 10. Error from Edge Function:', error);
-          console.error('[SMS-Doctor] 10a. Error type:', typeof error);
-          console.error('[SMS-Doctor] 10b. Error keys:', Object.keys(error));
+          console.error('[DoctorDashboard] Error creating lab orders:', error);
           throw error;
         }
-        
-        console.log('[SMS-Doctor] 11. SMS sent successfully!', data);
-        return data;
+        console.log('[DoctorDashboard] Lab orders created successfully for', data.test_ids.length, 'tests');
       } catch (err) {
-        console.error('[SMS-Doctor] 12. Exception in sendSmsReminderMutation:', err);
-        console.error('[SMS-Doctor] 12a. Error message:', err instanceof Error ? err.message : String(err));
-        console.error('[SMS-Doctor] 12b. Full error object:', err);
+        console.error('[DoctorDashboard] Lab order creation failed:', err);
         throw err;
       }
     },
     onSuccess: () => {
-      console.log('[SMS-Doctor] 13. onSuccess - SMS sent successfully');
-      toast.success('Reminder SMS sent successfully');
+      queryClient.invalidateQueries({ queryKey: ['doctor-lab-results'] });
+      queryClient.invalidateQueries({ queryKey: ['activity-log'] });
+      setIsAddLabOrderDialogOpen(false);
+      setNewLabOrder({ patient_id: '', test_ids: [], priority: 'normal' });
+      setSelectedTestDetails([]);
+      setTestSearch('');
+      setShowTestList(false);
+      toast.success('Lab orders created successfully');
     },
     onError: (error: Error) => {
-      console.error('[SMS-Doctor] 14. onError - Failed with error:', error.message);
-      toast.error(error.message);
+      console.error('[DoctorDashboard] Lab order mutation error:', error.message);
+      toast.error(`Failed to create lab order: ${error.message}`);
     },
   });
+
+  // SMS reminder mutation disabled - pending Twilio integration
+  // const sendSmsReminderMutation = useMutation({
+  //   ... mutation code removed ...
+  // });
 
   // ===== HANDLERS =====
   const handleConfirmAppointment = (appointment: Appointment) => {
@@ -1054,9 +1273,84 @@ const cancelPrescriptionMutation = useMutation({
     }
   };
 
+  // Toggle patient expansion
+  const togglePatientExpansion = (patientId: string) => {
+    const newExpanded = new Set(expandedPatients);
+    if (newExpanded.has(patientId)) {
+      newExpanded.delete(patientId);
+    } else {
+      newExpanded.add(patientId);
+    }
+    setExpandedPatients(newExpanded);
+  };
+
+  // HANDLER FOR VIEW PATIENT BUTTON
+  const handleViewPatient = async (patient: Patient) => {
+    setSelectedPatient(patient);
+    try {
+      // Fetch medical examinations for this patient
+      const { data, error } = await (supabase as any)
+        .from('medical_examinations')
+        .select('*')
+        .eq('patient_id', patient.id)
+        .order('examination_date', { ascending: false })
+        .limit(1);
+      
+      if (error) throw error;
+      
+      if (data && data.length > 0) {
+        setSelectedExamination(data[0]);
+        setIsViewExaminationModalOpen(true);
+      } else {
+        toast.error('No medical examinations found for this patient');
+      }
+    } catch (err) {
+      console.error('Error fetching patient examinations:', err);
+      toast.error('Failed to load patient examinations');
+    }
+  };
+
+  // HANDLER FOR EXPORT BUTTON
+  const handleExportPatient = (patient: Patient) => {
+    try {
+      // Create CSV content
+      const csvContent = [
+        ['Patient Information'],
+        ['Patient Number', patient.patient_number],
+        ['Name', `${patient.first_name} ${patient.last_name}`],
+        ['Gender', patient.gender || 'N/A'],
+        ['Date of Birth', patient.date_of_birth ? format(new Date(patient.date_of_birth), 'MMM dd, yyyy') : 'N/A'],
+        ['Blood Type', patient.blood_type || 'N/A'],
+      ].map(row => row.join(',')).join('\n');
+      
+      // Create blob and download
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+      
+      link.setAttribute('href', url);
+      link.setAttribute('download', `patient_${patient.patient_number}_${Date.now()}.csv`);
+      link.style.visibility = 'hidden';
+      
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      toast.success(`Patient data exported: ${patient.first_name} ${patient.last_name}`);
+    } catch (err) {
+      console.error('Error exporting patient:', err);
+      toast.error('Failed to export patient data');
+    }
+  };
+
   // HANDLER FOR DIAGNOSE BUTTON
   const handleDiagnoseClick = (patient: Patient) => {
     setSelectedPatient(patient);
+    // Reset diagnosis form
+    setDiagnosisForm({
+      chief_complaint: '',
+      assessment_diagnosis: '',
+    });
     setIsDiagnosisModalOpen(true);
   };
 
@@ -1064,9 +1358,12 @@ const cancelPrescriptionMutation = useMutation({
   const handleCreatePrescription = (patient: Patient) => {
     setSelectedPrescriptionPatient(patient);
     setPrescriptionForm({
-      ...prescriptionForm,
       patient_id: patient.id,
+      medicines: [],
     });
+    setSelectedMedicationDetails([]);
+    setMedicationSearch('');
+    setShowMedicationList(false);
     setIsPrescriptionModalOpen(true);
   };
 
@@ -1119,48 +1416,39 @@ const cancelPrescriptionMutation = useMutation({
       toast.error('Please select a patient');
       return;
     }
-    if (!prescriptionForm.medicine_id) {
-      toast.error('Please select a medication');
+    if (!prescriptionForm.medicines || prescriptionForm.medicines.length === 0) {
+      toast.error('Please add at least one medication');
       return;
     }
-    if (!prescriptionForm.dosage) {
-      toast.error('Please enter dosage');
-      return;
+    
+    // Validate each medicine has required fields
+    for (const med of prescriptionForm.medicines) {
+      if (!med.dosage) {
+        toast.error('Please enter dosage for all medications');
+        return;
+      }
+      if (!med.frequency) {
+        toast.error('Please select frequency for all medications');
+        return;
+      }
     }
-    if (!prescriptionForm.frequency) {
-      toast.error('Please select frequency');
-      return;
-    }
+    
     if (!user?.id) {
       toast.error('Doctor information not available. Please ensure you are logged in.');
       return;
     }
 
-    // If editing an existing prescription, use update mutation
-    if (selectedEditingPrescription) {
-      updatePrescriptionMutation.mutate({
-        ...prescriptionForm,
-        prescription_id: selectedEditingPrescription.id,
-      });
-    } else {
-      // Otherwise create new prescription
-      createPrescriptionMutation.mutate({
-        ...prescriptionForm,
-        doctor_user_id: user.id,
-      });
-    }
+    // Create new prescriptions (multi-medicine support)
+    createPrescriptionMutation.mutate({
+      ...prescriptionForm,
+      doctor_user_id: user.id,
+    });
   };
 
   const handleEditPrescription = (prescription: Prescription) => {
-    setSelectedEditingPrescription(prescription);
-    setPrescriptionForm({
-      patient_id: prescription.patient_id,
-      medicine_id: prescription.medicine_id,
-      dosage: prescription.dosage,
-      frequency: prescription.frequency,
-      duration: prescription.duration,
-    });
-    setIsPrescriptionModalOpen(true);
+    // For now, edit mode is disabled for multi-medicine prescriptions
+    // TODO: Implement full edit flow for multiple medicines
+    toast.error('Edit functionality will be updated for multi-prescription support');
   };
 
   const handleCancelPrescription = (prescriptionId: string) => {
@@ -1279,6 +1567,15 @@ const cancelPrescriptionMutation = useMutation({
         </button>
         <button
           className={`flex items-center gap-2 px-4 py-2 rounded-full font-semibold transition-colors duration-150 ${
+            activeTab === 'lab-tests' ? 'bg-indigo-600 text-white shadow' : 'bg-gray-100 text-gray-700 hover:bg-indigo-100'
+          }`}
+          onClick={() => setActiveTab('lab-tests')}
+        >
+          <BeakerIcon className="w-5 h-5" />
+          Lab Tests
+        </button>
+        <button
+          className={`flex items-center gap-2 px-4 py-2 rounded-full font-semibold transition-colors duration-150 ${
             activeTab === 'lab-results' ? 'bg-orange-500 text-white shadow' : 'bg-gray-100 text-gray-700 hover:bg-orange-100'
           }`}
           onClick={() => setActiveTab('lab-results')}
@@ -1339,19 +1636,6 @@ const cancelPrescriptionMutation = useMutation({
                         <Badge className={getStatusColor(apt.status)}>{apt.status}</Badge>
                       </td>
                       <td className="py-3 px-4 flex gap-2">
-                        <button
-                          className="bg-purple-500 hover:bg-purple-600 text-white px-2 py-1 rounded text-sm"
-                          onClick={() =>
-                            sendSmsReminderMutation.mutate({
-                              appointmentId: apt.id,
-                              patientId: apt.patient_id,
-                            })
-                          }
-                          disabled={sendSmsReminderMutation.isPending}
-                          title="Send SMS reminder"
-                        >
-                          <EnvelopeIcon className="h-4 w-4" />
-                        </button>
                         {apt.status === 'scheduled' || apt.status === 'pending' ? (
                           <button
                             className="bg-green-500 hover:bg-green-600 text-white px-2 py-1 rounded text-sm"
@@ -1493,10 +1777,7 @@ const cancelPrescriptionMutation = useMutation({
                       <td className="py-3 px-4 flex gap-2">
                         <button
                           className="bg-gray-500 hover:bg-gray-600 text-white px-3 py-1 rounded text-sm"
-                          onClick={() => {
-                            setSelectedPatient(patient);
-                            setIsViewExaminationModalOpen(true);
-                          }}
+                          onClick={() => handleViewPatient(patient)}
                         >
                           View
                         </button>
@@ -1508,7 +1789,7 @@ const cancelPrescriptionMutation = useMutation({
                         </button>
                         <button
                           className="bg-green-500 hover:bg-green-600 text-white px-3 py-1 rounded text-sm"
-                          onClick={() => alert('Export action (to be implemented)')}
+                          onClick={() => handleExportPatient(patient)}
                         >
                           Export
                         </button>
@@ -1886,12 +2167,11 @@ const cancelPrescriptionMutation = useMutation({
           setSelectedPrescriptionPatient(null);
           setPrescriptionForm({
             patient_id: '',
-            medicine_id: '',
-            dosage: '',
-            frequency: '',
-            duration: '',
-           
+            medicines: [],
           });
+          setSelectedMedicationDetails([]);
+          setMedicationSearch('');
+          setShowMedicationList(false);
           setIsPrescriptionModalOpen(true);
         }}
       >
@@ -1908,46 +2188,98 @@ const cancelPrescriptionMutation = useMutation({
         <table className="w-full">
           <thead>
             <tr className="border-b-2 border-gray-200">
+              <th className="text-left py-3 px-4 w-6"></th>
               <th className="text-left py-3 px-4 font-semibold">Patient</th>
-              <th className="text-left py-3 px-4 font-semibold">Medication</th>
-              <th className="text-left py-3 px-4 font-semibold">Dosage</th>
-              <th className="text-left py-3 px-4 font-semibold">Frequency</th>
-              <th className="text-left py-3 px-4 font-semibold">Duration</th>
-              <th className="text-left py-3 px-4 font-semibold">Prescribed Date</th>
+              <th className="text-left py-3 px-4 font-semibold">Medications</th>
+              <th className="text-left py-3 px-4 font-semibold">Last Prescribed</th>
               <th className="text-left py-3 px-4 font-semibold">Status</th>
-              <th className="text-left py-3 px-4 font-semibold">Actions</th>
+              <th className="text-left py-3 px-4 font-semibold"></th>
             </tr>
           </thead>
           <tbody>
-            {activePrescriptions.map((prescription) => (
-              <tr key={prescription.id} className="border-b border-gray-200 hover:bg-gray-50">
-                <td className="py-3 px-4 font-medium">{prescription.patient_name}</td>
-                <td className="py-3 px-4">{prescription.medicine_name}</td>
-                <td className="py-3 px-4">{prescription.dosage}</td>
-                <td className="py-3 px-4">{prescription.frequency}</td>
-                <td className="py-3 px-4">{prescription.duration}</td>
-                <td className="py-3 px-4">
-                  {format(new Date(prescription.prescribed_date), 'MMM dd, yyyy')}
-                </td>
-                <td className="py-3 px-4">
-                  <Badge className={getStatusColor(prescription.status)}>{prescription.status}</Badge>
-                </td>
-                <td className="py-3 px-4 flex gap-2">
-                  <button
-                    className="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded text-sm"
-                    onClick={() => handleEditPrescription(prescription)}
-                  >
-                    Edit
-                  </button>
-                  <button
-                    className="bg-red-500 hover:bg-red-600 text-white px-3 py-1 rounded text-sm"
-                    onClick={() => handleCancelPrescription(prescription.id)}
-                  >
-                    Cancel
-                  </button>
-                </td>
-              </tr>
-            ))}
+            {Array.from(
+              activePrescriptions.reduce((acc, prescription) => {
+                if (!acc.has(prescription.patient_id)) {
+                  acc.set(prescription.patient_id, []);
+                }
+                acc.get(prescription.patient_id)!.push(prescription);
+                return acc;
+              }, new Map<string, typeof activePrescriptions>())
+            )
+              .sort((a, b) => a[1][0].patient_name.localeCompare(b[1][0].patient_name))
+              .map(([patientId, patientMedicines]) => {
+                const isExpanded = expandedPatients.has(patientId);
+                const lastPrescription = patientMedicines[0];
+                return (
+                  <React.Fragment key={patientId}>
+                    {/* Patient Row */}
+                    <tr
+                      className="border-b border-gray-200 hover:bg-blue-50 cursor-pointer"
+                      onClick={() => togglePatientExpansion(patientId)}
+                    >
+                      <td className="py-3 px-4 text-center">
+                        <span className={`inline-block transition-transform ${isExpanded ? 'rotate-180' : ''}`}>
+                          ▼
+                        </span>
+                      </td>
+                      <td className="py-3 px-4 font-semibold text-gray-800">{lastPrescription.patient_name}</td>
+                      <td className="py-3 px-4">
+                        <Badge className="bg-blue-100 text-blue-800">{patientMedicines.length} medicines</Badge>
+                      </td>
+                      <td className="py-3 px-4 text-sm text-gray-600">
+                        {lastPrescription.prescribed_date ? new Date(lastPrescription.prescribed_date).toLocaleDateString() : 'N/A'}
+                      </td>
+                      <td className="py-3 px-4">
+                        <Badge className={getStatusColor(lastPrescription.status)}>{lastPrescription.status}</Badge>
+                      </td>
+                      <td className="py-3 px-4">
+                        <button
+                          className="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded text-sm"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            togglePatientExpansion(patientId);
+                          }}
+                        >
+                          {isExpanded ? 'Collapse' : 'View All'}
+                        </button>
+                      </td>
+                    </tr>
+
+                    {/* Expanded Patient Medicines */}
+                    {isExpanded &&
+                      patientMedicines.map((medicine) => (
+                        <tr key={`${patientId}-${medicine.id}-${medicine.medicine_id}`} className="border-b border-gray-100 bg-blue-50 hover:bg-blue-100">
+                          <td className="py-3 px-4"></td>
+                          <td className="py-3 px-4 pl-12">
+                            <div className="text-sm">
+                              <div className="font-medium text-gray-700">{medicine.medicine_name}</div>
+                            </div>
+                          </td>
+                          <td className="py-3 px-4">
+                            <div className="text-sm">
+                              <div className="text-gray-700">{medicine.dosage} • {medicine.frequency}</div>
+                              {medicine.duration && <div className="text-gray-600">{medicine.duration}</div>}
+                            </div>
+                          </td>
+                          <td className="py-3 px-4 text-sm text-gray-600">
+                            {medicine.prescribed_date ? new Date(medicine.prescribed_date).toLocaleDateString() : 'N/A'}
+                          </td>
+                          <td className="py-3 px-4">
+                            <Badge className={getStatusColor(medicine.status)}>{medicine.status}</Badge>
+                          </td>
+                          <td className="py-3 px-4 flex gap-2">
+                            <button
+                              className="bg-red-500 hover:bg-red-600 text-white px-3 py-1 rounded text-xs"
+                              onClick={() => handleCancelPrescription(medicine.id)}
+                            >
+                              Cancel
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                  </React.Fragment>
+                );
+              })}
           </tbody>
         </table>
       </div>
@@ -1957,14 +2289,8 @@ const cancelPrescriptionMutation = useMutation({
     {isPrescriptionModalOpen && (
       <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-50 overflow-y-auto">
         <div className="bg-white rounded-lg shadow-lg p-6 w-full max-w-md my-4">
-          <h3 className="text-xl font-bold mb-4">
-            {selectedEditingPrescription ? 'Edit Prescription' : 'Create Prescription'}
-          </h3>
-          <p className="mb-4 text-gray-600">
-            {selectedEditingPrescription
-              ? 'Update the prescription details below.'
-              : 'Create a new prescription for the selected patient.'}
-          </p>
+          <h3 className="text-xl font-bold mb-4">Create Prescription</h3>
+          <p className="mb-4 text-gray-600">Create a new prescription with multiple medications for the selected patient.</p>
 
           {/* Patient Selection */}
           <div className="mb-4">
@@ -1977,8 +2303,7 @@ const cancelPrescriptionMutation = useMutation({
                 const patient = activePatients?.find((p) => p.id === patientId);
                 if (patient) setSelectedPrescriptionPatient(patient);
               }}
-              disabled={!!selectedEditingPrescription}
-              className="w-full border border-gray-300 rounded px-3 py-2 disabled:bg-gray-100 disabled:cursor-not-allowed"
+              className="w-full border border-gray-300 rounded px-3 py-2"
             >
               <option value="">Select patient</option>
               {activePatients?.map((patient) => (
@@ -1989,71 +2314,151 @@ const cancelPrescriptionMutation = useMutation({
             </select>
           </div>
 
-          {/* Medication Selection */}
+          {/* Medication Search and Selection */}
           <div className="mb-4">
-            <label className="block text-sm font-medium text-gray-700 mb-1">Medication *</label>
-            <select
-              value={prescriptionForm.medicine_id}
-              onChange={(e) => handlePrescriptionFormChange('medicine_id', e.target.value)}
-              className="w-full border border-gray-300 rounded px-3 py-2"
-              disabled={loadingMedications}
-            >
-              <option value="">
-                {loadingMedications ? 'Loading medications...' : 'Select medication'}
-              </option>
-              {availableMedications?.map((med: any) => (
-                <option key={med.id} value={med.id}>
-                  {med.name} ({med.strength} {med.form})
-                </option>
-              ))}
-            </select>
-          </div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Medications * {loadingMedications && <span className="text-xs text-gray-500">(loading...)</span>}</label>
+            <div className="relative">
+              <input
+                type="text"
+                placeholder={loadingMedications ? "Loading medications..." : "Search medications by name, strength, or form..."}
+                value={medicationSearch}
+                onChange={(e) => {
+                  setMedicationSearch(e.target.value);
+                  setShowMedicationList(true);
+                }}
+                onFocus={() => setShowMedicationList(true)}
+                className="w-full border border-gray-300 rounded px-3 py-2"
+                disabled={loadingMedications}
+              />
+              {showMedicationList && medicationSearch && (
+                <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-50 max-h-48 overflow-y-auto">
+                  {filteredMedications.length > 0 ? (
+                    filteredMedications.map((med: any) => (
+                      <button
+                        key={med.id}
+                        type="button"
+                        onClick={() => {
+                          // Check if medication is already selected
+                          if (!prescriptionForm.medicines.some(m => m.medicine_id === med.id)) {
+                            setPrescriptionForm({
+                              ...prescriptionForm,
+                              medicines: [
+                                ...prescriptionForm.medicines,
+                                {
+                                  medicine_id: med.id,
+                                  dosage: '',
+                                  frequency: '',
+                                  duration: '',
+                                },
+                              ],
+                            });
+                            setSelectedMedicationDetails([
+                              ...selectedMedicationDetails,
+                              {
+                                id: med.id,
+                                name: med.name,
+                                strength: med.strength,
+                                form: med.form,
+                              },
+                            ]);
+                            setMedicationSearch('');
+                          }
+                        }}
+                        className={`w-full text-left px-4 py-3 hover:bg-gray-100 border-b last:border-b-0 transition ${
+                          prescriptionForm.medicines.some(m => m.medicine_id === med.id) ? 'bg-blue-50' : ''
+                        }`}
+                      >
+                        <div className="font-medium text-sm">{med.name}</div>
+                        <div className="text-xs text-gray-500">{med.strength} {med.form} • {med.category}</div>
+                      </button>
+                    ))
+                  ) : (
+                    <div className="px-4 py-3 text-sm text-gray-500 text-center">No medications found</div>
+                  )}
+                </div>
+              )}
+            </div>
 
-          {/* Dosage */}
-          <div className="mb-4">
-            <label className="block text-sm font-medium text-gray-700 mb-1">Dosage *</label>
-            <input
-              type="text"
-              placeholder="e.g., 10mg"
-              value={prescriptionForm.dosage}
-              onChange={(e) => handlePrescriptionFormChange('dosage', e.target.value)}
-              className="w-full border border-gray-300 rounded px-3 py-2"
-            />
-          </div>
+            {/* Selected Medications */}
+            {prescriptionForm.medicines.length > 0 && (
+              <div className="mt-3 space-y-3 border-t pt-3">
+                <p className="text-sm font-semibold text-gray-700">Selected Medications ({prescriptionForm.medicines.length}):</p>
+                {prescriptionForm.medicines.map((med, idx) => {
+                  const medDetails = selectedMedicationDetails.find(m => m.id === med.medicine_id);
+                  return (
+                    <div key={idx} className="bg-blue-50 border border-blue-200 rounded p-3">
+                      <div className="flex items-start justify-between mb-2">
+                        <div>
+                          <div className="font-medium text-sm text-gray-800">{medDetails?.name}</div>
+                          <div className="text-xs text-gray-600">{medDetails?.strength} {medDetails?.form}</div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPrescriptionForm({
+                              ...prescriptionForm,
+                              medicines: prescriptionForm.medicines.filter((_, i) => i !== idx),
+                            });
+                            setSelectedMedicationDetails(selectedMedicationDetails.filter(m => m.id !== med.medicine_id));
+                          }}
+                          className="text-red-500 hover:text-red-700 font-semibold"
+                        >
+                          ✕
+                        </button>
+                      </div>
 
-          {/* Frequency */}
-          <div className="mb-4">
-            <label className="block text-sm font-medium text-gray-700 mb-1">Frequency *</label>
-            <select
-              value={prescriptionForm.frequency}
-              onChange={(e) => handlePrescriptionFormChange('frequency', e.target.value)}
-              className="w-full border border-gray-300 rounded px-3 py-2"
-            >
-              <option value="">Select frequency</option>
-              <option value="Once daily">Once daily</option>
-              <option value="Twice daily">Twice daily</option>
-              <option value="Three times daily">Three times daily</option>
-              <option value="Four times daily">Four times daily</option>
-              <option value="Every 6 hours">Every 6 hours</option>
-              <option value="Every 8 hours">Every 8 hours</option>
-              <option value="Every 12 hours">Every 12 hours</option>
-              <option value="As needed">As needed</option>
-            </select>
-          </div>
+                      {/* Dosage for this medication */}
+                      <input
+                        type="text"
+                        placeholder="Dosage (e.g., 10mg)"
+                        value={med.dosage}
+                        onChange={(e) => {
+                          const updatedMeds = [...prescriptionForm.medicines];
+                          updatedMeds[idx].dosage = e.target.value;
+                          setPrescriptionForm({ ...prescriptionForm, medicines: updatedMeds });
+                        }}
+                        className="w-full border border-gray-300 rounded px-2 py-1 text-sm mb-2"
+                      />
 
-          {/* Duration */}
-          <div className="mb-4">
-            <label className="block text-sm font-medium text-gray-700 mb-1">Duration</label>
-            <input
-              type="text"
-              placeholder="e.g., 7 days, 2 weeks, 30 days"
-              value={prescriptionForm.duration}
-              onChange={(e) => handlePrescriptionFormChange('duration', e.target.value)}
-              className="w-full border border-gray-300 rounded px-3 py-2"
-            />
-          </div>
+                      {/* Frequency for this medication */}
+                      <select
+                        value={med.frequency}
+                        onChange={(e) => {
+                          const updatedMeds = [...prescriptionForm.medicines];
+                          updatedMeds[idx].frequency = e.target.value;
+                          setPrescriptionForm({ ...prescriptionForm, medicines: updatedMeds });
+                        }}
+                        className="w-full border border-gray-300 rounded px-2 py-1 text-sm mb-2"
+                      >
+                        <option value="">Select frequency</option>
+                        <option value="Once daily">Once daily</option>
+                        <option value="Twice daily">Twice daily</option>
+                        <option value="Three times daily">Three times daily</option>
+                        <option value="Four times daily">Four times daily</option>
+                        <option value="Every 6 hours">Every 6 hours</option>
+                        <option value="Every 8 hours">Every 8 hours</option>
+                        <option value="Every 12 hours">Every 12 hours</option>
+                        <option value="As needed">As needed</option>
+                      </select>
 
-    
+                      {/* Duration for this medication */}
+                      <input
+                        type="text"
+                        placeholder="Duration (e.g., 7 days)"
+                        value={med.duration}
+                        onChange={(e) => {
+                          const updatedMeds = [...prescriptionForm.medicines];
+                          updatedMeds[idx].duration = e.target.value;
+                          setPrescriptionForm({ ...prescriptionForm, medicines: updatedMeds });
+                        }}
+                        className="w-full border border-gray-300 rounded px-2 py-1 text-sm"
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
 
           <div className="flex gap-2 justify-end">
             <button
@@ -2063,12 +2468,11 @@ const cancelPrescriptionMutation = useMutation({
                 setSelectedEditingPrescription(null);
                 setPrescriptionForm({
                   patient_id: '',
-                  medicine_id: '',
-                  dosage: '',
-                  frequency: '',
-                  duration: '',
-                 
+                  medicines: [],
                 });
+                setSelectedMedicationDetails([]);
+                setMedicationSearch('');
+                setShowMedicationList(false);
                 setSelectedPrescriptionPatient(null);
               }}
             >
@@ -2077,15 +2481,9 @@ const cancelPrescriptionMutation = useMutation({
             <button
               className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-50"
               onClick={handleSubmitPrescription}
-              disabled={createPrescriptionMutation.isPending || updatePrescriptionMutation.isPending}
+              disabled={createPrescriptionMutation.isPending}
             >
-              {selectedEditingPrescription
-                ? updatePrescriptionMutation.isPending
-                  ? 'Updating...'
-                  : 'Update Prescription'
-                : createPrescriptionMutation.isPending
-                ? 'Creating...'
-                : 'Create Prescription'}
+              {createPrescriptionMutation.isPending ? 'Creating...' : 'Create Prescriptions'}
             </button>
           </div>
         </div>
@@ -2093,6 +2491,497 @@ const cancelPrescriptionMutation = useMutation({
     )}
   </div>
 )}
+
+      {/* LAB TESTS TAB */}
+      {activeTab === 'lab-tests' && (
+        <div className="bg-white rounded-lg shadow p-6">
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <h2 className="text-xl font-semibold">Lab Test Orders</h2>
+              <p className="text-sm text-gray-500 mt-1">Manage and order laboratory tests</p>
+            </div>
+            <Dialog open={isAddLabOrderDialogOpen} onOpenChange={setIsAddLabOrderDialogOpen}>
+              <DialogTrigger asChild>
+                <Button size="sm">New Lab Test</Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Create Lab Order</DialogTitle>
+                </DialogHeader>
+                <form onSubmit={(e) => {
+                  e.preventDefault();
+                  if (!newLabOrder.patient_id?.trim()) {
+                    toast.error('Patient is required');
+                    return;
+                  }
+                  if (newLabOrder.test_ids.length === 0) {
+                    toast.error('At least one test is required');
+                    return;
+                  }
+                  createLabOrderMutation.mutate(newLabOrder);
+                }} className="space-y-4">
+                  <div className="space-y-2">
+                    <Label>Patient *</Label>
+                    <Select value={newLabOrder.patient_id} onValueChange={(v) => {
+                      setNewLabOrder({ ...newLabOrder, patient_id: v });
+                      // Reset selected tests when patient changes
+                      setSelectedTestDetails([]);
+                      setNewLabOrder(prev => ({ ...prev, test_ids: [] }));
+                    }}>
+                      <SelectTrigger><SelectValue placeholder="Select patient" /></SelectTrigger>
+                      <SelectContent>
+                        {patientsList?.map((p: any) => (
+                          <SelectItem key={p.id} value={p.id}>{p.first_name} {p.last_name} ({p.patient_number})</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Tests * {testsLoading && <span className="text-xs text-gray-500">(loading...)</span>}</Label>
+                    <div className="relative">
+                      <Input
+                        placeholder={testsLoading ? "Loading tests..." : "Search and add tests..."}
+                        value={testSearch}
+                        onChange={(e) => {
+                          setTestSearch(e.target.value);
+                          setShowTestList(true);
+                        }}
+                        onFocus={() => setShowTestList(true)}
+                        className="w-full"
+                        disabled={testsLoading || !newLabOrder.patient_id}
+                      />
+                      {!newLabOrder.patient_id && <p className="text-xs text-red-500 mt-1">Select patient first</p>}
+                      {showTestList && testSearch && (
+                        <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-50 max-h-64 overflow-y-auto">
+                          {filteredTests.length > 0 ? (
+                            filteredTests.map((test: any) => {
+                              const isSelected = newLabOrder.test_ids.includes(test.id);
+                              const isDuplicate = labResults?.some((lr: any) => 
+                                lr.patient_id === newLabOrder.patient_id &&
+                                lr.id.includes(test.id) &&
+                                ['pending', 'sample_collected', 'processing'].includes(lr.status)
+                              );
+                              return (
+                                <button
+                                  key={test.id}
+                                  type="button"
+                                  onClick={() => {
+                                    if (isSelected) {
+                                      setNewLabOrder({
+                                        ...newLabOrder,
+                                        test_ids: newLabOrder.test_ids.filter(id => id !== test.id)
+                                      });
+                                      setSelectedTestDetails(selectedTestDetails.filter(t => t.id !== test.id));
+                                    } else {
+                                      setNewLabOrder({
+                                        ...newLabOrder,
+                                        test_ids: [...newLabOrder.test_ids, test.id]
+                                      });
+                                      setSelectedTestDetails([
+                                        ...selectedTestDetails,
+                                        {
+                                          id: test.id,
+                                          name: test.test_name,
+                                          code: test.test_code,
+                                          price: test.price
+                                        }
+                                      ]);
+                                    }
+                                    setTestSearch('');
+                                  }}
+                                  className={`w-full text-left px-4 py-3 border-b last:border-b-0 transition ${
+                                    isSelected ? 'bg-blue-100 hover:bg-blue-150' : isDuplicate ? 'bg-red-50 hover:bg-red-100' : 'hover:bg-gray-100'
+                                  } ${isDuplicate ? 'opacity-60 cursor-not-allowed' : ''}`}
+                                  disabled={isDuplicate}
+                                >
+                                  <div className="flex items-center justify-between">
+                                    <div className="flex-1">
+                                      <div className="font-medium text-sm">{test.test_name}</div>
+                                      <div className="text-xs text-gray-500">{test.test_code} • {test.category} • ${test.price}</div>
+                                    </div>
+                                    {isSelected && <span className="text-blue-600 font-bold">✓</span>}
+                                    {isDuplicate && <span className="text-red-600 text-xs font-semibold">Already pending</span>}
+                                  </div>
+                                </button>
+                              );
+                            })
+                          ) : (
+                            <div className="px-4 py-3 text-sm text-gray-500 text-center">No tests found</div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Selected Tests Display */}
+                  {selectedTestDetails.length > 0 && (
+                    <div className="space-y-2">
+                      <Label>Selected Tests ({selectedTestDetails.length})</Label>
+                      <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 space-y-2">
+                        {selectedTestDetails.map((test) => (
+                          <div key={test.id} className="flex items-center justify-between bg-white p-2 rounded border border-blue-100">
+                            <div>
+                              <div className="font-medium text-sm text-gray-900">{test.name}</div>
+                              <div className="text-xs text-gray-500">{test.code} • ${test.price}</div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setNewLabOrder({
+                                  ...newLabOrder,
+                                  test_ids: newLabOrder.test_ids.filter(id => id !== test.id)
+                                });
+                                setSelectedTestDetails(selectedTestDetails.filter(t => t.id !== test.id));
+                              }}
+                              className="text-red-500 hover:text-red-700 font-bold"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ))}
+                        <div className="text-right text-sm font-semibold text-gray-900 pt-2 border-t border-blue-200">
+                          Total: ${selectedTestDetails.reduce((sum, t) => sum + t.price, 0).toFixed(2)}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="space-y-2">
+                    <Label>Priority</Label>
+                    <Select value={newLabOrder.priority} onValueChange={(v) => setNewLabOrder({ ...newLabOrder, priority: v })}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="normal">Normal</SelectItem>
+                        <SelectItem value="urgent">Urgent</SelectItem>
+                        <SelectItem value="stat">STAT</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <Button type="submit" className="w-full" disabled={createLabOrderMutation.isPending}>
+                    {createLabOrderMutation.isPending ? 'Creating...' : 'Create Order'}
+                  </Button>
+                </form>
+              </DialogContent>
+            </Dialog>
+          </div>
+
+          {/* Lab Orders List - Grouped by Patient */}
+          {loadingLabResults ? (
+            <div className="text-center py-8">Loading lab orders...</div>
+          ) : !labResults || labResults.length === 0 ? (
+            <div className="text-center py-8 text-gray-500">No lab orders yet. Create one to get started.</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b-2 border-gray-200 bg-gray-50">
+                    <th className="text-left py-3 px-4 font-semibold w-8">
+                      <span className="text-gray-400">▼</span>
+                    </th>
+                    <th className="text-left py-3 px-4 font-semibold">Patient</th>
+                    <th className="text-left py-3 px-4 font-semibold">Orders Count</th>
+                    <th className="text-left py-3 px-4 font-semibold">Last Order Date</th>
+                    <th className="text-left py-3 px-4 font-semibold">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Array.from(
+                    labResults.reduce((acc, order) => {
+                      if (!acc.has(order.patient_id)) {
+                        acc.set(order.patient_id, []);
+                      }
+                      acc.get(order.patient_id)!.push(order);
+                      return acc;
+                    }, new Map<string, LabResult[]>())
+                  )
+                    .sort((a, b) => a[1][0].patient_name.localeCompare(b[1][0].patient_name))
+                    .map(([patientId, patientOrders]) => {
+                      const isExpanded = expandedPatients.has(patientId);
+                      const lastOrder = patientOrders[0];
+                      return (
+                        <React.Fragment key={patientId}>
+                          {/* Patient Row */}
+                          <tr
+                            className="border-b border-gray-200 hover:bg-blue-50 cursor-pointer"
+                            onClick={() => togglePatientExpansion(patientId)}
+                          >
+                            <td className="py-3 px-4 text-center">
+                              <span className={`inline-block transition-transform ${isExpanded ? 'rotate-180' : ''}`}>
+                                ▼
+                              </span>
+                            </td>
+                            <td className="py-3 px-4 font-semibold text-gray-800">{lastOrder.patient_name}</td>
+                            <td className="py-3 px-4">
+                              <Badge className="bg-blue-100 text-blue-800">{patientOrders.length} orders</Badge>
+                            </td>
+                            <td className="py-3 px-4 text-sm text-gray-600">
+                              {patientOrders[0].created_at ? new Date(patientOrders[0].created_at).toLocaleDateString() : 'N/A'}
+                            </td>
+                            <td className="py-3 px-4">
+                              <button
+                                className="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded text-sm"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  togglePatientExpansion(patientId);
+                                }}
+                              >
+                                {isExpanded ? 'Collapse' : 'View All'}
+                              </button>
+                            </td>
+                          </tr>
+
+                          {/* Expanded Patient Orders */}
+                          {isExpanded &&
+                            patientOrders.map((order) => (
+                              <tr key={order.id} className="border-b border-gray-100 bg-blue-50 hover:bg-blue-100">
+                                <td className="py-3 px-4"></td>
+                                <td className="py-3 px-4 pl-12">
+                                  <div className="text-sm">
+                                    <div className="font-medium text-gray-700">{order.order_number}</div>
+                                    <div className="text-gray-600">{order.test_type}</div>
+                                  </div>
+                                </td>
+                                <td className="py-3 px-4">
+                                  <Badge className={getStatusColor(order.status)}>{order.status}</Badge>
+                                </td>
+                                <td className="py-3 px-4">
+                                  <Badge className={getPriorityColor(order.priority)}>{order.priority}</Badge>
+                                </td>
+                                <td className="py-3 px-4 text-sm text-gray-600">
+                                  {order.created_at ? new Date(order.created_at).toLocaleDateString() : 'N/A'}
+                                </td>
+                                <td className="py-3 px-4 flex gap-2">
+                                  <button
+                                    className="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded text-xs"
+                                    onClick={() => {
+                                      setSelectedLabOrder(order);
+                                      setIsViewLabOrderModalOpen(true);
+                                    }}
+                                  >
+                                    Details
+                                  </button>
+                                  {order.status !== 'completed' && order.status !== 'cancelled' && (
+                                    <>
+                                      <button
+                                        className="bg-green-500 hover:bg-green-600 text-white px-3 py-1 rounded text-xs"
+                                        onClick={() => {
+                                          setSelectedLabOrder(order);
+                                          setEditLabOrderForm({
+                                            priority: order.priority,
+                                            result_value: order.result_value || '',
+                                            result_notes: order.result_notes || '',
+                                            is_abnormal: order.is_abnormal || false,
+                                          });
+                                          setIsEditLabOrderModalOpen(true);
+                                        }}
+                                      >
+                                        Edit
+                                      </button>
+                                      <button
+                                        className="bg-amber-500 hover:bg-amber-600 text-white px-3 py-1 rounded text-xs"
+                                        onClick={() => {
+                                          setSelectedLabOrder(order);
+                                          setIsCancelLabOrderDialogOpen(true);
+                                        }}
+                                      >
+                                        Cancel
+                                      </button>
+                                    </>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                        </React.Fragment>
+                      );
+                    })}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* View Lab Order Modal */}
+          {isViewLabOrderModalOpen && selectedLabOrder && (
+            <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-50">
+              <div className="bg-white rounded-lg shadow-lg p-6 w-full max-w-2xl max-h-96 overflow-y-auto">
+                <h3 className="text-xl font-bold mb-4">Lab Order Details</h3>
+                <div className="grid grid-cols-2 gap-4 mb-6">
+                  <div>
+                    <p className="text-gray-600 text-sm">Order Number</p>
+                    <p className="font-semibold">{selectedLabOrder.order_number}</p>
+                  </div>
+                  <div>
+                    <p className="text-gray-600 text-sm">Patient</p>
+                    <p className="font-semibold">{selectedLabOrder.patient_name}</p>
+                  </div>
+                  <div>
+                    <p className="text-gray-600 text-sm">Test Type</p>
+                    <p className="font-semibold">{selectedLabOrder.test_type}</p>
+                  </div>
+                  <div>
+                    <p className="text-gray-600 text-sm">Date Created</p>
+                    <p className="font-semibold">{selectedLabOrder.created_at ? new Date(selectedLabOrder.created_at).toLocaleDateString() : 'N/A'}</p>
+                  </div>
+                  <div>
+                    <p className="text-gray-600 text-sm">Status</p>
+                    <Badge className={getStatusColor(selectedLabOrder.status)}>{selectedLabOrder.status}</Badge>
+                  </div>
+                  <div>
+                    <p className="text-gray-600 text-sm">Priority</p>
+                    <Badge className={getPriorityColor(selectedLabOrder.priority)}>{selectedLabOrder.priority}</Badge>
+                  </div>
+                  <div>
+                    <p className="text-gray-600 text-sm">Result Value</p>
+                    <p className="font-semibold">{selectedLabOrder.result_value || 'Pending'}</p>
+                  </div>
+                  <div>
+                    <p className="text-gray-600 text-sm">Abnormal</p>
+                    <p className="font-semibold">{selectedLabOrder.is_abnormal ? 'Yes' : 'No'}</p>
+                  </div>
+                </div>
+                {selectedLabOrder.result_notes && (
+                  <div className="mb-6">
+                    <p className="text-gray-600 text-sm">Notes</p>
+                    <p className="font-semibold">{selectedLabOrder.result_notes}</p>
+                  </div>
+                )}
+                {selectedLabOrder.sample_collected_at && (
+                  <div className="mb-6">
+                    <p className="text-gray-600 text-sm">Sample Collected At</p>
+                    <p className="font-semibold">{new Date(selectedLabOrder.sample_collected_at).toLocaleString()}</p>
+                  </div>
+                )}
+                <button
+                  className="w-full px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+                  onClick={() => setIsViewLabOrderModalOpen(false)}
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Cancel Lab Order Dialog */}
+          {isCancelLabOrderDialogOpen && selectedLabOrder && (
+            <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-50">
+              <div className="bg-white rounded-lg shadow-lg p-6 w-full max-w-md">
+                <h3 className="text-xl font-bold mb-4">Cancel Lab Order</h3>
+                <p className="text-gray-700 mb-6">
+                  Are you sure you want to cancel the lab order <strong>{selectedLabOrder.order_number}</strong> for <strong>{selectedLabOrder.patient_name}</strong>?
+                </p>
+                <div className="flex gap-4">
+                  <button
+                    className="flex-1 px-4 py-2 bg-gray-400 text-white rounded hover:bg-gray-500"
+                    onClick={() => {
+                      setIsCancelLabOrderDialogOpen(false);
+                      setSelectedLabOrder(null);
+                    }}
+                  >
+                    Keep Order
+                  </button>
+                  <button
+                    className="flex-1 px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600"
+                    onClick={() => {
+                      if (selectedLabOrder) {
+                        cancelLabOrderMutation.mutate(selectedLabOrder.id);
+                      }
+                    }}
+                    disabled={cancelLabOrderMutation.isPending}
+                  >
+                    {cancelLabOrderMutation.isPending ? 'Cancelling...' : 'Cancel Order'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Edit Lab Order Modal */}
+          {isEditLabOrderModalOpen && selectedLabOrder && (
+            <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-50">
+              <div className="bg-white rounded-lg shadow-lg p-6 w-full max-w-2xl max-h-96 overflow-y-auto">
+                <h3 className="text-xl font-bold mb-4">Edit Lab Order</h3>
+                <div className="grid grid-cols-2 gap-4 mb-6">
+                  <div>
+                    <label className="block text-gray-600 text-sm font-semibold">Priority</label>
+                    <select
+                      value={editLabOrderForm.priority}
+                      onChange={(e) => setEditLabOrderForm({ ...editLabOrderForm, priority: e.target.value })}
+                      className="w-full border border-gray-300 rounded px-3 py-2 mt-1"
+                    >
+                      <option value="normal">Normal</option>
+                      <option value="urgent">Urgent</option>
+                      <option value="critical">Critical</option>
+                      <option value="stat">STAT</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-gray-600 text-sm font-semibold">Abnormal</label>
+                    <div className="flex items-center mt-2">
+                      <input
+                        type="checkbox"
+                        checked={editLabOrderForm.is_abnormal}
+                        onChange={(e) => setEditLabOrderForm({ ...editLabOrderForm, is_abnormal: e.target.checked })}
+                        className="h-4 w-4"
+                      />
+                      <span className="ml-2">{editLabOrderForm.is_abnormal ? 'Yes' : 'No'}</span>
+                    </div>
+                  </div>
+                  <div className="col-span-2">
+                    <label className="block text-gray-600 text-sm font-semibold">Result Value</label>
+                    <input
+                      type="text"
+                      value={editLabOrderForm.result_value}
+                      onChange={(e) => setEditLabOrderForm({ ...editLabOrderForm, result_value: e.target.value })}
+                      placeholder="e.g., 125 mg/dL"
+                      className="w-full border border-gray-300 rounded px-3 py-2 mt-1"
+                    />
+                  </div>
+                  <div className="col-span-2">
+                    <label className="block text-gray-600 text-sm font-semibold">Result Notes</label>
+                    <textarea
+                      value={editLabOrderForm.result_notes}
+                      onChange={(e) => setEditLabOrderForm({ ...editLabOrderForm, result_notes: e.target.value })}
+                      placeholder="Add any notes about this result..."
+                      className="w-full border border-gray-300 rounded px-3 py-2 mt-1"
+                      rows={3}
+                    />
+                  </div>
+                </div>
+                <div className="flex gap-4">
+                  <button
+                    className="flex-1 px-4 py-2 bg-gray-400 text-white rounded hover:bg-gray-500"
+                    onClick={() => {
+                      setIsEditLabOrderModalOpen(false);
+                      setSelectedLabOrder(null);
+                      setEditLabOrderForm({
+                        priority: 'normal',
+                        result_value: '',
+                        result_notes: '',
+                        is_abnormal: false,
+                      });
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    className="flex-1 px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600"
+                    onClick={() => {
+                      if (selectedLabOrder) {
+                        editLabOrderMutation.mutate({
+                          orderId: selectedLabOrder.id,
+                          updates: editLabOrderForm,
+                        });
+                      }
+                    }}
+                    disabled={editLabOrderMutation.isPending}
+                  >
+                    {editLabOrderMutation.isPending ? 'Saving...' : 'Save Changes'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* LAB RESULTS TAB */}
       {activeTab === 'lab-results' && (
@@ -2107,42 +2996,98 @@ const cancelPrescriptionMutation = useMutation({
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
-                  <tr className="border-b-2 border-gray-200">
-                    <th className="text-left py-3 px-4 font-semibold">Order #</th>
+                  <tr className="border-b-2 border-gray-200 bg-gray-50">
+                    <th className="text-left py-3 px-4 font-semibold w-8">
+                      <span className="text-gray-400">▼</span>
+                    </th>
                     <th className="text-left py-3 px-4 font-semibold">Patient</th>
-                    <th className="text-left py-3 px-4 font-semibold">Test Type</th>
-                    <th className="text-left py-3 px-4 font-semibold">Result Date</th>
-                    <th className="text-left py-3 px-4 font-semibold">Status</th>
-                    <th className="text-left py-3 px-4 font-semibold">Priority</th>
+                    <th className="text-left py-3 px-4 font-semibold">Results Count</th>
+                    <th className="text-left py-3 px-4 font-semibold">Last Result Date</th>
                     <th className="text-left py-3 px-4 font-semibold">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {labResults.map((lr) => (
-                    <tr key={lr.id} className="border-b border-gray-200 hover:bg-gray-50">
-                      <td className="py-3 px-4 font-medium">{lr.order_number}</td>
-                      <td className="py-3 px-4">{lr.patient_name}</td>
-                      <td className="py-3 px-4">{lr.test_type}</td>
-                      <td className="py-3 px-4">{lr.result_date}</td>
-                      <td className="py-3 px-4">
-                        <Badge className={getStatusColor(lr.status)}>{lr.status}</Badge>
-                      </td>
-                      <td className="py-3 px-4">
-                        <Badge className={getPriorityColor(lr.priority)}>{lr.priority}</Badge>
-                      </td>
-                      <td className="py-3 px-4">
-                        <button
-                          className="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded text-sm"
-                          onClick={() => {
-                            setSelectedLabResult(lr);
-                            setIsResultDialogOpen(true);
-                          }}
-                        >
-                          View
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                  {Array.from(
+                    labResults.reduce((acc, result) => {
+                      if (!acc.has(result.patient_id)) {
+                        acc.set(result.patient_id, []);
+                      }
+                      acc.get(result.patient_id)!.push(result);
+                      return acc;
+                    }, new Map<string, LabResult[]>())
+                  )
+                    .sort((a, b) => a[1][0].patient_name.localeCompare(b[1][0].patient_name))
+                    .map(([patientId, patientResults]) => {
+                      const isExpanded = expandedPatients.has(patientId);
+                      const lastResult = patientResults[0];
+                      return (
+                        <React.Fragment key={patientId}>
+                          {/* Patient Row */}
+                          <tr
+                            className="border-b border-gray-200 hover:bg-blue-50 cursor-pointer"
+                            onClick={() => togglePatientExpansion(patientId)}
+                          >
+                            <td className="py-3 px-4 text-center">
+                              <span className={`inline-block transition-transform ${isExpanded ? 'rotate-180' : ''}`}>
+                                ▼
+                              </span>
+                            </td>
+                            <td className="py-3 px-4 font-semibold text-gray-800">{lastResult.patient_name}</td>
+                            <td className="py-3 px-4">
+                              <Badge className="bg-blue-100 text-blue-800">{patientResults.length} results</Badge>
+                            </td>
+                            <td className="py-3 px-4 text-sm text-gray-600">
+                              {lastResult.created_at ? new Date(lastResult.created_at).toLocaleDateString() : 'N/A'}
+                            </td>
+                            <td className="py-3 px-4">
+                              <button
+                                className="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded text-sm"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  togglePatientExpansion(patientId);
+                                }}
+                              >
+                                {isExpanded ? 'Collapse' : 'View All'}
+                              </button>
+                            </td>
+                          </tr>
+
+                          {/* Expanded Patient Results */}
+                          {isExpanded &&
+                            patientResults.map((result) => (
+                              <tr key={result.id} className="border-b border-gray-100 bg-blue-50 hover:bg-blue-100">
+                                <td className="py-3 px-4"></td>
+                                <td className="py-3 px-4 pl-12">
+                                  <div className="text-sm">
+                                    <div className="font-medium text-gray-700">{result.order_number}</div>
+                                    <div className="text-gray-600">{result.test_type}</div>
+                                  </div>
+                                </td>
+                                <td className="py-3 px-4">
+                                  <Badge className={getStatusColor(result.status)}>{result.status}</Badge>
+                                </td>
+                                <td className="py-3 px-4">
+                                  <Badge className={getPriorityColor(result.priority)}>{result.priority}</Badge>
+                                </td>
+                                <td className="py-3 px-4 text-sm text-gray-600">
+                                  {result.result_date ? new Date(result.result_date).toLocaleDateString() : 'Pending'}
+                                </td>
+                                <td className="py-3 px-4 flex gap-2">
+                                  <button
+                                    className="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded text-xs"
+                                    onClick={() => {
+                                      setSelectedLabResult(result);
+                                      setIsResultDialogOpen(true);
+                                    }}
+                                  >
+                                    View
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                        </React.Fragment>
+                      );
+                    })}
                 </tbody>
               </table>
             </div>

@@ -99,11 +99,13 @@ const Laboratory = () => {
   const [selectedOrder, setSelectedOrder] = useState<LabOrder | null>(null);
   const [testSearch, setTestSearch] = useState('');
   const [showTestList, setShowTestList] = useState(false);
+  const [expandedPatients, setExpandedPatients] = useState<Set<string>>(new Set());
   const [newOrder, setNewOrder] = useState({
     patient_id: '',
-    test_id: '',
+    test_ids: [] as string[], // Array for multiple tests
     priority: 'normal',
   });
+  const [selectedTestDetails, setSelectedTestDetails] = useState<Array<{ id: string; name: string; code: string; price: number }>>([]);
   const [resultData, setResultData] = useState({
     result_value: '',
     result_notes: '',
@@ -184,24 +186,35 @@ const Laboratory = () => {
         console.warn('[Laboratory] Patient is required');
         throw new Error('Patient is required');
       }
-      if (!data.test_id?.trim()) {
-        console.warn('[Laboratory] Test is required');
-        throw new Error('Test is required');
+      if (!data.test_ids || data.test_ids.length === 0) {
+        console.warn('[Laboratory] At least one test is required');
+        throw new Error('At least one test is required');
       }
 
       try {
-        const { error } = await supabase.from('lab_orders').insert({
-          patient_id: data.patient_id,
-          test_id: data.test_id,
-          priority: data.priority,
-          ordered_by: user?.id,
-          order_number: '',
+        // Create multiple orders, one for each test
+        const ordersToCreate = data.test_ids.map((testId) => {
+          const today = new Date();
+          const dateStr = today.toISOString().split('T')[0].replace(/-/g, '');
+          const timestamp = Date.now().toString().slice(-4);
+          const random = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
+          const orderNumber = `LAB${dateStr}-${timestamp}${random}`;
+
+          return {
+            patient_id: data.patient_id,
+            test_id: testId,
+            priority: data.priority,
+            ordered_by: user?.id,
+            order_number: orderNumber,
+          };
         });
+
+        const { error } = await supabase.from('lab_orders').insert(ordersToCreate);
         if (error) {
-          console.error('[Laboratory] Error creating lab order:', error);
+          console.error('[Laboratory] Error creating lab orders:', error);
           throw error;
         }
-        console.log('[Laboratory] Lab order created successfully');
+        console.log('[Laboratory] Lab orders created successfully for', ordersToCreate.length, 'tests');
       } catch (err) {
         console.error('[Laboratory] Lab order creation failed:', err);
         throw err;
@@ -211,10 +224,11 @@ const Laboratory = () => {
       queryClient.invalidateQueries({ queryKey: ['lab-orders'] });
       queryClient.invalidateQueries({ queryKey: ['activity-log'] });
       setIsAddDialogOpen(false);
-      setNewOrder({ patient_id: '', test_id: '', priority: 'normal' });
+      setNewOrder({ patient_id: '', test_ids: [], priority: 'normal' });
+      setSelectedTestDetails([]);
       setTestSearch('');
       setShowTestList(false);
-      toast.success('Lab order created successfully');
+      toast.success('Lab orders created successfully');
     },
     onError: (error: Error) => {
       console.error('[Laboratory] Mutation error:', error.message);
@@ -321,6 +335,17 @@ const Laboratory = () => {
   const processingCount = labOrders?.filter((o) => o.status === 'processing' || o.status === 'sample_collected').length || 0;
   const completedCount = labOrders?.filter((o) => o.status === 'completed').length || 0;
   const abnormalCount = labOrders?.filter((o) => o.is_abnormal).length || 0;
+
+  // Toggle patient expansion
+  const togglePatientExpansion = (patientId: string) => {
+    const newExpanded = new Set(expandedPatients);
+    if (newExpanded.has(patientId)) {
+      newExpanded.delete(patientId);
+    } else {
+      newExpanded.add(patientId);
+    }
+    setExpandedPatients(newExpanded);
+  };
 
   const handleExport = () => {
     // Convert filtered orders to CSV
@@ -437,8 +462,8 @@ const Laboratory = () => {
                     toast.error('Patient is required');
                     return;
                   }
-                  if (!newOrder.test_id?.trim()) {
-                    toast.error('Test is required');
+                  if (!newOrder.test_ids || newOrder.test_ids.length === 0) {
+                    toast.error('At least one test is required');
                     return;
                   }
                   createOrderMutation.mutate(newOrder); 
@@ -455,7 +480,7 @@ const Laboratory = () => {
                     </Select>
                   </div>
                   <div className="space-y-2">
-                    <Label>Test * {testsLoading && <span className="text-xs text-gray-500">(loading...)</span>} {testsError && <span className="text-xs text-red-500">(error loading tests)</span>}</Label>
+                    <Label>Tests * {testsLoading && <span className="text-xs text-gray-500">(loading...)</span>} {testsError && <span className="text-xs text-red-500">(error loading tests)</span>}</Label>
                     <div className="relative">
                       <Input
                         placeholder={testsLoading ? "Loading tests..." : "Search tests by name, code, or category..."}
@@ -476,11 +501,24 @@ const Laboratory = () => {
                                 key={test.id}
                                 type="button"
                                 onClick={() => {
-                                  setNewOrder({ ...newOrder, test_id: test.id });
-                                  setTestSearch(`${test.test_name} (${test.test_code})`);
-                                  setShowTestList(false);
+                                  // Check if test is already selected
+                                  if (!newOrder.test_ids.includes(test.id)) {
+                                    setNewOrder({ ...newOrder, test_ids: [...newOrder.test_ids, test.id] });
+                                    setSelectedTestDetails([
+                                      ...selectedTestDetails,
+                                      {
+                                        id: test.id,
+                                        name: test.test_name,
+                                        code: test.test_code,
+                                        price: test.price,
+                                      },
+                                    ]);
+                                    setTestSearch('');
+                                  }
                                 }}
-                                className="w-full text-left px-4 py-3 hover:bg-gray-100 border-b last:border-b-0 transition"
+                                className={`w-full text-left px-4 py-3 hover:bg-gray-100 border-b last:border-b-0 transition ${
+                                  newOrder.test_ids.includes(test.id) ? 'bg-blue-50' : ''
+                                }`}
                               >
                                 <div className="font-medium text-sm">{test.test_name}</div>
                                 <div className="text-xs text-gray-500">{test.test_code} • {test.category} • ${test.price}</div>
@@ -491,15 +529,40 @@ const Laboratory = () => {
                           )}
                         </div>
                       )}
-                      {newOrder.test_id && !testSearch && (
-                        <div className="absolute top-full left-0 right-0 mt-1 bg-blue-50 border border-blue-200 rounded-lg p-3 z-50">
-                          <div className="text-sm font-medium text-blue-900">Selected:</div>
-                          <div className="text-sm text-blue-700">
-                            {labTests?.find(t => t.id === newOrder.test_id)?.test_name}
-                          </div>
-                        </div>
-                      )}
                     </div>
+
+                    {/* Selected Tests */}
+                    {selectedTestDetails.length > 0 && (
+                      <div className="mt-3 space-y-2 border-t pt-3">
+                        <p className="text-sm font-semibold text-gray-700">Selected Tests ({selectedTestDetails.length}):</p>
+                        <div className="space-y-1">
+                          {selectedTestDetails.map((test) => (
+                            <div
+                              key={test.id}
+                              className="flex items-center justify-between bg-blue-50 border border-blue-200 rounded px-3 py-2"
+                            >
+                              <div>
+                                <div className="font-medium text-sm text-gray-800">{test.name}</div>
+                                <div className="text-xs text-gray-600">{test.code} • ${test.price}</div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setNewOrder({
+                                    ...newOrder,
+                                    test_ids: newOrder.test_ids.filter((id) => id !== test.id),
+                                  });
+                                  setSelectedTestDetails(selectedTestDetails.filter((t) => t.id !== test.id));
+                                }}
+                                className="text-red-500 hover:text-red-700 font-semibold"
+                              >
+                                ✕
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                   <div className="space-y-2">
                     <Label>Priority</Label>
@@ -601,83 +664,140 @@ const Laboratory = () => {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Test ID</TableHead>
+                  <TableHead className="w-8"></TableHead>
                   <TableHead>Patient</TableHead>
-                  <TableHead>Test Name</TableHead>
-                  <TableHead>Requested By</TableHead>
-                  <TableHead>Date</TableHead>
-                  <TableHead>Status</TableHead>
+                  <TableHead>Orders Count</TableHead>
+                  <TableHead>Last Order Date</TableHead>
                   <TableHead>Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredOrders?.map((order) => (
-                  <TableRow key={order.id}>
-                    <TableCell className="text-sm font-mono">{order.order_number}</TableCell>
-                    <TableCell className="text-sm">{order.patients?.first_name} {order.patients?.last_name}</TableCell>
-                    <TableCell className="text-sm">{order.lab_tests?.test_name}</TableCell>
-                    <TableCell className="text-sm text-muted-foreground">N/A</TableCell>
-                    <TableCell className="text-sm">{format(new Date(order.created_at), 'MMM dd, yyyy')}</TableCell>
-                    <TableCell>
-                      <Badge className={statusColors[order.status]}>
-                        {order.status === 'pending' && 'Pending'}
-                        {order.status === 'sample_collected' && 'Sample Needed'}
-                        {order.status === 'processing' && 'In Progress'}
-                        {order.status === 'completed' && 'Completed'}
-                        {order.status === 'cancelled' && 'Cancelled'}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon" className="h-8 w-8 p-0">
-                            <MoreHorizontal className="h-4 w-4" />
-                            <span className="sr-only">Open menu</span>
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="w-56">
-                          <DropdownMenuItem
-                            onClick={() => {
-                              setSelectedOrder(order);
-                              setIsDetailsDialogOpen(true);
-                            }}
-                          >
-                            <Eye className="mr-2 h-4 w-4" />
-                            <span>View Details</span>
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={() => {
-                              setSelectedOrder(order);
-                              setIsResultDialogOpen(true);
-                            }}
-                          >
-                            <FileText className="mr-2 h-4 w-4" />
-                            <span>Update Status</span>
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={() => {
-                              setSelectedOrder(order);
-                              handlePrintReport(order);
-                            }}
-                          >
-                            <Printer className="mr-2 h-4 w-4" />
-                            <span>Print Report</span>
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem
-                            onClick={() => {
-                              setSelectedOrder(order);
-                              setIsSampleDialogOpen(true);
-                            }}
-                          >
-                            <Droplet className="mr-2 h-4 w-4" />
-                            <span>Sample Collection</span>
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </TableCell>
-                  </TableRow>
-                ))}
+                {Array.from(
+                  (filteredOrders || []).reduce((acc, order) => {
+                    if (!acc.has(order.patient_id)) {
+                      acc.set(order.patient_id, []);
+                    }
+                    acc.get(order.patient_id)!.push(order);
+                    return acc;
+                  }, new Map<string, LabOrder[]>())
+                )
+                  .sort((a, b) => {
+                    const nameA = `${a[1][0].patients?.first_name} ${a[1][0].patients?.last_name}`;
+                    const nameB = `${b[1][0].patients?.first_name} ${b[1][0].patients?.last_name}`;
+                    return nameA.localeCompare(nameB);
+                  })
+                  .map(([patientId, patientOrders]) => {
+                    const isExpanded = expandedPatients.has(patientId);
+                    const lastOrder = patientOrders[0];
+                    const patientName = `${lastOrder.patients?.first_name} ${lastOrder.patients?.last_name}`;
+                    return (
+                      <>
+                        <TableRow
+                          key={patientId}
+                          className="cursor-pointer hover:bg-blue-50"
+                          onClick={() => togglePatientExpansion(patientId)}
+                        >
+                          <TableCell className="text-center">
+                            <span className={`inline-block transition-transform ${isExpanded ? 'rotate-180' : ''}`}>
+                              ▼
+                            </span>
+                          </TableCell>
+                          <TableCell className="font-semibold">{patientName}</TableCell>
+                          <TableCell>
+                            <Badge className="bg-blue-100 text-blue-800">{patientOrders.length} orders</Badge>
+                          </TableCell>
+                          <TableCell className="text-sm text-muted-foreground">
+                            {format(new Date(patientOrders[0].created_at), 'MMM dd, yyyy')}
+                          </TableCell>
+                          <TableCell>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                togglePatientExpansion(patientId);
+                              }}
+                            >
+                              {isExpanded ? 'Collapse' : 'View All'}
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+
+                        {isExpanded &&
+                          patientOrders.map((order) => (
+                            <TableRow key={order.id} className="bg-blue-50 hover:bg-blue-100">
+                              <TableCell></TableCell>
+                              <TableCell className="pl-12 text-sm font-mono">{order.order_number}</TableCell>
+                              <TableCell className="text-sm">
+                                <div>{order.lab_tests?.test_name}</div>
+                                <div className="text-xs text-gray-500">{order.lab_tests?.test_code}</div>
+                              </TableCell>
+                              <TableCell>
+                                <Badge className={statusColors[order.status]}>
+                                  {order.status === 'pending' && 'Pending'}
+                                  {order.status === 'sample_collected' && 'Sample Needed'}
+                                  {order.status === 'processing' && 'In Progress'}
+                                  {order.status === 'completed' && 'Completed'}
+                                  {order.status === 'cancelled' && 'Cancelled'}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="text-sm text-muted-foreground">
+                                {format(new Date(order.created_at), 'MMM dd, yyyy')}
+                              </TableCell>
+                              <TableCell>
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger asChild>
+                                    <Button variant="ghost" size="icon" className="h-8 w-8 p-0">
+                                      <MoreHorizontal className="h-4 w-4" />
+                                      <span className="sr-only">Open menu</span>
+                                    </Button>
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent align="end" className="w-56">
+                                    <DropdownMenuItem
+                                      onClick={() => {
+                                        setSelectedOrder(order);
+                                        setIsDetailsDialogOpen(true);
+                                      }}
+                                    >
+                                      <Eye className="mr-2 h-4 w-4" />
+                                      <span>View Details</span>
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                      onClick={() => {
+                                        setSelectedOrder(order);
+                                        setIsResultDialogOpen(true);
+                                      }}
+                                    >
+                                      <FileText className="mr-2 h-4 w-4" />
+                                      <span>Update Status</span>
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                      onClick={() => {
+                                        setSelectedOrder(order);
+                                        handlePrintReport(order);
+                                      }}
+                                    >
+                                      <Printer className="mr-2 h-4 w-4" />
+                                      <span>Print Report</span>
+                                    </DropdownMenuItem>
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuItem
+                                      onClick={() => {
+                                        setSelectedOrder(order);
+                                        setIsSampleDialogOpen(true);
+                                      }}
+                                    >
+                                      <Droplet className="mr-2 h-4 w-4" />
+                                      <span>Sample Collection</span>
+                                    </DropdownMenuItem>
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                      </>
+                    );
+                  })}
                 {filteredOrders?.length === 0 && (
                   <TableRow><TableCell colSpan={7} className="text-center py-8 text-muted-foreground">No lab tests found</TableCell></TableRow>
                 )}

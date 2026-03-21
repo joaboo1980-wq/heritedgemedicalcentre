@@ -1,4 +1,4 @@
-import { useState, useContext } from 'react';
+import { useState, useContext, Fragment } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { AuthContext } from '@/contexts/AuthContext';
@@ -115,6 +115,7 @@ const Pharmacy = () => {
   const [editingMedication, setEditingMedication] = useState<Medication | null>(null);
   const [editFormData, setEditFormData] = useState<Partial<Medication>>({});
   const [isCreatingInvoice, setIsCreatingInvoice] = useState<string | null>(null);
+  const [expandedPatients, setExpandedPatients] = useState<Set<string>>(new Set());
   const [invoiceModalOpen, setInvoiceModalOpen] = useState(false);
   const [simplifiedInvoiceForm, setSimplifiedInvoiceForm] = useState({
     patient_id: '',
@@ -138,7 +139,7 @@ const Pharmacy = () => {
   });
 
   const [newOrder, setNewOrder] = useState({
-    supplier_id: '',
+    supplier_name: '',
     order_date: format(new Date(), 'yyyy-MM-dd'),
     expected_delivery_date: '',
     medications: [{ medication_id: '', quantity: 100 }],
@@ -154,6 +155,18 @@ const Pharmacy = () => {
     // Generate from prescription ID (first 8 chars) and created_at
     const date = new Date(prescription.created_at).toISOString().slice(0, 10).replace(/-/g, '');
     return `RX-${date}-${prescription.id.substring(0, 6).toUpperCase()}`;
+  };
+
+  const togglePatientExpansion = (patientId: string) => {
+    setExpandedPatients(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(patientId)) {
+        newSet.delete(patientId);
+      } else {
+        newSet.add(patientId);
+      }
+      return newSet;
+    });
   };
 
   // Fetch medications
@@ -186,9 +199,11 @@ const Pharmacy = () => {
           return [];
         }
 
-        // Extract patient IDs and fetch patient data
+        // Extract patient IDs and doctor IDs, fetch patient and doctor data
         const patientIds = [...new Set(prescriptionData.map(p => p.patient_id).filter(Boolean))];
+        const doctorIds = [...new Set(prescriptionData.map(p => p.doctor_id).filter(Boolean))];
         let patientMap: Record<string, any> = {};
+        let doctorMap: Record<string, any> = {};
         
         if (patientIds.length > 0) {
           try {
@@ -206,21 +221,45 @@ const Pharmacy = () => {
           }
         }
 
-        // Fetch all prescription items with medications
+        // Fetch doctor/prescriber information from profiles table
+        if (doctorIds.length > 0) {
+          try {
+            const { data: profileData, error: profileError } = await supabase
+              .from('profiles')
+              .select('user_id, full_name')
+              .in('user_id', doctorIds);
+            if (!profileError && profileData) {
+              doctorMap = profileData.reduce((acc: Record<string, any>, p: any) => {
+                acc[p.user_id] = {
+                  full_name: p.full_name || 'Unknown Doctor',
+                };
+                return acc;
+              }, {});
+            }
+          } catch (err) {
+            console.error('Exception fetching doctors:', err);
+          }
+        }
+
+        // Fetch all prescription items with medications and full details
         const presRxIds = prescriptionData.map(p => p.id);
         let itemsMap: Record<string, any[]> = {};
         if (presRxIds.length > 0) {
           try {
             const { data: itemsData, error: itemsError } = await supabase
               .from('prescription_items')
-              .select('id, prescription_id, medication_id, medications(name)')
+              .select('id, prescription_id, medication_id, dosage, frequency, duration, medications(name)')
               .in('prescription_id', presRxIds);
             if (!itemsError && itemsData) {
               itemsMap = itemsData.reduce((acc: Record<string, any[]>, item: any) => {
                 if (!acc[item.prescription_id]) acc[item.prescription_id] = [];
                 acc[item.prescription_id].push({
                   id: item.id,
+                  medication_id: item.medication_id,
                   medication_name: item.medications?.name || 'Unknown',
+                  dosage: item.dosage || '-',
+                  frequency: item.frequency || '-',
+                  duration: item.duration || '-',
                 });
                 return acc;
               }, {});
@@ -230,14 +269,18 @@ const Pharmacy = () => {
           }
         }
 
-        // Map patient data and medication items to prescriptions
-        const prescriptionsWithData = prescriptionData.map((rx: any) => ({
-          ...rx,
-          first_name: patientMap[rx.patient_id]?.first_name || '',
-          last_name: patientMap[rx.patient_id]?.last_name || '',
-          patient_number: patientMap[rx.patient_id]?.patient_number || '',
-          items: itemsMap[rx.id] || [],
-        }));
+        // Map patient data, doctor data, and medication items to prescriptions
+        const prescriptionsWithData = prescriptionData.map((rx: any) => {
+          const doctorName = doctorMap[rx.doctor_id]?.full_name || 'Unknown Doctor';
+          return {
+            ...rx,
+            first_name: patientMap[rx.patient_id]?.first_name || '',
+            last_name: patientMap[rx.patient_id]?.last_name || '',
+            patient_number: patientMap[rx.patient_id]?.patient_number || '',
+            prescribed_by_name: doctorName,
+            items: itemsMap[rx.id] || [],
+          };
+        });
 
         return prescriptionsWithData as Prescription[];
       } catch (err) {
@@ -247,12 +290,80 @@ const Pharmacy = () => {
     },
   });
 
-  // Fetch purchase orders - disabled as table doesn't exist yet
+  // Fetch purchase orders
   const { data: purchaseOrders, isLoading: ordersLoading } = useQuery({
     queryKey: ['purchase_orders'],
     queryFn: async () => {
-      // purchase_orders table not available in current schema
-      return [];
+      try {
+        // Fetch purchase orders
+        const { data: ordersData, error: ordersError } = await supabase
+          .from('purchase_orders')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .limit(100);
+
+        if (ordersError) {
+          console.error('[Pharmacy] Purchase orders fetch error:', ordersError);
+          return [];
+        }
+
+        if (!ordersData || ordersData.length === 0) {
+          return [];
+        }
+
+        // Fetch order items for all orders
+        const orderIds = ordersData.map((o: any) => o.id);
+        const { data: itemsData, error: itemsError } = await supabase
+          .from('purchase_order_items')
+          .select('*, medications(name, category)')
+          .in('purchase_order_id', orderIds);
+
+        if (itemsError) {
+          console.error('[Pharmacy] Order items fetch error:', itemsError);
+          return ordersData.map((o: any) => ({
+            ...o,
+            items: [],
+            total_amount: 0,
+            item_count: 0,
+          }));
+        }
+
+        // Map items to orders and calculate totals
+        const itemsMap = (itemsData || []).reduce((acc: any, item: any) => {
+          if (!acc[item.purchase_order_id]) {
+            acc[item.purchase_order_id] = [];
+          }
+          acc[item.purchase_order_id].push({
+            id: item.id,
+            medication_name: item.medications?.name || 'Unknown',
+            quantity: item.quantity,
+            unit_price: item.unit_price || 0,
+            received_quantity: item.received_quantity || 0,
+          });
+          return acc;
+        }, {});
+
+        // Format orders with items and totals
+        const formattedOrders = ordersData.map((o: any) => {
+          const items = itemsMap[o.id] || [];
+          const total = items.reduce((sum: number, item: any) => {
+            return sum + ((item.unit_price || 0) * item.quantity);
+          }, 0);
+
+          return {
+            ...o,
+            order_id: o.id.substring(0, 8).toUpperCase(),
+            items,
+            total_amount: total,
+            item_count: items.length,
+          };
+        });
+
+        return formattedOrders;
+      } catch (err) {
+        console.error('[Pharmacy] Purchase orders query error:', err);
+        return [];
+      }
     },
   });
 
@@ -690,7 +801,7 @@ const Pharmacy = () => {
     },
   });
 
-  // Create purchase order - disabled as table doesn't exist yet
+  // Create purchase order
   const createPurchaseOrderMutation = useMutation({
     mutationFn: async (order: typeof newOrder) => {
       if (!userId || !sessionToken) {
@@ -701,21 +812,90 @@ const Pharmacy = () => {
         userId,
         sessionToken,
         async () => {
-          toast.info('Purchase orders module coming soon');
-          return { success: true };
+          // Validate required fields
+          if (!order.supplier_name?.trim()) {
+            throw new Error('Supplier name is required');
+          }
+          if (!order.order_date) {
+            throw new Error('Order date is required');
+          }
+          if (!order.medications || order.medications.length === 0) {
+            throw new Error('At least one medication is required');
+          }
+
+          // Validate each medication has a quantity
+          for (const med of order.medications) {
+            if (!med.medication_id) {
+              throw new Error('Please select a medication for each line item');
+            }
+            if (!med.quantity || med.quantity <= 0) {
+              throw new Error('Quantity must be greater than 0');
+            }
+          }
+
+          try {
+            // Create the purchase order
+            const { data: poData, error: poError } = await (supabase as any)
+              .from('purchase_orders')
+              .insert({
+                supplier_name: order.supplier_name.trim(),
+                order_date: order.order_date,
+                expected_delivery_date: order.expected_delivery_date || null,
+                status: 'pending',
+                notes: order.notes || null,
+                created_by: userId,
+              })
+              .select()
+              .single();
+
+            if (poError) {
+              console.error('[Pharmacy] Purchase order insert error:', poError);
+              throw poError;
+            }
+
+            // Create purchase order items
+            const orderItems = order.medications.map((med: any) => ({
+              purchase_order_id: poData.id,
+              medication_id: med.medication_id,
+              quantity: med.quantity,
+              unit_price: null,
+              received_quantity: 0,
+            }));
+
+            const { error: itemError } = await (supabase as any)
+              .from('purchase_order_items')
+              .insert(orderItems);
+
+            if (itemError) {
+              console.error('[Pharmacy] Purchase order items insert error:', itemError);
+              throw itemError;
+            }
+
+            console.log('[Pharmacy] Purchase order created:', poData.id);
+            return { success: true, orderId: poData.id };
+          } catch (err) {
+            console.error('[Pharmacy] Purchase order creation failed:', err);
+            throw err;
+          }
         },
         'Create Purchase Order'
       );
     },
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['purchase_orders'] });
       setIsCreateOrderOpen(false);
       setNewOrder({
-        supplier_id: '',
+        supplier_name: '',
         order_date: format(new Date(), 'yyyy-MM-dd'),
         expected_delivery_date: '',
         medications: [{ medication_id: '', quantity: 100 }],
         notes: '',
       });
+      toast.success('Purchase order created successfully');
+    },
+    onError: (error: Error) => {
+      console.error('[Pharmacy] Purchase order error:', error);
+      toast.error('Failed to create purchase order: ' + error.message);
     },
   });
 
@@ -1525,291 +1705,424 @@ const Pharmacy = () => {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Prescription #</TableHead>
+                      <TableHead className="w-6"></TableHead>
                       <TableHead>Patient Name</TableHead>
                       <TableHead>Patient #</TableHead>
-                      <TableHead>Medication(s)</TableHead>
-                      <TableHead>Prescribed By</TableHead>
-                      <TableHead>Notes</TableHead>
+                      <TableHead>Medications</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead>Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {prescriptions?.map((prescription) => (
-                      <TableRow key={prescription.id}>
-                        <TableCell>
-                          <Badge variant="outline">{getPrescriptionNumber(prescription)}</Badge>
-                        </TableCell>
-                        <TableCell>
-                          {prescription.first_name && prescription.last_name
-                            ? `${prescription.first_name} ${prescription.last_name}`
-                            : prescription.patient_id.substring(0, 8)}
-                        </TableCell>
-                        <TableCell>{prescription.patient_number || '-'}</TableCell>
-                        <TableCell className="text-sm">
-                          {prescription.items && prescription.items.length > 0
-                            ? prescription.items.map(item => item.medication_name).join(', ')
-                            : '-'
+                    {prescriptions && prescriptions.length > 0 ? (
+                      Array.from(
+                        prescriptions.reduce((acc, prescription) => {
+                          if (!acc.has(prescription.patient_id)) {
+                            acc.set(prescription.patient_id, []);
                           }
-                        </TableCell>
-                        <TableCell>{prescription.prescribed_by}</TableCell>
-                        <TableCell className="word-wrap min-w-0">{prescription.notes || '-'}</TableCell>
-                        <TableCell>
-                          <Badge
-                            className={
-                              prescription.status === 'completed'
-                                ? 'bg-green-100 text-green-800'
-                                : prescription.status === 'ready'
-                                ? 'bg-blue-100 text-blue-800'
-                                : 'bg-yellow-100 text-yellow-800'
-                            }
-                          >
-                            {prescription.status}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex gap-1">
-                            <Dialog
-                              open={selectedPrescription?.id === prescription.id}
-                              onOpenChange={(open) =>
-                                setSelectedPrescription(open ? prescription : null)
-                              }
-                            >
-                              <DialogTrigger asChild>
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  title="View Prescription"
-                                >
-                                  <Eye className="h-4 w-4" />
-                                </Button>
-                              </DialogTrigger>
-                              <DialogContent>
-                                <DialogHeader>
-                                  <DialogTitle>
-                                    Prescription Details
-                                  </DialogTitle>
-                                </DialogHeader>
-                                <div className="space-y-4">
-                                  <div className="grid grid-cols-2 gap-4">
-                                    <div>
-                                      <p className="text-sm text-muted-foreground">
-                                        Prescription #
-                                      </p>
-                                      <p className="font-medium">
-                                        {selectedPrescription?.prescription_number}
-                                      </p>
-                                    </div>
-                                    <div>
-                                      <p className="text-sm text-muted-foreground">
-                                        Patient Name
-                                      </p>
-                                      <p className="font-medium">
-                                        {selectedPrescription?.first_name && selectedPrescription?.last_name
-                                          ? `${selectedPrescription.first_name} ${selectedPrescription.last_name}`
-                                          : 'N/A'}
-                                      </p>
-                                    </div>
-                                    <div>
-                                      <p className="text-sm text-muted-foreground">
-                                        Patient #
-                                      </p>
-                                      <p className="font-medium">
-                                        {selectedPrescription?.patient_number || 'N/A'}
-                                      </p>
-                                    </div>
-                                    <div>
-                                      <p className="text-sm text-muted-foreground">
-                                        Prescribed By
-                                      </p>
-                                      <p className="font-medium">
-                                        {selectedPrescription?.prescribed_by}
-                                      </p>
-                                    </div>
-                                    <div>
-                                      <p className="text-sm text-muted-foreground">
-                                        Status
-                                      </p>
-                                      <p className="font-medium capitalize">
-                                        {selectedPrescription?.status}
-                                      </p>
-                                    </div>
-                                    <div className="col-span-2">
-                                      <p className="text-sm text-muted-foreground">
-                                        Notes
-                                      </p>
-                                      <p className="font-medium">
-                                        {selectedPrescription?.notes || 'No notes'}
-                                      </p>
-                                    </div>
-                                    <div>
-                                      <p className="text-sm text-muted-foreground">
-                                        Created
-                                      </p>
-                                      <p className="font-medium">
-                                        {selectedPrescription?.created_at ? format(new Date(selectedPrescription.created_at), 'MMM dd, yyyy') : '-'}
-                                      </p>
-                                    </div>
-                                  </div>
-                                </div>
-                              </DialogContent>
-                            </Dialog>
+                          acc.get(prescription.patient_id)!.push(prescription);
+                          return acc;
+                        }, new Map<string, typeof prescriptions>())
+                      )
+                        .sort((a, b) => {
+                          const nameA = a[1][0].first_name + a[1][0].last_name;
+                          const nameB = b[1][0].first_name + b[1][0].last_name;
+                          return nameA.localeCompare(nameB);
+                        })
+                        .map(([patientId, patientPrescriptions]) => {
+                          const isExpanded = expandedPatients.has(patientId);
+                          const firstPrescription = patientPrescriptions[0];
+                          const totalMeds = patientPrescriptions.reduce((sum, p) => sum + (p.items?.length || 0), 0);
 
-                            {prescription.status !== 'dispensed' && prescription.status !== 'completed' && (
-                              <>
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  title="Create Invoice"
-                                  onClick={() => {
-                                    setInvoiceModalOpen(true);
-                                  }}
-                                >
-                                  <FileText className="h-4 w-4" />
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  title="Check Payment & Dispense"
-                                  onClick={() => {
-                                    setInvoicesLoading(true);
-                                    checkPaymentStatusMutation.mutate(prescription);
-                                  }}
-                                  disabled={checkPaymentStatusMutation.isPending || dispenseMedicationMutation.isPending}
-                                >
-                                  <CheckSquare className="h-4 w-4" />
-                                </Button>
-                              </>
-                            )}
+                          return (
+                            <Fragment key={patientId}>
+                              {/* Patient Header Row */}
+                              <TableRow
+                                className="bg-gray-50 hover:bg-blue-50 cursor-pointer"
+                                onClick={() => togglePatientExpansion(patientId)}
+                              >
+                                <TableCell className="text-center">
+                                  <span className={`inline-block transition-transform ${isExpanded ? 'rotate-180' : ''}`}>
+                                    ▼
+                                  </span>
+                                </TableCell>
+                                <TableCell className="font-semibold">
+                                  {firstPrescription.first_name} {firstPrescription.last_name}
+                                </TableCell>
+                                <TableCell>{firstPrescription.patient_number || '-'}</TableCell>
+                                <TableCell>
+                                  <Badge className="bg-blue-100 text-blue-800">{totalMeds} medications</Badge>
+                                </TableCell>
+                                <TableCell>
+                                  <Badge
+                                    className={
+                                      patientPrescriptions[0].status === 'completed'
+                                        ? 'bg-green-100 text-green-800'
+                                        : patientPrescriptions[0].status === 'ready'
+                                        ? 'bg-blue-100 text-blue-800'
+                                        : 'bg-yellow-100 text-yellow-800'
+                                    }
+                                  >
+                                    {patientPrescriptions[0].status}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      togglePatientExpansion(patientId);
+                                    }}
+                                  >
+                                    {isExpanded ? 'Collapse' : 'View All'}
+                                  </Button>
+                                </TableCell>
+                              </TableRow>
 
-                            <Dialog
-                              open={printPrescription?.id === prescription.id}
-                              onOpenChange={(open) =>
-                                setPrintPrescription(open ? prescription : null)
-                              }
-                            >
-                              <DialogTrigger asChild>
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  title="Print Label"
-                                >
-                                  <Printer className="h-4 w-4" />
-                                </Button>
-                              </DialogTrigger>
-                              <DialogContent>
-                                <DialogHeader>
-                                  <DialogTitle>Print Prescription Label</DialogTitle>
-                                </DialogHeader>
-                                {printPrescription && (
-                                  <div className="space-y-4">
-                                    <div className="p-6 bg-white border-2 border-dashed border-gray-300 rounded">
-                                      <div className="text-center space-y-2">
-                                        <p className="text-sm font-semibold">PRESCRIPTION LABEL</p>
-                                        <p className="text-2xl font-bold">#{getPrescriptionNumber(printPrescription)}</p>
-                                        <p className="text-sm">
-                                          {printPrescription.first_name} {printPrescription.last_name}
-                                        </p>
-                                        <p className="text-xs text-gray-600">
-                                          Date: {printPrescription.created_at ? format(new Date(printPrescription.created_at), 'MMM dd, yyyy') : 'N/A'}
-                                        </p>
-                                        <p className="text-xs text-gray-600">
-                                          {printPrescription.notes}
-                                        </p>
-                                      </div>
-                                    </div>
-                                    <Button
-                                      onClick={() => window.print()}
-                                      className="w-full"
-                                    >
-                                      Print Label
-                                    </Button>
-                                  </div>
+                              {/* Expanded Prescriptions */}
+                              {isExpanded &&
+                                patientPrescriptions.flatMap((prescription) =>
+                                  (prescription.items || []).map((item, itemIdx) => (
+                                    <TableRow key={`${prescription.id}-${itemIdx}`} className="bg-blue-50 hover:bg-blue-100">
+                                      <TableCell></TableCell>
+                                      <TableCell className="pl-12">
+                                        <div className="text-sm">
+                                          <div className="font-medium text-gray-700">{getPrescriptionNumber(prescription)}</div>
+                                          <div className="text-xs text-gray-600">
+                                            {format(new Date(prescription.created_at), 'MMM dd, yyyy')}
+                                          </div>
+                                        </div>
+                                      </TableCell>
+                                      <TableCell></TableCell>
+                                      <TableCell>
+                                        <div className="text-sm space-y-1">
+                                          <div className="font-medium text-gray-800">{item.medication_name}</div>
+                                          <div className="text-xs text-gray-600">
+                                            {item.dosage} • {item.frequency} • {item.duration}
+                                          </div>
+                                          {prescription.prescribed_by_name && prescription.prescribed_by_name !== 'Unknown Doctor' && (
+                                            <div className="text-xs text-blue-600 font-semibold">Prescribed by: Dr. {prescription.prescribed_by_name}</div>
+                                          )}
+                                          {prescription.prescribed_by_name === 'Unknown Doctor' && (
+                                            <div className="text-xs text-gray-500 italic">Prescribed by: Unknown Doctor</div>
+                                          )}
+                                          {prescription.notes && (
+                                            <div className="text-xs text-gray-600 italic">{prescription.notes}</div>
+                                          )}
+                                        </div>
+                                      </TableCell>
+                                      <TableCell>
+                                        <Badge
+                                          className={
+                                            prescription.status === 'completed'
+                                              ? 'bg-green-100 text-green-800'
+                                              : prescription.status === 'ready'
+                                              ? 'bg-blue-100 text-blue-800'
+                                              : 'bg-yellow-100 text-yellow-800'
+                                          }
+                                        >
+                                          {prescription.status}
+                                        </Badge>
+                                      </TableCell>
+                                      <TableCell>
+                                        <div className="flex gap-1">
+                                          <Dialog
+                                            open={selectedPrescription?.id === prescription.id}
+                                            onOpenChange={(open) =>
+                                              setSelectedPrescription(open ? prescription : null)
+                                            }
+                                          >
+                                            <DialogTrigger asChild>
+                                              <Button
+                                                size="sm"
+                                                variant="ghost"
+                                                title="View Prescription"
+                                              >
+                                                <Eye className="h-4 w-4" />
+                                              </Button>
+                                            </DialogTrigger>
+                                            <DialogContent>
+                                              <DialogHeader>
+                                                <DialogTitle>Prescription Details</DialogTitle>
+                                              </DialogHeader>
+                                              <div className="space-y-4">
+                                                <div className="grid grid-cols-2 gap-4">
+                                                  <div>
+                                                    <p className="text-sm text-muted-foreground">Prescription #</p>
+                                                    <p className="font-medium">{getPrescriptionNumber(selectedPrescription)}</p>
+                                                  </div>
+                                                  <div>
+                                                    <p className="text-sm text-muted-foreground">Patient Name</p>
+                                                    <p className="font-medium">
+                                                      {selectedPrescription?.first_name && selectedPrescription?.last_name
+                                                        ? `${selectedPrescription.first_name} ${selectedPrescription.last_name}`
+                                                        : 'N/A'}
+                                                    </p>
+                                                  </div>
+                                                  <div>
+                                                    <p className="text-sm text-muted-foreground">Patient #</p>
+                                                    <p className="font-medium">{selectedPrescription?.patient_number || 'N/A'}</p>
+                                                  </div>
+                                                  <div>
+                                                    <p className="text-sm text-muted-foreground">Prescribed By</p>
+                                                    <p className="font-medium text-blue-600">
+                                                      {selectedPrescription?.prescribed_by_name && selectedPrescription.prescribed_by_name !== 'Unknown Doctor'
+                                                        ? `Dr. ${selectedPrescription.prescribed_by_name}`
+                                                        : selectedPrescription?.prescribed_by_name || 'Unknown Doctor'}
+                                                    </p>
+                                                  </div>
+                                                  <div>
+                                                    <p className="text-sm text-muted-foreground">Status</p>
+                                                    <p className="font-medium capitalize">{selectedPrescription?.status}</p>
+                                                  </div>
+                                                  <div>
+                                                    <p className="text-sm text-muted-foreground">Created</p>
+                                                    <p className="font-medium">
+                                                      {selectedPrescription?.created_at
+                                                        ? format(new Date(selectedPrescription.created_at), 'MMM dd, yyyy')
+                                                        : '-'}
+                                                    </p>
+                                                  </div>
+                                                  <div className="col-span-2">
+                                                    <p className="text-sm text-muted-foreground">Notes</p>
+                                                    <p className="font-medium">{selectedPrescription?.notes || 'No notes'}</p>
+                                                  </div>
+                                                  <div className="col-span-2">
+                                                    <p className="text-sm text-muted-foreground mb-2">Medications</p>
+                                                    <div className="space-y-2">
+                                                      {selectedPrescription?.items && selectedPrescription.items.length > 0 ? (
+                                                        selectedPrescription.items.map((med, idx) => (
+                                                          <div key={idx} className="bg-gray-100 p-2 rounded text-sm">
+                                                            <div className="font-medium">{med.medication_name}</div>
+                                                            <div className="text-xs text-gray-600">
+                                                              {med.dosage} • {med.frequency} • {med.duration}
+                                                            </div>
+                                                          </div>
+                                                        ))
+                                                      ) : (
+                                                        <p className="text-sm text-gray-500">No medications</p>
+                                                      )}
+                                                    </div>
+                                                  </div>
+                                                </div>
+                                              </div>
+                                            </DialogContent>
+                                          </Dialog>
+
+                                          {prescription.status !== 'dispensed' && prescription.status !== 'completed' && (
+                                            <>
+                                              <Button
+                                                size="sm"
+                                                variant="ghost"
+                                                title="Create Invoice"
+                                                onClick={() => {
+                                                  setInvoiceModalOpen(true);
+                                                }}
+                                              >
+                                                <FileText className="h-4 w-4" />
+                                              </Button>
+                                              <Button
+                                                size="sm"
+                                                variant="ghost"
+                                                title="Check Payment & Dispense"
+                                                onClick={() => {
+                                                  setInvoicesLoading(true);
+                                                  checkPaymentStatusMutation.mutate(prescription);
+                                                }}
+                                                disabled={checkPaymentStatusMutation.isPending || dispenseMedicationMutation.isPending}
+                                              >
+                                                <CheckSquare className="h-4 w-4" />
+                                              </Button>
+                                            </>
+                                          )}
+
+                                          <Dialog
+                                            open={printPrescription?.id === prescription.id}
+                                            onOpenChange={(open) => setPrintPrescription(open ? prescription : null)}
+                                          >
+                                            <DialogTrigger asChild>
+                                              <Button size="sm" variant="ghost" title="Print Label">
+                                                <Printer className="h-4 w-4" />
+                                              </Button>
+                                            </DialogTrigger>
+                                            <DialogContent className="max-w-2xl">
+                                              <DialogHeader>
+                                                <DialogTitle>Print Prescription Label</DialogTitle>
+                                              </DialogHeader>
+                                              {printPrescription && (
+                                                <div className="space-y-4">
+                                                  <div className="p-6 bg-white border-2 border-gray-400 rounded">
+                                                    {/* Header */}
+                                                    <div className="border-b-2 border-gray-400 pb-3 mb-4">
+                                                      <div className="text-center">
+                                                        <p className="text-lg font-bold">Heritage Medical Centre</p>
+                                                        <p className="text-xs text-gray-600">PHARMACY PRESCRIPTION LABEL</p>
+                                                      </div>
+                                                    </div>
+
+                                                    {/* Prescription Number */}
+                                                    <div className="text-center mb-4">
+                                                      <p className="text-xs text-gray-700 font-semibold">PRESCRIPTION #</p>
+                                                      <p className="text-2xl font-bold tracking-wider">{getPrescriptionNumber(printPrescription)}</p>
+                                                      <p className="text-xs text-gray-600 mt-1">
+                                                        Date: {printPrescription.created_at ? format(new Date(printPrescription.created_at), 'MMM dd, yyyy') : 'N/A'}
+                                                      </p>
+                                                    </div>
+
+                                                    {/* Patient Information */}
+                                                    <div className="bg-gray-100 p-3 rounded mb-4 border border-gray-300">
+                                                      <div className="grid grid-cols-2 gap-4 text-xs">
+                                                        <div>
+                                                          <p className="font-semibold text-gray-700">PATIENT NAME</p>
+                                                          <p className="font-bold text-sm">{printPrescription.first_name} {printPrescription.last_name}</p>
+                                                        </div>
+                                                        <div>
+                                                          <p className="font-semibold text-gray-700">PATIENT ID</p>
+                                                          <p className="font-bold text-sm">{printPrescription.patient_number || 'N/A'}</p>
+                                                        </div>
+                                                      </div>
+                                                    </div>
+
+                                                    {/* Medication Details */}
+                                                    <div className="space-y-3 mb-4">
+                                                      {printPrescription.items && printPrescription.items.length > 0 ? (
+                                                        printPrescription.items.map((med, idx) => (
+                                                          <div key={idx} className="border-2 border-gray-300 p-3 rounded bg-gray-50">
+                                                            <div className="grid grid-cols-2 gap-3 text-xs">
+                                                              <div>
+                                                                <p className="font-semibold text-gray-700">MEDICATION NAME</p>
+                                                                <p className="font-bold text-sm">{med.medication_name}</p>
+                                                              </div>
+                                                              <div>
+                                                                <p className="font-semibold text-gray-700">DOSAGE</p>
+                                                                <p className="font-bold text-sm">{med.dosage}</p>
+                                                              </div>
+                                                              <div>
+                                                                <p className="font-semibold text-gray-700">FREQUENCY</p>
+                                                                <p className="font-bold text-sm">{med.frequency}</p>
+                                                              </div>
+                                                              <div>
+                                                                <p className="font-semibold text-gray-700">DURATION</p>
+                                                                <p className="font-bold text-sm">{med.duration}</p>
+                                                              </div>
+                                                            </div>
+                                                          </div>
+                                                        ))
+                                                      ) : (
+                                                        <p className="text-sm text-gray-500">No medications</p>
+                                                      )}
+                                                    </div>
+
+                                                    {/* Prescriber & Status */}
+                                                    <div className="grid grid-cols-2 gap-4 mb-4 text-xs border-t pt-3">
+                                                      <div>
+                                                        <p className="font-semibold text-gray-700">PRESCRIBED BY</p>
+                                                        <p className="font-bold">
+                                                          {printPrescription.prescribed_by_name && printPrescription.prescribed_by_name !== 'Unknown Doctor' 
+                                                            ? `Dr. ${printPrescription.prescribed_by_name}`
+                                                            : printPrescription.prescribed_by_name || 'Unknown Doctor'
+                                                          }
+                                                        </p>
+                                                      </div>
+                                                      <div>
+                                                        <p className="font-semibold text-gray-700">STATUS</p>
+                                                        <p className="font-bold text-blue-600 uppercase">{printPrescription.status}</p>
+                                                      </div>
+                                                    </div>
+
+                                                    {/* Special Instructions */}
+                                                    {printPrescription.notes && (
+                                                      <div className="bg-yellow-50 border-l-4 border-yellow-400 p-3 mb-4">
+                                                        <p className="text-xs font-semibold text-gray-700">SPECIAL INSTRUCTIONS</p>
+                                                        <p className="text-xs text-gray-800 mt-1">{printPrescription.notes}</p>
+                                                      </div>
+                                                    )}
+
+                                                    {/* Footer */}
+                                                    <div className="border-t-2 border-gray-400 pt-3 mt-4 text-center text-xs text-gray-600">
+                                                      <p>Valid for 1 year from date of issue</p>
+                                                      <p className="text-xs mt-1">For Pharmacy Use Only | Dispense as Directed</p>
+                                                      <p className="text-xs mt-2 text-gray-500">Printed: {format(new Date(), 'MMM dd, yyyy HH:mm')}</p>
+                                                    </div>
+                                                  </div>
+                                                  <Button onClick={() => window.print()} className="w-full">
+                                                    Print Label
+                                                  </Button>
+                                                </div>
+                                              )}
+                                            </DialogContent>
+                                          </Dialog>
+
+                                          <Dialog
+                                            open={contactPrescription?.id === prescription.id}
+                                            onOpenChange={(open) => setContactPrescription(open ? prescription : null)}
+                                          >
+                                            <DialogTrigger asChild>
+                                              <Button size="sm" variant="ghost" title="Contact Patient">
+                                                <Phone className="h-4 w-4" />
+                                              </Button>
+                                            </DialogTrigger>
+                                            <DialogContent>
+                                              <DialogHeader>
+                                                <DialogTitle>Contact Patient</DialogTitle>
+                                              </DialogHeader>
+                                              {contactPrescription && (
+                                                <div className="space-y-4">
+                                                  <div className="grid gap-4">
+                                                    <div>
+                                                      <p className="text-sm font-semibold text-gray-600">Patient Name</p>
+                                                      <p className="text-lg">
+                                                        {contactPrescription.first_name} {contactPrescription.last_name}
+                                                      </p>
+                                                    </div>
+                                                    <div>
+                                                      <p className="text-sm font-semibold text-gray-600">Patient Number</p>
+                                                      <p className="text-lg">{contactPrescription.patient_number || 'Not Available'}</p>
+                                                    </div>
+                                                    <div>
+                                                      <p className="text-sm font-semibold text-gray-600">Prescription #</p>
+                                                      <p className="text-lg">{getPrescriptionNumber(contactPrescription)}</p>
+                                                    </div>
+                                                    <div>
+                                                      <p className="text-sm font-semibold text-gray-600">Status</p>
+                                                      <Badge className="mt-1 capitalize">{contactPrescription.status}</Badge>
+                                                    </div>
+                                                  </div>
+                                                  <div className="flex gap-2">
+                                                    <Button className="flex-1" variant="outline">
+                                                      Send SMS
+                                                    </Button>
+                                                    <Button className="flex-1" variant="outline">
+                                                      Send Email
+                                                    </Button>
+                                                  </div>
+                                                </div>
+                                              )}
+                                            </DialogContent>
+                                          </Dialog>
+
+                                          <Button
+                                            size="sm"
+                                            variant="ghost"
+                                            className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                                            title="Delete Prescription"
+                                            onClick={() => deletePrescriptionMutation.mutate(prescription.id)}
+                                            disabled={deletePrescriptionMutation.isPending}
+                                          >
+                                            <Trash2 className="h-4 w-4" />
+                                          </Button>
+                                        </div>
+                                      </TableCell>
+                                    </TableRow>
+                                  ))
                                 )}
-                              </DialogContent>
-                            </Dialog>
-
-                            <Dialog
-                              open={contactPrescription?.id === prescription.id}
-                              onOpenChange={(open) =>
-                                setContactPrescription(open ? prescription : null)
-                              }
-                            >
-                              <DialogTrigger asChild>
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  title="Contact Patient"
-                                >
-                                  <Phone className="h-4 w-4" />
-                                </Button>
-                              </DialogTrigger>
-                              <DialogContent>
-                                <DialogHeader>
-                                  <DialogTitle>Contact Patient</DialogTitle>
-                                </DialogHeader>
-                                {contactPrescription && (
-                                  <div className="space-y-4">
-                                    <div className="grid gap-4">
-                                      <div>
-                                        <p className="text-sm font-semibold text-gray-600">Patient Name</p>
-                                        <p className="text-lg">
-                                          {contactPrescription.first_name} {contactPrescription.last_name}
-                                        </p>
-                                      </div>
-                                      <div>
-                                        <p className="text-sm font-semibold text-gray-600">Patient Number</p>
-                                        <p className="text-lg">
-                                          {contactPrescription.patient_number || 'Not Available'}
-                                        </p>
-                                      </div>
-                                      <div>
-                                        <p className="text-sm font-semibold text-gray-600">Prescription #</p>
-                                        <p className="text-lg">
-                                          {getPrescriptionNumber(contactPrescription)}
-                                        </p>
-                                      </div>
-                                      <div>
-                                        <p className="text-sm font-semibold text-gray-600">Status</p>
-                                        <Badge className="mt-1 capitalize">{contactPrescription.status}</Badge>
-                                      </div>
-                                    </div>
-                                    <div className="flex gap-2">
-                                      <Button className="flex-1" variant="outline">
-                                        Send SMS
-                                      </Button>
-                                      <Button className="flex-1" variant="outline">
-                                        Send Email
-                                      </Button>
-                                    </div>
-                                  </div>
-                                )}
-                              </DialogContent>
-                            </Dialog>
-
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                              title="Delete Prescription"
-                              onClick={() =>
-                                deletePrescriptionMutation.mutate(prescription.id)
-                              }
-                              disabled={deletePrescriptionMutation.isPending}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                    {!prescriptions || prescriptions.length === 0 && (
+                            </Fragment>
+                          );
+                        })
+                    ) : (
                       <TableRow>
-                        <TableCell
-                          colSpan={6}
-                          className="text-center py-8 text-muted-foreground"
-                        >
+                        <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
                           No active prescriptions
                         </TableCell>
                       </TableRow>
@@ -2156,27 +2469,14 @@ const Pharmacy = () => {
                     <div className="space-y-4">
                       <div className="space-y-2">
                         <Label>Supplier</Label>
-                        <Select
-                          value={newOrder.supplier_id}
-                          onValueChange={(v) =>
-                            setNewOrder({ ...newOrder, supplier_id: v })
+                        <Input
+                          type="text"
+                          placeholder="Enter supplier name"
+                          value={newOrder.supplier_name}
+                          onChange={(e) =>
+                            setNewOrder({ ...newOrder, supplier_name: e.target.value })
                           }
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select supplier" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="supplier_1">
-                              PharmaCorp Supplies
-                            </SelectItem>
-                            <SelectItem value="supplier_2">
-                              Medical Distributor Ltd
-                            </SelectItem>
-                            <SelectItem value="supplier_3">
-                              Global Pharma Solutions
-                            </SelectItem>
-                          </SelectContent>
-                        </Select>
+                        />
                       </div>
 
                       <div className="space-y-2">
@@ -2283,35 +2583,50 @@ const Pharmacy = () => {
                     <TableRow>
                       <TableHead>Order ID</TableHead>
                       <TableHead>Supplier</TableHead>
+                      <TableHead>Medications Ordered</TableHead>
                       <TableHead>Order Date</TableHead>
                       <TableHead>Expected Delivery</TableHead>
                       <TableHead>Status</TableHead>
-                      <TableHead>Total Amount</TableHead>
+                      <TableHead>Items</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {purchaseOrders.map((order) => (
+                    {purchaseOrders.map((order: any) => (
                       <TableRow key={order.id}>
                         <TableCell>
                           <Badge variant="outline">{order.order_id}</Badge>
                         </TableCell>
-                        <TableCell>{order.supplier?.name}</TableCell>
+                        <TableCell>{order.supplier_name}</TableCell>
+                        <TableCell>
+                          <div className="text-sm space-y-1">
+                            {order.items && order.items.length > 0 ? (
+                              order.items.map((item: any, idx: number) => (
+                                <div key={idx} className="text-gray-700">
+                                  {item.medication_name} (Qty: {item.quantity})
+                                </div>
+                              ))
+                            ) : (
+                              <span className="text-gray-500 italic">No items</span>
+                            )}
+                          </div>
+                        </TableCell>
                         <TableCell>
                           {format(new Date(order.order_date), 'MMM dd, yyyy')}
                         </TableCell>
                         <TableCell>
-                          {format(
-                            new Date(order.expected_delivery_date),
-                            'MMM dd, yyyy'
-                          )}
+                          {order.expected_delivery_date
+                            ? format(new Date(order.expected_delivery_date), 'MMM dd, yyyy')
+                            : '-'}
                         </TableCell>
                         <TableCell>
                           <Badge
                             className={
-                              order.status === 'received'
+                              order.status === 'delivered'
                                 ? 'bg-green-100 text-green-800'
                                 : order.status === 'pending'
                                 ? 'bg-blue-100 text-blue-800'
+                                : order.status === 'partial'
+                                ? 'bg-yellow-100 text-yellow-800'
                                 : 'bg-red-100 text-red-800'
                             }
                           >
@@ -2319,7 +2634,7 @@ const Pharmacy = () => {
                           </Badge>
                         </TableCell>
                         <TableCell>
-                          UGX {order.total_amount.toLocaleString()}
+                          {order.item_count} items
                         </TableCell>
                       </TableRow>
                     ))}
@@ -2343,27 +2658,14 @@ const Pharmacy = () => {
                       <div className="space-y-4">
                         <div className="space-y-2">
                           <Label>Supplier</Label>
-                          <Select
-                            value={newOrder.supplier_id}
-                            onValueChange={(v) =>
-                              setNewOrder({ ...newOrder, supplier_id: v })
+                          <Input
+                            type="text"
+                            placeholder="Enter supplier name"
+                            value={newOrder.supplier_name}
+                            onChange={(e) =>
+                              setNewOrder({ ...newOrder, supplier_name: e.target.value })
                             }
-                          >
-                            <SelectTrigger>
-                              <SelectValue placeholder="Select supplier" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="supplier_1">
-                                PharmaCorp Supplies
-                              </SelectItem>
-                              <SelectItem value="supplier_2">
-                                Medical Distributor Ltd
-                              </SelectItem>
-                              <SelectItem value="supplier_3">
-                                Global Pharma Solutions
-                              </SelectItem>
-                            </SelectContent>
-                          </Select>
+                          />
                         </div>
 
                         <div className="space-y-2">

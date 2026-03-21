@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { PatientConsultationHistory } from '@/components/doctor/PatientConsultationHistory';
 import {
   Table,
   TableBody,
@@ -100,7 +101,10 @@ const DoctorExamination = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [selectedExamination, setSelectedExamination] = useState<MedicalExamination | null>(null);
+  const [editingExamination, setEditingExamination] = useState<any>(null);
   const [selectedPatientId, setSelectedPatientId] = useState('');
   const [patientSearch, setPatientSearch] = useState('');
   const [showPatientList, setShowPatientList] = useState(false);
@@ -136,6 +140,41 @@ const DoctorExamination = () => {
     medications_prescribed: '',
     follow_up_date: '',
     referrals: '',
+  });
+
+  // Fetch past examinations for selected patient
+  const { data: patientExaminations, isLoading: loadingPatientExaminations } = useQuery({
+    queryKey: ['patient-examinations', selectedPatientId],
+    queryFn: async () => {
+      if (!selectedPatientId) return [];
+      try {
+        const { data, error } = await (supabase as any)
+          .from('medical_examinations')
+          .select(
+            `id, patient_id, examination_date, chief_complaint, assessment_diagnosis,
+             history_of_present_illness, plan_treatment, medications_prescribed, follow_up_date,
+             triage_temperature, triage_blood_pressure, triage_pulse_rate,
+             triage_respiratory_rate, triage_oxygen_saturation, triage_weight,
+             triage_height, triage_bmi, triage_notes,
+             patients(first_name, last_name)`
+          )
+          .eq('patient_id', selectedPatientId)
+          .order('examination_date', { ascending: false });
+
+        if (error) {
+          console.error('[DoctorExamination] Error fetching patient examinations:', error);
+          throw error;
+        }
+        return (data || []).map((me: any) => ({
+          ...me,
+          patient_name: me.patients ? `${me.patients.first_name} ${me.patients.last_name}` : 'Unknown',
+        }));
+      } catch (err) {
+        console.error('[DoctorExamination] Patient examinations query failed:', err);
+        throw err;
+      }
+    },
+    enabled: !!selectedPatientId,
   });
 
   // Fetch latest vitals for the selected patient
@@ -344,6 +383,139 @@ const DoctorExamination = () => {
     createExaminationMutation.mutate(newExamination);
   };
 
+  // ===== UPDATE EXAMINATION MUTATION =====
+  const updateExaminationMutation = useMutation({
+    mutationFn: async (data: any) => {
+      if (!userId || !sessionToken) {
+        throw new Error('Session not found');
+      }
+      return withSessionValidation(
+        userId,
+        sessionToken,
+        async () => {
+          const { id, ...updateData } = data;
+
+          // Calculate BMI if weight and height are provided
+          let bmi = null;
+          if (updateData.triage_weight && updateData.triage_height) {
+            const heightInMeters = parseFloat(updateData.triage_height) / 100;
+            bmi = parseFloat(updateData.triage_weight) / (heightInMeters * heightInMeters);
+          }
+
+          // Prepare update object with proper parsing
+          const updatePayload = {
+            chief_complaint: updateData.chief_complaint,
+            assessment_diagnosis: updateData.assessment_diagnosis,
+            triage_temperature: updateData.triage_temperature ? parseFloat(updateData.triage_temperature) : null,
+            triage_blood_pressure: updateData.triage_blood_pressure || null,
+            triage_pulse_rate: updateData.triage_pulse_rate ? parseInt(updateData.triage_pulse_rate) : null,
+            triage_respiratory_rate: updateData.triage_respiratory_rate ? parseInt(updateData.triage_respiratory_rate) : null,
+            triage_oxygen_saturation: updateData.triage_oxygen_saturation ? parseFloat(updateData.triage_oxygen_saturation) : null,
+            triage_weight: updateData.triage_weight ? parseFloat(updateData.triage_weight) : null,
+            triage_height: updateData.triage_height ? parseFloat(updateData.triage_height) : null,
+            triage_bmi: bmi,
+            plan_treatment: updateData.plan_treatment || null,
+            medications_prescribed: updateData.medications_prescribed || null,
+            follow_up_date: updateData.follow_up_date || null,
+          };
+
+          console.log('[DoctorExamination] Updating examination:', id, updatePayload);
+
+          const { error } = await (supabase as any)
+            .from('medical_examinations')
+            .update(updatePayload)
+            .eq('id', id);
+
+          if (error) {
+            console.error('[DoctorExamination] Update error:', error);
+            throw error;
+          }
+
+          console.log('[DoctorExamination] Examination updated successfully');
+          return true;
+        },
+        'Update Medical Examination'
+      );
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['medical-examinations'] });
+      queryClient.invalidateQueries({ queryKey: ['patient-examinations'] });
+      setIsEditDialogOpen(false);
+      setEditingExamination(null);
+      toast.success('Examination updated successfully');
+    },
+    onError: (error: Error) => {
+      console.error('[DoctorExamination] Update mutation error:', error);
+      toast.error(`Failed to update examination: ${error.message}`);
+    },
+  });
+
+  // ===== DELETE EXAMINATION MUTATION =====
+  const deleteExaminationMutation = useMutation({
+    mutationFn: async (examId: string) => {
+      if (!userId || !sessionToken) {
+        throw new Error('Session not found');
+      }
+      return withSessionValidation(
+        userId,
+        sessionToken,
+        async () => {
+          console.log('[DoctorExamination] Deleting examination:', examId);
+          console.log('[DoctorExamination] Current user ID:', userId);
+
+          const { error, status } = await (supabase as any)
+            .from('medical_examinations')
+            .delete()
+            .eq('id', examId);
+
+          console.log('[DoctorExamination] Delete response status:', status);
+
+          if (error) {
+            console.error('[DoctorExamination] Delete RLS error details:', {
+              code: error.code,
+              message: error.message,
+              details: error.details,
+              hint: error.hint,
+            });
+            throw new Error(`Delete failed: ${error.message || 'Unknown error'}`);
+          }
+
+          console.log('[DoctorExamination] Examination deleted successfully');
+          return true;
+        },
+        'Delete Medical Examination'
+      );
+    },
+    onSuccess: () => {
+      console.log('[DoctorExamination] Delete success - invalidating queries');
+      queryClient.invalidateQueries({ queryKey: ['medical-examinations'] });
+      queryClient.invalidateQueries({ queryKey: ['patient-examinations'] });
+      setIsDeleteDialogOpen(false);
+      setSelectedExamination(null);
+      toast.success('Examination deleted successfully');
+    },
+    onError: (error: Error) => {
+      console.error('[DoctorExamination] Delete mutation final error:', error);
+      toast.error(`Failed to delete examination: ${error.message}`);
+    },
+  });
+
+  const handleEditExamination = (exam: MedicalExamination) => {
+    setEditingExamination(exam);
+    setIsEditDialogOpen(true);
+  };
+
+  const handleDeleteExamination = (exam: MedicalExamination) => {
+    setSelectedExamination(exam);
+    setIsDeleteDialogOpen(true);
+  };
+
+  const handleConfirmDelete = () => {
+    if (selectedExamination) {
+      deleteExaminationMutation.mutate(selectedExamination.id);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -427,16 +599,33 @@ const DoctorExamination = () => {
                     </TableCell>
                     <TableCell className="word-wrap min-w-0">{exam.assessment_diagnosis}</TableCell>
                     <TableCell>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => {
-                          setSelectedExamination(exam);
-                          setIsViewDialogOpen(true);
-                        }}
-                      >
-                        View
-                      </Button>
+                      <div className="flex gap-2">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            setSelectedExamination(exam);
+                            setIsViewDialogOpen(true);
+                          }}
+                        >
+                          View
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleEditExamination(exam)}
+                        >
+                          Edit
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                          onClick={() => handleDeleteExamination(exam)}
+                        >
+                          Delete
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -512,6 +701,14 @@ const DoctorExamination = () => {
                 rows={3}
               />
             </div>
+
+            {/* Past Consultations */}
+            {selectedPatientId && (
+              <PatientConsultationHistory
+                examinations={patientExaminations || []}
+                isLoading={loadingPatientExaminations}
+              />
+            )}
 
             {/* Triage Vitals */}
             <div className="border-t pt-4">
@@ -1178,6 +1375,249 @@ const DoctorExamination = () => {
                 </div>
               </div>
             </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Examination?</DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <p className="text-gray-600 mb-4">
+              Are you sure you want to delete this examination record for{' '}
+              <strong>
+                {selectedExamination?.patients?.first_name} {selectedExamination?.patients?.last_name}
+              </strong>
+              ? This action cannot be undone.
+            </p>
+          </div>
+          <div className="flex gap-3 justify-end">
+            <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleConfirmDelete}
+              disabled={deleteExaminationMutation.isPending}
+            >
+              {deleteExaminationMutation.isPending ? 'Deleting...' : 'Delete'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Examination Dialog */}
+      <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+        <DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Edit Medical Examination</DialogTitle>
+          </DialogHeader>
+          {editingExamination && (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                updateExaminationMutation.mutate(editingExamination);
+              }}
+              className="space-y-6"
+            >
+              {/* Chief Complaint */}
+              <div className="space-y-2">
+                <Label htmlFor="edit_chief_complaint">Chief Complaint</Label>
+                <Textarea
+                  id="edit_chief_complaint"
+                  value={editingExamination.chief_complaint}
+                  onChange={(e) =>
+                    setEditingExamination({
+                      ...editingExamination,
+                      chief_complaint: e.target.value,
+                    })
+                  }
+                  rows={3}
+                />
+              </div>
+
+              {/* Triage Vitals */}
+              <div className="border-t pt-4">
+                <h3 className="font-semibold mb-4 flex items-center gap-2">
+                  <Thermometer className="h-4 w-4" />
+                  Triage Vital Signs
+                </h3>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="edit_temperature">Temperature (°C)</Label>
+                    <Input
+                      id="edit_temperature"
+                      type="number"
+                      step="0.1"
+                      value={editingExamination.triage_temperature || ''}
+                      onChange={(e) =>
+                        setEditingExamination({
+                          ...editingExamination,
+                          triage_temperature: e.target.value,
+                        })
+                      }
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="edit_bp">Blood Pressure</Label>
+                    <Input
+                      id="edit_bp"
+                      value={editingExamination.triage_blood_pressure || ''}
+                      onChange={(e) =>
+                        setEditingExamination({
+                          ...editingExamination,
+                          triage_blood_pressure: e.target.value,
+                        })
+                      }
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="edit_pulse">Pulse Rate (bpm)</Label>
+                    <Input
+                      id="edit_pulse"
+                      type="number"
+                      value={editingExamination.triage_pulse_rate || ''}
+                      onChange={(e) =>
+                        setEditingExamination({
+                          ...editingExamination,
+                          triage_pulse_rate: e.target.value,
+                        })
+                      }
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="edit_rr">Respiratory Rate (/min)</Label>
+                    <Input
+                      id="edit_rr"
+                      type="number"
+                      value={editingExamination.triage_respiratory_rate || ''}
+                      onChange={(e) =>
+                        setEditingExamination({
+                          ...editingExamination,
+                          triage_respiratory_rate: e.target.value,
+                        })
+                      }
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="edit_o2">O₂ Saturation (%)</Label>
+                    <Input
+                      id="edit_o2"
+                      type="number"
+                      step="0.1"
+                      value={editingExamination.triage_oxygen_saturation || ''}
+                      onChange={(e) =>
+                        setEditingExamination({
+                          ...editingExamination,
+                          triage_oxygen_saturation: e.target.value,
+                        })
+                      }
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="edit_weight">Weight (kg)</Label>
+                    <Input
+                      id="edit_weight"
+                      type="number"
+                      step="0.1"
+                      value={editingExamination.triage_weight || ''}
+                      onChange={(e) =>
+                        setEditingExamination({
+                          ...editingExamination,
+                          triage_weight: e.target.value,
+                        })
+                      }
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Assessment/Diagnosis */}
+              <div className="space-y-2">
+                <Label htmlFor="edit_diagnosis">Assessment/Diagnosis</Label>
+                <Textarea
+                  id="edit_diagnosis"
+                  value={editingExamination.assessment_diagnosis || ''}
+                  onChange={(e) =>
+                    setEditingExamination({
+                      ...editingExamination,
+                      assessment_diagnosis: e.target.value,
+                    })
+                  }
+                  rows={3}
+                />
+              </div>
+
+              {/* Treatment Plan */}
+              <div className="space-y-2">
+                <Label htmlFor="edit_plan">Treatment Plan</Label>
+                <Textarea
+                  id="edit_plan"
+                  value={editingExamination.plan_treatment || ''}
+                  onChange={(e) =>
+                    setEditingExamination({
+                      ...editingExamination,
+                      plan_treatment: e.target.value,
+                    })
+                  }
+                  rows={3}
+                />
+              </div>
+
+              {/* Medications Prescribed */}
+              <div className="space-y-2">
+                <Label htmlFor="edit_medications">Medications Prescribed</Label>
+                <Textarea
+                  id="edit_medications"
+                  value={editingExamination.medications_prescribed || ''}
+                  onChange={(e) =>
+                    setEditingExamination({
+                      ...editingExamination,
+                      medications_prescribed: e.target.value,
+                    })
+                  }
+                  rows={3}
+                />
+              </div>
+
+              {/* Follow-up Date */}
+              <div className="space-y-2">
+                <Label htmlFor="edit_followup">Follow-up Date</Label>
+                <Input
+                  id="edit_followup"
+                  type="date"
+                  value={editingExamination.follow_up_date || ''}
+                  onChange={(e) =>
+                    setEditingExamination({
+                      ...editingExamination,
+                      follow_up_date: e.target.value,
+                    })
+                  }
+                />
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex gap-3 pt-6">
+                <Button
+                  type="submit"
+                  disabled={updateExaminationMutation.isPending}
+                  className="flex-1"
+                >
+                  {updateExaminationMutation.isPending ? 'Saving...' : 'Save Changes'}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setIsEditDialogOpen(false)}
+                  className="flex-1"
+                >
+                  Cancel
+                </Button>
+              </div>
+            </form>
           )}
         </DialogContent>
       </Dialog>

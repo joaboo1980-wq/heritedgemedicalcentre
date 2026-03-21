@@ -82,17 +82,14 @@ CREATE POLICY "Staff can update examinations"
 ON public.medical_examinations
 FOR UPDATE
 TO authenticated
-USING (true);
+USING (true)
+WITH CHECK (true);
 
-CREATE POLICY "Admins can delete examinations"
+CREATE POLICY "Staff can delete examinations"
 ON public.medical_examinations
 FOR DELETE
 TO authenticated
-USING (
-  public.has_role(auth.uid(), 'admin')
-  OR
-  examined_by = auth.uid()
-);
+USING (true);
 
 -- Create trigger for updated_at
 CREATE TRIGGER update_medical_examinations_updated_at
