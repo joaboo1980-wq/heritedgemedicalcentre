@@ -32,7 +32,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from 'sonner';
-import { Plus, Search, Pill, Package, AlertTriangle, TrendingDown, Edit, Eye, CheckSquare, Printer, Phone, Trash2, Package2, RotateCw, BarChart3, FileText } from 'lucide-react';
+import { Plus, Search, Pill, Package, AlertTriangle, TrendingDown, Edit, Eye, CheckSquare, Printer, Phone, Trash2, Package2, RotateCw, BarChart3, FileText, ChevronDown, ChevronRight } from 'lucide-react';
 import { format } from 'date-fns';
 import PermissionGuard from '@/components/layout/PermissionGuard';
 
@@ -116,6 +116,11 @@ const Pharmacy = () => {
   const [editFormData, setEditFormData] = useState<Partial<Medication>>({});
   const [isCreatingInvoice, setIsCreatingInvoice] = useState<string | null>(null);
   const [expandedPatients, setExpandedPatients] = useState<Set<string>>(new Set());
+  const [dispenseCheckDialogOpen, setDispenseCheckDialogOpen] = useState<string | null>(null);
+  const [inventoryCheckData, setInventoryCheckData] = useState<any>(null);
+  const [selectedItemsToDispense, setSelectedItemsToDispense] = useState<Set<string>>(new Set());
+  const [contactDialogOpen, setContactDialogOpen] = useState<string | null>(null);
+  const [printDialogOpen, setPrintDialogOpen] = useState<string | null>(null);
   const [invoiceModalOpen, setInvoiceModalOpen] = useState(false);
   const [simplifiedInvoiceForm, setSimplifiedInvoiceForm] = useState({
     patient_id: '',
@@ -798,6 +803,118 @@ const Pharmacy = () => {
     onError: (error: Error) => {
       console.error('[Pharmacy] Deletion error:', error.message);
       toast.error(`Failed to delete prescription: ${error.message}`);
+    },
+  });
+
+  // Check inventory for prescriptions
+  const checkInventory = async (prescriptionIds: string[]) => {
+    try {
+      const { data: items, error: itemError } = await supabase
+        .from('prescription_items')
+        .select('id, prescription_id, medication_id, dosage, frequency, duration')
+        .in('prescription_id', prescriptionIds);
+
+      if (itemError) throw itemError;
+      if (!items || items.length === 0) {
+        toast.error('No medication items found');
+        return;
+      }
+
+      const medIds = [...new Set((items || []).map(i => i.medication_id))];
+      const { data: medications } = await supabase
+        .from('medications')
+        .select('id, name, stock_quantity, reorder_level')
+        .in('id', medIds);
+
+      const medMap: Record<string, any> = {};
+      (medications || []).forEach(med => {
+        medMap[med.id] = med;
+      });
+
+      const itemsWithStock = items.map((item: any) => {
+        const med = medMap[item.medication_id];
+        return {
+          id: item.id,
+          prescription_id: item.prescription_id,
+          medication_id: item.medication_id,
+          medication_name: med?.name || 'Unknown',
+          dosage: item.dosage,
+          frequency: item.frequency,
+          duration: item.duration,
+          stock: med?.stock_quantity || 0,
+          is_in_stock: (med?.stock_quantity || 0) > 0,
+          is_low_stock: (med?.stock_quantity || 0) > 0 && (med?.stock_quantity || 0) <= (med?.reorder_level || 50),
+        };
+      });
+
+      setSelectedItemsToDispense(new Set(itemsWithStock.filter((i: any) => i.is_in_stock).map((i: any) => i.id)));
+      setInventoryCheckData({
+        prescriptionIds,
+        items: itemsWithStock,
+        outOfStock: itemsWithStock.filter((i: any) => !i.is_in_stock),
+        lowStock: itemsWithStock.filter((i: any) => i.is_low_stock),
+        inStock: itemsWithStock.filter((i: any) => i.is_in_stock),
+      });
+      setDispenseCheckDialogOpen('inventory');
+    } catch (err: any) {
+      toast.error('Failed to check inventory: ' + err.message);
+    }
+  };
+
+  // Dispense selected items with inventory deduction
+  const dispenseSelectedItemsMutation = useMutation({
+    mutationFn: async (selectedIds: string[]) => {
+      if (selectedIds.length === 0) throw new Error('No items selected');
+
+      const { data: itemsToUpdate } = await supabase
+        .from('prescription_items')
+        .select('id, medication_id, prescription_id')
+        .in('id', selectedIds);
+
+      if (!itemsToUpdate || itemsToUpdate.length === 0) throw new Error('Items not found');
+
+      for (const item of itemsToUpdate) {
+        const { data: med } = await supabase
+          .from('medications')
+          .select('stock_quantity')
+          .eq('id', item.medication_id)
+          .single();
+
+        if (med && med.stock_quantity > 0) {
+          await supabase
+            .from('medications')
+            .update({ stock_quantity: med.stock_quantity - 1 })
+            .eq('id', item.medication_id);
+        }
+      }
+
+      const prescriptionIds = [...new Set(itemsToUpdate.map((i: any) => i.prescription_id))];
+      for (const prescId of prescriptionIds) {
+        const { data: allItems } = await supabase
+          .from('prescription_items')
+          .select('id')
+          .eq('prescription_id', prescId);
+
+        const selectedForThis = itemsToUpdate.filter((i: any) => i.prescription_id === prescId);
+        if (allItems && selectedForThis.length === allItems.length) {
+          await supabase
+            .from('prescriptions')
+            .update({ status: 'dispensed', updated_at: new Date().toISOString() })
+            .eq('id', prescId);
+        }
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['prescriptions'] });
+      queryClient.invalidateQueries({ queryKey: ['pharmacy-stats'] });
+      queryClient.invalidateQueries({ queryKey: ['inventory-medications'] });
+      setDispenseCheckDialogOpen(null);
+      setInventoryCheckData(null);
+      setSelectedItemsToDispense(new Set());
+      toast.success('Items dispensed and inventory updated');
+    },
+    onError: (error: any) => {
+      toast.error('Failed to dispense: ' + error.message);
     },
   });
 
@@ -1767,16 +1884,244 @@ const Pharmacy = () => {
                                   </Badge>
                                 </TableCell>
                                 <TableCell>
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      togglePatientExpansion(patientId);
-                                    }}
-                                  >
-                                    {isExpanded ? 'Collapse' : 'View All'}
-                                  </Button>
+                                  <div className="flex gap-1">
+                                    <Button
+                                      size="sm"
+                                      className="bg-green-500 hover:bg-green-600 text-white text-xs"
+                                      onClick={() => checkInventory(patientPrescriptions.map(rx => rx.id))}
+                                      disabled={dispenseSelectedItemsMutation.isPending}
+                                    >
+                                      Dispense All
+                                    </Button>
+
+                                    {/* Inventory Check Dialog */}
+                                    <Dialog open={dispenseCheckDialogOpen === 'inventory'} onOpenChange={(open) => {
+                                      if (!open) {
+                                        setDispenseCheckDialogOpen(null);
+                                        setInventoryCheckData(null);
+                                        setSelectedItemsToDispense(new Set());
+                                      }
+                                    }}>
+                                      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+                                        <DialogHeader>
+                                          <DialogTitle>Inventory Check & Selective Dispensing</DialogTitle>
+                                        </DialogHeader>
+                                        {inventoryCheckData && (
+                                          <div className="space-y-6">
+                                            <div className="grid grid-cols-3 gap-4">
+                                              <div className="p-4 bg-green-50 border border-green-200 rounded">
+                                                <p className="text-sm font-semibold text-green-700">In Stock</p>
+                                                <p className="text-2xl font-bold text-green-600">{inventoryCheckData.inStock.length}</p>
+                                              </div>
+                                              <div className="p-4 bg-yellow-50 border border-yellow-200 rounded">
+                                                <p className="text-sm font-semibold text-yellow-700">Low Stock</p>
+                                                <p className="text-2xl font-bold text-yellow-600">{inventoryCheckData.lowStock.length}</p>
+                                              </div>
+                                              <div className="p-4 bg-red-50 border border-red-200 rounded">
+                                                <p className="text-sm font-semibold text-red-700">Out of Stock</p>
+                                                <p className="text-2xl font-bold text-red-600">{inventoryCheckData.outOfStock.length}</p>
+                                              </div>
+                                            </div>
+
+                                            <div className="space-y-3">
+                                              <p className="font-semibold text-gray-700">Select items to dispense:</p>
+                                              {inventoryCheckData.items.map((item: any) => (
+                                                <div key={item.id} className={`p-4 border rounded flex items-start gap-3 ${
+                                                  item.is_in_stock ? 'border-gray-200 bg-gray-50' : 'border-red-200 bg-red-50'
+                                                }`}>
+                                                  <input
+                                                    type="checkbox"
+                                                    checked={selectedItemsToDispense.has(item.id)}
+                                                    onChange={(e) => {
+                                                      const newSelected = new Set(selectedItemsToDispense);
+                                                      if (e.target.checked) {
+                                                        newSelected.add(item.id);
+                                                      } else {
+                                                        newSelected.delete(item.id);
+                                                      }
+                                                      setSelectedItemsToDispense(newSelected);
+                                                    }}
+                                                    disabled={!item.is_in_stock}
+                                                    className="mt-1"
+                                                  />
+                                                  <div className="flex-1">
+                                                    <div className="flex items-center gap-2">
+                                                      <p className="font-semibold text-gray-800">{item.medication_name}</p>
+                                                      {item.is_low_stock && (
+                                                        <Badge className="bg-yellow-200 text-yellow-800 text-xs">Low Stock</Badge>
+                                                      )}
+                                                      {!item.is_in_stock && (
+                                                        <Badge className="bg-red-200 text-red-800 text-xs">Out of Stock</Badge>
+                                                      )}
+                                                    </div>
+                                                    <p className="text-sm text-gray-600 mt-1">
+                                                      Dosage: {item.dosage} | Frequency: {item.frequency} | Duration: {item.duration}
+                                                    </p>
+                                                    <p className="text-sm font-semibold text-gray-700 mt-1">
+                                                      Stock: <span className={item.is_in_stock ? 'text-green-600' : 'text-red-600'}>{item.stock} units</span>
+                                                    </p>
+                                                  </div>
+                                                </div>
+                                              ))}
+                                            </div>
+
+                                            {inventoryCheckData.outOfStock.length > 0 && (
+                                              <div className="p-4 bg-red-50 border border-red-200 rounded">
+                                                <p className="text-sm font-semibold text-red-700 mb-2">
+                                                  ⚠️ {inventoryCheckData.outOfStock.length} medication(s) out of stock
+                                                </p>
+                                                <p className="text-sm text-red-600">
+                                                  These cannot be dispensed. Contact supplier or inform patient.
+                                                </p>
+                                              </div>
+                                            )}
+
+                                            <div className="flex gap-3">
+                                              <Button
+                                                onClick={() => {
+                                                  if (selectedItemsToDispense.size === 0) {
+                                                    toast.error('Select at least one item');
+                                                    return;
+                                                  }
+                                                  dispenseSelectedItemsMutation.mutate(Array.from(selectedItemsToDispense));
+                                                }}
+                                                className="flex-1 bg-green-500 hover:bg-green-600"
+                                                disabled={selectedItemsToDispense.size === 0 || dispenseSelectedItemsMutation.isPending}
+                                              >
+                                                Dispense Selected ({selectedItemsToDispense.size})
+                                              </Button>
+                                              <Button
+                                                variant="outline"
+                                                onClick={() => {
+                                                  setDispenseCheckDialogOpen(null);
+                                                  setInventoryCheckData(null);
+                                                  setSelectedItemsToDispense(new Set());
+                                                }}
+                                              >
+                                                Cancel
+                                              </Button>
+                                            </div>
+                                          </div>
+                                        )}
+                                      </DialogContent>
+                                    </Dialog>
+                                    <Dialog open={contactDialogOpen === patientId} onOpenChange={(open) => setContactDialogOpen(open ? patientId : null)}>
+                                      <DialogTrigger asChild>
+                                        <Button
+                                          size="sm"
+                                          variant="outline"
+                                          className="text-xs"
+                                          title="Contact Patient"
+                                        >
+                                          <Phone className="h-3 w-3" />
+                                        </Button>
+                                      </DialogTrigger>
+                                      <DialogContent>
+                                        <DialogHeader>
+                                          <DialogTitle>Contact Patient - {firstPrescription.first_name} {firstPrescription.last_name}</DialogTitle>
+                                        </DialogHeader>
+                                        <div className="space-y-4">
+                                          <div className="grid gap-4">
+                                            <div>
+                                              <p className="text-sm font-semibold text-gray-600">Patient Name</p>
+                                              <p className="text-lg">{firstPrescription.first_name} {firstPrescription.last_name}</p>
+                                            </div>
+                                            <div>
+                                              <p className="text-sm font-semibold text-gray-600">Prescriptions</p>
+                                              <p className="text-lg">{patientPrescriptions.length} prescription(s)</p>
+                                            </div>
+                                          </div>
+                                          <div className="flex gap-2">
+                                            <Button className="flex-1" variant="outline">
+                                              Send SMS
+                                            </Button>
+                                            <Button className="flex-1" variant="outline">
+                                              Send Email
+                                            </Button>
+                                          </div>
+                                        </div>
+                                      </DialogContent>
+                                    </Dialog>
+
+                                    {/* Print Labels Dialog */}
+                                    <Dialog open={printDialogOpen === patientId} onOpenChange={(open) => setPrintDialogOpen(open ? patientId : null)}>
+                                      <DialogTrigger asChild>
+                                        <Button
+                                          size="sm"
+                                          variant="outline"
+                                          className="text-xs"
+                                          title="Print Labels"
+                                        >
+                                          <Printer className="h-3 w-3" />
+                                        </Button>
+                                      </DialogTrigger>
+                                      <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+                                        <DialogHeader>
+                                          <DialogTitle>Print Prescription Labels</DialogTitle>
+                                        </DialogHeader>
+                                        <div className="space-y-4">
+                                          {patientPrescriptions.map((rx) => (
+                                            <div key={rx.id} className="p-6 bg-white border-2 border-gray-400 rounded">
+                                              <div className="border-b-2 border-gray-400 pb-3 mb-4">
+                                                <div className="text-center">
+                                                  <p className="text-lg font-bold">Heritage Medical Centre</p>
+                                                  <p className="text-xs text-gray-600">PHARMACY PRESCRIPTION LABEL</p>
+                                                </div>
+                                              </div>
+                                              <div className="text-center mb-4">
+                                                <p className="text-xs text-gray-700 font-semibold">PRESCRIPTION #</p>
+                                                <p className="text-2xl font-bold tracking-wider">{getPrescriptionNumber(rx)}</p>
+                                                <p className="text-xs text-gray-600 mt-1">Date: {format(new Date(rx.created_at), 'MMM dd, yyyy')}</p>
+                                              </div>
+                                              <div className="bg-gray-100 p-3 rounded mb-4 border border-gray-300 grid grid-cols-2 gap-4 text-xs">
+                                                <div>
+                                                  <p className="font-semibold text-gray-700">PATIENT NAME</p>
+                                                  <p className="font-bold text-sm">{firstPrescription.first_name} {firstPrescription.last_name}</p>
+                                                </div>
+                                                <div>
+                                                  <p className="font-semibold text-gray-700">MEDICATION(S)</p>
+                                                  <p className="font-bold text-sm">{rx.items?.map((i: any) => i.medication_name).join(', ')}</p>
+                                                </div>
+                                              </div>
+                                              <div className="grid grid-cols-2 gap-4 mb-4 text-xs border-b pb-3">
+                                                <div>
+                                                  <p className="font-semibold text-gray-700">DOSAGE</p>
+                                                  <p className="font-bold text-sm">{rx.items?.[0]?.dosage || '-'}</p>
+                                                </div>
+                                                <div>
+                                                  <p className="font-semibold text-gray-700">PRESCRIBED BY</p>
+                                                  <p className="font-bold text-sm">Dr. {rx.prescribed_by_name || 'Unknown'}</p>
+                                                </div>
+                                              </div>
+                                              <div className="border-t-2 border-gray-400 pt-3 mt-4 text-center text-xs text-gray-600">
+                                                <p>Valid for 1 year from date of issue</p>
+                                                <p className="text-xs mt-1">For Pharmacy Use Only | Dispense as Directed</p>
+                                                <p className="text-xs mt-2 text-gray-500">Printed: {format(new Date(), 'MMM dd, yyyy HH:mm')}</p>
+                                              </div>
+                                            </div>
+                                          ))}
+                                        </div>
+                                        <Button onClick={() => window.print()} className="w-full mt-4">
+                                          Print All Labels
+                                        </Button>
+                                      </DialogContent>
+                                    </Dialog>
+
+                                    {/* Delete All Button */}
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className="text-red-600 hover:text-red-700 hover:bg-red-50 text-xs"
+                                      onClick={() => {
+                                        if (confirm('Delete all prescriptions for this patient? This cannot be undone.')) {
+                                          patientPrescriptions.forEach(rx => deletePrescriptionMutation.mutate(rx.id));
+                                        }
+                                      }}
+                                      title="Delete All"
+                                    >
+                                      <Trash2 className="h-3 w-3" />
+                                    </Button>
+                                  </div>
                                 </TableCell>
                               </TableRow>
 

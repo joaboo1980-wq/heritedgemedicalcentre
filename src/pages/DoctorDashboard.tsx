@@ -2455,7 +2455,7 @@ const cancelPrescriptionMutation = useMutation({
                       />
                     </div>
                   );
-                })}
+                })}  
               </div>
             )}
           </div>

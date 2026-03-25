@@ -37,8 +37,9 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from 'sonner';
-import { Plus, Search, FlaskConical, Clock, CheckCircle, AlertCircle, Download, MoreHorizontal, Eye, FileText, Printer, Droplet } from 'lucide-react';
+import { Plus, Search, FlaskConical, Clock, CheckCircle, AlertCircle, Download, MoreHorizontal, Eye, FileText, Printer, Droplet, Edit, Trash2 } from 'lucide-react';
 import { format } from 'date-fns';
 import PermissionGuard from '@/components/layout/PermissionGuard';
 
@@ -90,12 +91,15 @@ const priorityColors: Record<string, string> = {
 const Laboratory = () => {
   const { user } = useAuth();
   const queryClient = useQueryClient();
+  const [activeTab, setActiveTab] = useState<'orders' | 'test-management'>('orders');
   const [searchTerm, setSearchTerm] = useState('');
   const [filterTab, setFilterTab] = useState<'all' | 'pending' | 'completed' | 'sample'>('all');
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isResultDialogOpen, setIsResultDialogOpen] = useState(false);
   const [isDetailsDialogOpen, setIsDetailsDialogOpen] = useState(false);
   const [isSampleDialogOpen, setIsSampleDialogOpen] = useState(false);
+  const [isAddTestDialogOpen, setIsAddTestDialogOpen] = useState(false);
+  const [isEditTestDialogOpen, setIsEditTestDialogOpen] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<LabOrder | null>(null);
   const [testSearch, setTestSearch] = useState('');
   const [showTestList, setShowTestList] = useState(false);
@@ -111,6 +115,13 @@ const Laboratory = () => {
     result_notes: '',
     is_abnormal: false,
   });
+  const [newTest, setNewTest] = useState({
+    test_code: '',
+    test_name: '',
+    category: '',
+    price: 0,
+  });
+  const [editingTest, setEditingTest] = useState<LabTest | null>(null);
 
   // Fetch lab orders
   const { data: labOrders, isLoading } = useQuery({
@@ -316,6 +327,90 @@ const Laboratory = () => {
     },
   });
 
+  // Create lab test
+  const createTestMutation = useMutation({
+    mutationFn: async (data: typeof newTest) => {
+      if (!data.test_code?.trim()) throw new Error('Test code is required');
+      if (!data.test_name?.trim()) throw new Error('Test name is required');
+      if (!data.category?.trim()) throw new Error('Category is required');
+      if (data.price <= 0) throw new Error('Price must be greater than 0');
+
+      const { error } = await supabase.from('lab_tests').insert({
+        test_code: data.test_code.trim(),
+        test_name: data.test_name.trim(),
+        category: data.category.trim(),
+        price: data.price,
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['lab-tests'] });
+      setNewTest({ test_code: '', test_name: '', category: '', price: 0 });
+      setIsAddTestDialogOpen(false);
+      toast.success('Test added successfully');
+    },
+    onError: (error: Error) => {
+      toast.error(`Failed to add test: ${error.message}`);
+    },
+  });
+
+  // Update lab test
+  const updateTestMutation = useMutation({
+    mutationFn: async (data: LabTest) => {
+      if (!data.test_code?.trim()) throw new Error('Test code is required');
+      if (!data.test_name?.trim()) throw new Error('Test name is required');
+      if (!data.category?.trim()) throw new Error('Category is required');
+      if (data.price <= 0) throw new Error('Price must be greater than 0');
+
+      const { error } = await supabase.from('lab_tests').update({
+        test_code: data.test_code.trim(),
+        test_name: data.test_name.trim(),
+        category: data.category.trim(),
+        price: data.price,
+      }).eq('id', data.id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['lab-tests'] });
+      setEditingTest(null);
+      setIsEditTestDialogOpen(false);
+      toast.success('Test updated successfully');
+    },
+    onError: (error: Error) => {
+      toast.error(`Failed to update test: ${error.message}`);
+    },
+  });
+
+  // Delete lab test
+  const deleteTestMutation = useMutation({
+    mutationFn: async (testId: string) => {
+      const { error } = await supabase.from('lab_tests').delete().eq('id', testId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['lab-tests'] });
+      toast.success('Test deleted successfully');
+    },
+    onError: (error: Error) => {
+      toast.error(`Failed to delete test: ${error.message}`);
+    },
+  });
+
+  // Delete all lab tests
+  const deleteAllTestsMutation = useMutation({
+    mutationFn: async () => {
+      const { error } = await supabase.from('lab_tests').delete().gt('id', '');
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['lab-tests'] });
+      toast.success('All tests cleared successfully');
+    },
+    onError: (error: Error) => {
+      toast.error(`Failed to clear tests: ${error.message}`);
+    },
+  });
+
   const filteredOrders = labOrders?.filter((o) => {
     const matchesSearch = 
       o.order_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -441,17 +536,28 @@ const Laboratory = () => {
         <div>
           <h1 className="text-3xl font-bold text-primary">Laboratory Management</h1>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={handleExport}>
-            <Download className="h-4 w-4 mr-2" />
-            Export
-          </Button>
-          <PermissionGuard module="laboratory" action="create">
-            <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-              <DialogTrigger asChild>
-                <Button size="sm"><Plus className="h-4 w-4 mr-2" />New Lab Test</Button>
-              </DialogTrigger>
-              <DialogContent>
+      </div>
+
+      {/* Tabs */}
+      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'orders' | 'test-management')} className="w-full">
+        <TabsList>
+          <TabsTrigger value="orders">Lab Orders</TabsTrigger>
+          <TabsTrigger value="test-management">Test Management</TabsTrigger>
+        </TabsList>
+
+        {/* Lab Orders Tab */}
+        <TabsContent value="orders" className="space-y-6">
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={handleExport}>
+              <Download className="h-4 w-4 mr-2" />
+              Export
+            </Button>
+            <PermissionGuard module="laboratory" action="create">
+              <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+                <DialogTrigger asChild>
+                  <Button size="sm"><Plus className="h-4 w-4 mr-2" />New Lab Test</Button>
+                </DialogTrigger>
+                <DialogContent>
                 <DialogHeader>
                   <DialogTitle>Create Lab Order</DialogTitle>
                 </DialogHeader>
@@ -582,96 +688,95 @@ const Laboratory = () => {
               </DialogContent>
             </Dialog>
           </PermissionGuard>
-        </div>
-      </div>
-
-      {/* Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Card>
-          <CardContent className="p-4 flex items-center gap-4">
-            <div className="p-3 rounded-lg bg-primary/10"><FlaskConical className="h-6 w-6 text-primary" /></div>
-            <div><p className="text-2xl font-bold">{labOrders?.length || 0}</p><p className="text-sm text-muted-foreground">Total Orders</p></div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4 flex items-center gap-4">
-            <div className="p-3 rounded-lg bg-yellow-100"><Clock className="h-6 w-6 text-yellow-600" /></div>
-            <div><p className="text-2xl font-bold">{pendingCount}</p><p className="text-sm text-muted-foreground">Pending</p></div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4 flex items-center gap-4">
-            <div className="p-3 rounded-lg bg-green-100"><CheckCircle className="h-6 w-6 text-green-600" /></div>
-            <div><p className="text-2xl font-bold">{completedCount}</p><p className="text-sm text-muted-foreground">Completed</p></div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4 flex items-center gap-4">
-            <div className="p-3 rounded-lg bg-red-100"><AlertCircle className="h-6 w-6 text-red-600" /></div>
-            <div><p className="text-2xl font-bold">{abnormalCount}</p><p className="text-sm text-muted-foreground">Abnormal Results</p></div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Laboratory Tests */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <CardTitle>Laboratory Tests</CardTitle>
-              <p className="text-sm text-muted-foreground mt-1">Manage and track laboratory tests for patients.</p>
-            </div>
-            <div className="relative w-64">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input placeholder="Search tests..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="pl-9" />
-            </div>
           </div>
-          <div className="flex gap-2">
-            <Button
-              variant={filterTab === 'all' ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => setFilterTab('all')}
-            >
-              All Tests
-            </Button>
-            <Button
-              variant={filterTab === 'pending' ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => setFilterTab('pending')}
-            >
-              Pending
-            </Button>
-            <Button
-              variant={filterTab === 'completed' ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => setFilterTab('completed')}
-            >
-              Completed
-            </Button>
-            <Button
-              variant={filterTab === 'sample' ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => setFilterTab('sample')}
-            >
-              Sample Collection
-            </Button>
+
+          {/* Stats */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <Card>
+              <CardContent className="p-4 flex items-center gap-4">
+                <div className="p-3 rounded-lg bg-primary/10"><FlaskConical className="h-6 w-6 text-primary" /></div>
+                <div><p className="text-2xl font-bold">{labOrders?.length || 0}</p><p className="text-sm text-muted-foreground">Total Orders</p></div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-4 flex items-center gap-4">
+                <div className="p-3 rounded-lg bg-yellow-100"><Clock className="h-6 w-6 text-yellow-600" /></div>
+                <div><p className="text-2xl font-bold">{pendingCount}</p><p className="text-sm text-muted-foreground">Pending</p></div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-4 flex items-center gap-4">
+                <div className="p-3 rounded-lg bg-green-100"><CheckCircle className="h-6 w-6 text-green-600" /></div>
+                <div><p className="text-2xl font-bold">{completedCount}</p><p className="text-sm text-muted-foreground">Completed</p></div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-4 flex items-center gap-4">
+                <div className="p-3 rounded-lg bg-red-100"><AlertCircle className="h-6 w-6 text-red-600" /></div>
+                <div><p className="text-2xl font-bold">{abnormalCount}</p><p className="text-sm text-muted-foreground">Abnormal Results</p></div>
+              </CardContent>
+            </Card>
           </div>
-        </CardHeader>
-        <CardContent>
-          {isLoading ? (
-            <div className="flex justify-center py-8"><div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" /></div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-8"></TableHead>
-                  <TableHead>Patient</TableHead>
-                  <TableHead>Orders Count</TableHead>
-                  <TableHead>Last Order Date</TableHead>
-                  <TableHead>Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
+
+          {/* Laboratory Tests */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <CardTitle>Laboratory Tests</CardTitle>
+                  <p className="text-sm text-muted-foreground mt-1">Manage and track laboratory tests for patients.</p>
+                </div>
+                <div className="relative w-64">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input placeholder="Search tests..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="pl-9" />
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  variant={filterTab === 'all' ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setFilterTab('all')}
+                >
+                  All Tests
+                </Button>
+                <Button
+                  variant={filterTab === 'pending' ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setFilterTab('pending')}
+                >
+                  Pending
+                </Button>
+                <Button
+                  variant={filterTab === 'completed' ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setFilterTab('completed')}
+                >
+                  Completed
+                </Button>
+                <Button
+                  variant={filterTab === 'sample' ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setFilterTab('sample')}
+                >
+                  Sample Collection
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {isLoading ? (
+                <div className="flex justify-center py-8"><div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" /></div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-8"></TableHead>
+                      <TableHead>Patient</TableHead>
+                      <TableHead>Orders Count</TableHead>
+                      <TableHead>Last Order Date</TableHead>
+                      <TableHead>Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
                 {Array.from(
                   (filteredOrders || []).reduce((acc, order) => {
                     if (!acc.has(order.patient_id)) {
@@ -807,6 +912,7 @@ const Laboratory = () => {
         </CardContent>
       </Card>
 
+      {/* Dialogs for Lab Orders Tab */}
       {/* Result Entry Dialog */}
       <Dialog open={isResultDialogOpen} onOpenChange={setIsResultDialogOpen}>
         <DialogContent>
@@ -987,6 +1093,240 @@ const Laboratory = () => {
           )}
         </DialogContent>
       </Dialog>
+        </TabsContent>
+
+        {/* Test Management Tab */}
+        <TabsContent value="test-management" className="space-y-6">
+          {/* Add Test Button */}
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xl font-semibold">Manage Lab Tests</h2>
+            <PermissionGuard module="laboratory" action="create">
+              <Dialog open={isAddTestDialogOpen} onOpenChange={setIsAddTestDialogOpen}>
+                <DialogTrigger asChild>
+                  <Button size="sm"><Plus className="h-4 w-4 mr-2" />Add New Test</Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Add Lab Test</DialogTitle>
+                  </DialogHeader>
+                  <form onSubmit={(e) => {
+                    e.preventDefault();
+                    createTestMutation.mutate(newTest);
+                  }} className="space-y-4">
+                    <div className="space-y-2">
+                      <Label>Test Code (e.g., CBC-001) *</Label>
+                      <Input 
+                        value={newTest.test_code}
+                        onChange={(e) => setNewTest({...newTest, test_code: e.target.value})}
+                        placeholder="Enter test code"
+                        required
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Test Name *</Label>
+                      <Input 
+                        value={newTest.test_name}
+                        onChange={(e) => setNewTest({...newTest, test_name: e.target.value})}
+                        placeholder="e.g., Complete Blood Count"
+                        required
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Category *</Label>
+                      <Select value={newTest.category} onValueChange={(v) => setNewTest({...newTest, category: v})}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select category" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="hematology">Hematology</SelectItem>
+                          <SelectItem value="biochemistry">Biochemistry</SelectItem>
+                          <SelectItem value="microbiology">Microbiology</SelectItem>
+                          <SelectItem value="immunology">Immunology</SelectItem>
+                          <SelectItem value="urinalysis">Urinalysis</SelectItem>
+                          <SelectItem value="imaging">Imaging</SelectItem>
+                          <SelectItem value="other">Other</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Price (UGX) *</Label>
+                      <Input 
+                        type="number"
+                        value={newTest.price}
+                        onChange={(e) => setNewTest({...newTest, price: parseFloat(e.target.value) || 0})}
+                        placeholder="Enter price in Uganda Shillings"
+                        min="0"
+                        step="100"
+                        required
+                      />
+                    </div>
+                    <Button type="submit" className="w-full" disabled={createTestMutation.isPending}>
+                      {createTestMutation.isPending ? 'Adding...' : 'Add Test'}
+                    </Button>
+                  </form>
+                </DialogContent>
+              </Dialog>
+            </PermissionGuard>
+          </div>
+
+          {/* Tests Table */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Lab Tests Catalog</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Code</TableHead>
+                      <TableHead>Test Name</TableHead>
+                      <TableHead>Category</TableHead>
+                      <TableHead>Price (UGX)</TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {labTests && labTests.length > 0 ? (
+                      labTests.map((test) => (
+                        <TableRow key={test.id}>
+                          <TableCell className="font-mono text-sm">{test.test_code}</TableCell>
+                          <TableCell>{test.test_name}</TableCell>
+                          <TableCell>
+                            <Badge variant="outline" className="capitalize">{test.category}</Badge>
+                          </TableCell>
+                          <TableCell className="font-semibold">{test.price.toLocaleString('en-UG', { style: 'currency', currency: 'UGX' })}</TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex gap-2 justify-end">
+                              <Dialog open={isEditTestDialogOpen && editingTest?.id === test.id} onOpenChange={(open) => {
+                                if (!open) setEditingTest(null);
+                                setIsEditTestDialogOpen(open);
+                              }}>
+                                <DialogTrigger asChild>
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    onClick={() => setEditingTest(test)}
+                                  >
+                                    <Edit className="h-4 w-4" />
+                                  </Button>
+                                </DialogTrigger>
+                                <DialogContent>
+                                  <DialogHeader>
+                                    <DialogTitle>Edit Lab Test</DialogTitle>
+                                  </DialogHeader>
+                                  {editingTest && (
+                                    <form onSubmit={(e) => {
+                                      e.preventDefault();
+                                      updateTestMutation.mutate(editingTest);
+                                    }} className="space-y-4">
+                                      <div className="space-y-2">
+                                        <Label>Test Code *</Label>
+                                        <Input 
+                                          value={editingTest.test_code}
+                                          onChange={(e) => setEditingTest({...editingTest, test_code: e.target.value})}
+                                          required
+                                        />
+                                      </div>
+                                      <div className="space-y-2">
+                                        <Label>Test Name *</Label>
+                                        <Input 
+                                          value={editingTest.test_name}
+                                          onChange={(e) => setEditingTest({...editingTest, test_name: e.target.value})}
+                                          required
+                                        />
+                                      </div>
+                                      <div className="space-y-2">
+                                        <Label>Category *</Label>
+                                        <Select value={editingTest.category} onValueChange={(v) => setEditingTest({...editingTest, category: v})}>
+                                          <SelectTrigger>
+                                            <SelectValue />
+                                          </SelectTrigger>
+                                          <SelectContent>
+                                            <SelectItem value="hematology">Hematology</SelectItem>
+                                            <SelectItem value="biochemistry">Biochemistry</SelectItem>
+                                            <SelectItem value="microbiology">Microbiology</SelectItem>
+                                            <SelectItem value="immunology">Immunology</SelectItem>
+                                            <SelectItem value="urinalysis">Urinalysis</SelectItem>
+                                            <SelectItem value="imaging">Imaging</SelectItem>
+                                            <SelectItem value="other">Other</SelectItem>
+                                          </SelectContent>
+                                        </Select>
+                                      </div>
+                                      <div className="space-y-2">
+                                        <Label>Price (UGX) *</Label>
+                                        <Input 
+                                          type="number"
+                                          value={editingTest.price}
+                                          onChange={(e) => setEditingTest({...editingTest, price: parseFloat(e.target.value) || 0})}
+                                          min="0"
+                                          step="100"
+                                          required
+                                        />
+                                      </div>
+                                      <Button type="submit" className="w-full" disabled={updateTestMutation.isPending}>
+                                        {updateTestMutation.isPending ? 'Updating...' : 'Update Test'}
+                                      </Button>
+                                    </form>
+                                  )}
+                                </DialogContent>
+                              </Dialog>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                                onClick={() => {
+                                  if (confirm(`Delete test "${test.test_name}"? This cannot be undone.`)) {
+                                    deleteTestMutation.mutate(test.id);
+                                  }
+                                }}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    ) : (
+                      <TableRow>
+                        <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
+                          No lab tests found. Add your first test to get started.
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Clear All Tests Button */}
+          {labTests && labTests.length > 0 && (
+            <Card className="border-red-200 bg-red-50">
+              <CardContent className="p-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="font-semibold text-red-900">Clear All Tests</h3>
+                    <p className="text-sm text-red-700 mt-1">Delete all tests from the catalog. This action cannot be undone.</p>
+                  </div>
+                  <Button
+                    variant="outline"
+                    className="text-red-600 border-red-300 hover:bg-red-100"
+                    onClick={() => {
+                      if (confirm('Are you sure you want to delete ALL tests? This cannot be undone and will affect all lab orders using these tests.')) {
+                        deleteAllTestsMutation.mutate();
+                      }
+                    }}
+                    disabled={deleteAllTestsMutation.isPending}
+                  >
+                    {deleteAllTestsMutation.isPending ? 'Clearing...' : 'Clear All Tests'}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </TabsContent>
+      </Tabs>
     </div>
   );
 };
