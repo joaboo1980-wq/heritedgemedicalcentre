@@ -388,22 +388,22 @@ const useHMISStaffUtilization = (department?: string) => {
     queryKey: ['hmis-staff-utilization', department],
     queryFn: async () => {
       const { count: doctors } = await supabase
-        .from('staff')
+        .from('user_roles')
         .select('*', { count: 'exact', head: true })
         .eq('role', 'doctor');
 
       const { count: nurses } = await supabase
-        .from('staff')
+        .from('user_roles')
         .select('*', { count: 'exact', head: true })
         .eq('role', 'nurse');
 
       const { count: pharmacists } = await supabase
-        .from('staff')
+        .from('user_roles')
         .select('*', { count: 'exact', head: true })
         .eq('role', 'pharmacist');
 
       const { count: labTechs } = await supabase
-        .from('staff')
+        .from('user_roles')
         .select('*', { count: 'exact', head: true })
         .eq('role', 'lab_technician');
 

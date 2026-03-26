@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
+import { createSampleNotificationsForUser } from './useNotificationGenerator';
 
 export interface Notification {
   id: string;
@@ -49,7 +50,7 @@ export interface Notification {
 }
 
 export const useNotifications = () => {
-  const { user } = useAuth();
+  const { user, roles } = useAuth();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
@@ -68,8 +69,20 @@ export const useNotifications = () => {
 
       if (error) throw error;
 
-      setNotifications(data as Notification[]);
-      setUnreadCount(data.filter((n: Notification) => !n.is_read).length);
+      const notificationsData = (data || []) as Notification[];
+      setNotifications(notificationsData);
+      setUnreadCount(notificationsData.filter((n: Notification) => !n.is_read).length);
+
+      // If user has no notifications, generate sample ones based on their role
+      if (notificationsData.length === 0 && roles && roles.length > 0) {
+        const userRole = roles[0]; // Get primary role
+        console.log(`[Notifications] Generating sample notifications for role: ${userRole}`);
+        const created = await createSampleNotificationsForUser(user.id, userRole);
+        if (created) {
+          // Refetch to get the newly created notifications
+          setTimeout(() => fetchNotifications(), 500);
+        }
+      }
     } catch (error) {
       console.error('Error fetching notifications:', error);
     } finally {
@@ -212,7 +225,7 @@ export const useNotifications = () => {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [user]);
+  }, [user, roles]);
 
   return {
     notifications,

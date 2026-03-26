@@ -1,8 +1,9 @@
-import { Moon, Search } from 'lucide-react';
+import { Moon, Sun, Search } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { useAuth } from '@/hooks/useAuth';
+import { useTheme } from '@/contexts/ThemeContext';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -18,6 +19,7 @@ import heritageLogo from '@/assets/heritage-logo.jpg';
 
 const Header = () => {
   const { profile, signOut } = useAuth();
+  const { isDark, setTheme } = useTheme();
   const navigate = useNavigate();
 
   const handleSignOut = async () => {
@@ -59,8 +61,14 @@ const Header = () => {
       <div className="flex items-center gap-3">
         <NotificationDropdown />
         
-        <Button variant="ghost" size="icon">
-          <Moon className="h-5 w-5 text-muted-foreground" />
+        <Button 
+          variant="ghost" 
+          size="icon"
+          onClick={() => setTheme(isDark ? 'light' : 'dark')}
+          className="text-muted-foreground hover:text-foreground transition-colors"
+          title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+        >
+          {isDark ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
         </Button>
 
         <DropdownMenu>
@@ -81,9 +89,6 @@ const Header = () => {
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={() => navigate('/profile')}>
               Profile
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => navigate('/settings')}>
-              Settings
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={handleSignOut} className="text-destructive">

@@ -29,13 +29,12 @@ import Pharmacy from "./pages/Pharmacy";
 import Reports from "./pages/Reports";
 import GenerateReport from "./pages/GenerateReport";
 import SubmittedReports from "./pages/SubmittedReports";
-import AcademicDocuments from "./pages/AcademicDocuments";
-import ReviewAcademicDocuments from "./pages/ReviewAcademicDocuments";
 import Profile from "./pages/Profile";
 import UserManagement from "./pages/UserManagement";
 import Billing from "./pages/Billing";
 import Invoices from "./pages/Invoices";
 import Accounts from "./pages/Accounts";
+import Notifications from "./pages/Notifications";
 import NotFound from "./pages/NotFound";
 import ForgotPassword from "./pages/ForgotPassword";
 import ResetPassword from "./pages/ResetPassword";
@@ -209,14 +208,9 @@ const App = () => (
                   <Profile />
                 </ProtectedRoute>
               } />
-              <Route path="/academic-documents" element={
-                <ProtectedRoute module="user_management">
-                  <AcademicDocuments />
-                </ProtectedRoute>
-              } />
-              <Route path="/admin/academic-documents" element={
-                <ProtectedRoute module="user_management" requiredRole="admin">
-                  <ReviewAcademicDocuments />
+              <Route path="/notifications" element={
+                <ProtectedRoute module="dashboard">
+                  <Notifications />
                 </ProtectedRoute>
               } />
               <Route path="/billing" element={

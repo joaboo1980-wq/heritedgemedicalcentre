@@ -34,10 +34,11 @@ const SubmittedReports = () => {
   const [statusFilter, setStatusFilter] = useState('all');
   const [isReviewing, setIsReviewing] = useState(false);
 
-  // Get all submitted reports
+  // Get all submitted reports with submitter info
   const { data: submittedReports, isLoading: reportsLoading } = useQuery({
     queryKey: ['admin-submitted-reports', statusFilter],
     queryFn: async () => {
+      // First, fetch all submitted reports
       let query = supabase
         .from('submitted_reports')
         .select('*');
@@ -46,8 +47,31 @@ const SubmittedReports = () => {
         query = query.eq('status', statusFilter);
       }
 
-      const { data } = await query.order('submitted_at', { ascending: false });
-      return data || [];
+      const { data: reports } = await query.order('submitted_at', { ascending: false });
+      
+      if (!reports || reports.length === 0) return [];
+
+      // Get all unique user IDs
+      const userIds = [...new Set((reports as any[]).map(r => r.user_id))];
+
+      // Fetch profiles for those users
+      const { data: profiles } = await supabase
+        .from('profiles')
+        .select('user_id, full_name, department')
+        .in('user_id', userIds);
+
+      // Combine data
+      const profileMap = (profiles || []).reduce((acc: any, p: any) => {
+        acc[p.user_id] = p;
+        return acc;
+      }, {});
+
+      const enrichedReports = (reports as any[]).map(report => ({
+        ...report,
+        submitterProfile: profileMap[report.user_id] || { full_name: 'Unknown User', department: '-' }
+      }));
+
+      return enrichedReports;
     },
   });
 
@@ -272,49 +296,24 @@ const SubmittedReports = () => {
             <div className="py-8 text-center text-muted-foreground">No reports found</div>
           ) : (
             <div className="space-y-4">
-              {submittedReports?.map(report => (
+              {submittedReports?.map(report => {
+                const submitterName = (report as any).submitterProfile?.full_name || 'Unknown User';
+                return (
                 <div
                   key={report.id}
-                  className="border rounded-lg p-4 hover:bg-accent transition-colors"
+                  className="border rounded-lg p-4 space-y-3 hover:bg-accent transition-colors"
                 >
-                  <div className="flex items-start justify-between mb-3">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-1">
-                        <h3 className="font-semibold">{report.report_title}</h3>
-                        <Badge variant={getStatusColor(report.status)}>
-                          {getStatusIcon(report.status)}
-                          <span className="ml-1">
-                            {report.status.charAt(0).toUpperCase() + report.status.slice(1)}
-                          </span>
-                        </Badge>
-                      </div>
-                      <p className="text-sm text-muted-foreground mb-2">{report.summary}</p>
-                      <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
-                        <span>Department: {report.department}</span>
-                        <span>Type: {report.report_type}</span>
-                        <span>Submitted: {format(new Date(report.submitted_at), 'MMM dd, yyyy HH:mm')}</span>
-                        {report.reviewed_at && (
-                          <span>Reviewed: {format(new Date(report.reviewed_at), 'MMM dd, yyyy')}</span>
-                        )}
-                        {report.performance_rating && (
-                          <div className="flex items-center">
-                            {Array.from({ length: report.performance_rating }).map((_, i) => (
-                              <Star
-                                key={i}
-                                className="h-3 w-3 fill-yellow-400 text-yellow-400"
-                              />
-                            ))}
-                            {Array.from({ length: 5 - report.performance_rating }).map((_, i) => (
-                              <Star
-                                key={i + report.performance_rating}
-                                className="h-3 w-3 text-gray-300"
-                              />
-                            ))}
-                          </div>
-                        )}
-                      </div>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <h3 className="font-semibold">{report.report_title}</h3>
+                      <Badge variant={getStatusColor(report.status)}>
+                        {getStatusIcon(report.status)}
+                        <span className="ml-1">
+                          {report.status.charAt(0).toUpperCase() + report.status.slice(1)}
+                        </span>
+                      </Badge>
                     </div>
-                    <div className="flex gap-2 ml-4">
+                    <div className="flex gap-2">
                       <Button
                         variant="outline"
                         size="sm"
@@ -333,6 +332,54 @@ const SubmittedReports = () => {
                     </div>
                   </div>
 
+                  <div className="bg-gray-50 p-3 rounded border border-gray-200">
+                    <p className="text-sm text-gray-700 line-clamp-3">{report.summary}</p>
+                  </div>
+
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-xs">
+                    <div>
+                      <span className="font-medium text-gray-700">Submitted by:</span>
+                      <p className="text-muted-foreground">{submitterName}</p>
+                    </div>
+                    <div>
+                      <span className="font-medium text-gray-700">Department:</span>
+                      <p className="text-muted-foreground">{report.department}</p>
+                    </div>
+                    <div>
+                      <span className="font-medium text-gray-700">Type:</span>
+                      <p className="text-muted-foreground">{report.report_type}</p>
+                    </div>
+                    <div>
+                      <span className="font-medium text-gray-700">Submitted:</span>
+                      <p className="text-muted-foreground">{format(new Date(report.submitted_at), 'MMM dd, yyyy HH:mm')}</p>
+                    </div>
+                    {report.reviewed_at && (
+                      <div>
+                        <span className="font-medium text-gray-700">Reviewed:</span>
+                        <p className="text-muted-foreground">{format(new Date(report.reviewed_at), 'MMM dd, yyyy')}</p>
+                      </div>
+                    )}
+                    {report.performance_rating && (
+                      <div>
+                        <span className="font-medium text-gray-700">Rating:</span>
+                        <div className="flex items-center">
+                            {Array.from({ length: report.performance_rating }).map((_, i) => (
+                              <Star
+                                key={i}
+                                className="h-3 w-3 fill-yellow-400 text-yellow-400"
+                              />
+                            ))}
+                            {Array.from({ length: 5 - report.performance_rating }).map((_, i) => (
+                              <Star
+                                key={i + report.performance_rating}
+                                className="h-3 w-3 text-gray-300"
+                              />
+                            ))}
+                          </div>
+                      </div>
+                    )}
+                  </div>
+
                   {report.admin_comments && (
                     <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded text-sm">
                       <p className="font-semibold text-blue-900 mb-1">Admin Comments:</p>
@@ -340,7 +387,8 @@ const SubmittedReports = () => {
                     </div>
                   )}
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </CardContent>
@@ -360,23 +408,29 @@ const SubmittedReports = () => {
             {/* Report Summary */}
             <div>
               <label className="text-sm font-medium">Report Summary</label>
-              <div className="mt-2 p-3 bg-gray-50 rounded text-sm">
-                {selectedReport?.summary}
+              <div className="mt-2 p-4 bg-gradient-to-br from-blue-50 to-cyan-50 border border-blue-200 rounded-lg text-xs max-h-[150px] overflow-y-auto w-full">
+                {selectedReport?.summary ? (
+                  <p className="text-gray-800 leading-relaxed whitespace-normal break-all w-full">
+                    {selectedReport.summary}
+                  </p>
+                ) : (
+                  <p className="text-gray-500 italic">No summary provided</p>
+                )}
               </div>
             </div>
 
             {/* Performance Rating */}
-            <div>
-              <label className="text-sm font-medium mb-2 block">Performance Rating</label>
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+              <label className="text-sm font-medium text-amber-900 mb-3 block">Performance Rating</label>
               <div className="flex gap-2">
                 {[1, 2, 3, 4, 5].map(rating => (
                   <button
                     key={rating}
                     onClick={() => setPerformanceRating(rating)}
-                    className="p-2 transition-colors"
+                    className="p-2 transition-transform hover:scale-110 active:scale-95"
                   >
                     <Star
-                      className={`h-6 w-6 ${
+                      className={`h-7 w-7 ${
                         rating <= performanceRating
                           ? 'fill-yellow-400 text-yellow-400'
                           : 'text-gray-300'
@@ -388,32 +442,40 @@ const SubmittedReports = () => {
             </div>
 
             {/* Admin Comments */}
-            <div>
-              <label className="text-sm font-medium">Admin Comments</label>
+            <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+              <label className="text-sm font-medium text-green-900 mb-2 block">Admin Review Comments</label>
               <Textarea
-                placeholder="Add your review comments and recommendations..."
+                placeholder="Add your review comments, feedback, and recommendations..."
                 value={adminComments}
                 onChange={(e) => setAdminComments(e.target.value)}
-                className="mt-2 min-h-[100px]"
+                className="mt-2 min-h-[120px] resize-none"
               />
             </div>
           </div>
 
-          <DialogFooter className="gap-2">
+          <DialogFooter className="gap-2 border-t pt-4">
+            <Button
+              variant="outline"
+              onClick={() => setReviewDialog(false)}
+              disabled={isReviewing}
+            >
+              Cancel
+            </Button>
             <Button
               variant="destructive"
               onClick={handleReject}
               disabled={isReviewing}
             >
               <XCircle className="h-4 w-4 mr-2" />
-              Reject
+              {isReviewing ? 'Processing...' : 'Reject'}
             </Button>
             <Button
+              className="bg-green-600 hover:bg-green-700"
               onClick={handleApprove}
               disabled={isReviewing}
             >
               <CheckCircle className="h-4 w-4 mr-2" />
-              {isReviewing ? 'Approving...' : 'Approve'}
+              {isReviewing ? 'Processing...' : 'Approve'}
             </Button>
           </DialogFooter>
         </DialogContent>

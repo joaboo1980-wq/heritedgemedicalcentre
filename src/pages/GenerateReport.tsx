@@ -293,10 +293,10 @@ const GenerateReport = () => {
               {submittedReports?.map(report => (
                 <div
                   key={report.id}
-                  className="border rounded-lg p-4 flex items-start justify-between hover:bg-accent transition-colors"
+                  className="border rounded-lg p-4 space-y-3 hover:bg-accent transition-colors"
                 >
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
                       <FileText className="h-4 w-4 text-muted-foreground" />
                       <h3 className="font-semibold">{report.report_title}</h3>
                       <Badge
@@ -313,26 +313,40 @@ const GenerateReport = () => {
                         {report.status.charAt(0).toUpperCase() + report.status.slice(1)}
                       </Badge>
                     </div>
-                    <p className="text-sm text-muted-foreground mb-2">{report.summary}</p>
-                    <div className="flex gap-4 text-xs text-muted-foreground">
-                      <span>Submitted: {format(new Date(report.submitted_at), 'MMM dd, yyyy')}</span>
-                      {report.reviewed_at && (
-                        <span>Reviewed: {format(new Date(report.reviewed_at), 'MMM dd, yyyy')}</span>
-                      )}
-                      {report.performance_rating && (
-                        <span>Rating: {report.performance_rating}/5 ⭐</span>
-                      )}
+                    <Button variant="outline" size="sm" onClick={() => handleExportReport(report)}>
+                      <Download className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  
+                  <div className="bg-gray-50 p-3 rounded border border-gray-200">
+                    <p className="text-sm text-gray-700 line-clamp-3">{report.summary}</p>
+                  </div>
+                  
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs text-muted-foreground">
+                    <div>
+                      <span className="font-medium">Submitted:</span>
+                      <p>{format(new Date(report.submitted_at), 'MMM dd, yyyy')}</p>
                     </div>
-                    {report.admin_comments && (
-                      <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded text-sm">
-                        <p className="font-semibold text-blue-900">Admin Comments:</p>
-                        <p className="text-blue-800">{report.admin_comments}</p>
+                    {report.reviewed_at && (
+                      <div>
+                        <span className="font-medium">Reviewed:</span>
+                        <p>{format(new Date(report.reviewed_at), 'MMM dd, yyyy')}</p>
+                      </div>
+                    )}
+                    {report.performance_rating && (
+                      <div>
+                        <span className="font-medium">Rating:</span>
+                        <p>{report.performance_rating}/5 ⭐</p>
                       </div>
                     )}
                   </div>
-                  <Button variant="outline" size="sm" className="ml-4" onClick={() => handleExportReport(report)}>
-                    <Download className="h-4 w-4" />
-                  </Button>
+                  
+                  {report.admin_comments && (
+                    <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded text-sm">
+                      <p className="font-semibold text-blue-900 mb-1">Admin Comments:</p>
+                      <p className="text-blue-800">{report.admin_comments}</p>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

@@ -148,7 +148,10 @@ const NotificationItem = ({ notification, onMarkAsRead, onDelete }: Notification
                 variant="ghost"
                 size="icon"
                 className="h-6 w-6"
-                onClick={() => onMarkAsRead(notification.id)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onMarkAsRead(notification.id);
+                }}
               >
                 <Check className="h-3 w-3" />
               </Button>
@@ -157,7 +160,10 @@ const NotificationItem = ({ notification, onMarkAsRead, onDelete }: Notification
               variant="ghost"
               size="icon"
               className="h-6 w-6 text-muted-foreground hover:text-destructive"
-              onClick={() => onDelete(notification.id)}
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete(notification.id);
+              }}
             >
               <X className="h-3 w-3" />
             </Button>

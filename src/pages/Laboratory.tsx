@@ -56,7 +56,7 @@ interface LabOrder {
   is_abnormal: boolean;
   created_at: string;
   patients?: { first_name: string; last_name: string; patient_number: string };
-  lab_tests?: { test_name: string; test_code: string; category: string };
+  lab_tests?: { test_name: string; test_code: string; category: string; normal_range: string | null; unit: string | null };
 }
 
 interface LabTest {
@@ -65,6 +65,8 @@ interface LabTest {
   test_name: string;
   category: string;
   price: number;
+  normal_range?: string | null;
+  unit?: string | null;
 }
 
 interface Patient {
@@ -114,12 +116,16 @@ const Laboratory = () => {
     result_value: '',
     result_notes: '',
     is_abnormal: false,
+    result_unit: '',
   });
+  const [previousResults, setPreviousResults] = useState<LabOrder[]>([]);
   const [newTest, setNewTest] = useState({
     test_code: '',
     test_name: '',
     category: '',
     price: 0,
+    normal_range: '',
+    unit: '',
   });
   const [editingTest, setEditingTest] = useState<LabTest | null>(null);
 
@@ -132,7 +138,7 @@ const Laboratory = () => {
         .select(`
           *,
           patients (first_name, last_name, patient_number),
-          lab_tests (test_name, test_code, category)
+          lab_tests (test_name, test_code, category, normal_range, unit)
         `)
         .order('created_at', { ascending: false });
       if (error) throw error;
@@ -282,6 +288,39 @@ const Laboratory = () => {
     },
   });
 
+  // Check if result is abnormal based on normal range
+  const checkAbnormal = (resultValue: string, normalRange: string | null | undefined): boolean => {
+    if (!resultValue?.trim() || !normalRange) return false;
+    
+    const numValue = parseFloat(resultValue);
+    if (isNaN(numValue)) return false; // Not a number, can't auto-flag
+    
+    // Parse normal range (e.g., "70-100" or "<150" or ">60")
+    const cleanRange = normalRange.trim();
+    
+    // Handle ranges like "70-100"
+    if (cleanRange.includes('-')) {
+      const [min, max] = cleanRange.split('-').map(v => parseFloat(v.trim()));
+      if (!isNaN(min) && !isNaN(max)) {
+        return numValue < min || numValue > max;
+      }
+    }
+    
+    // Handle "<number"
+    if (cleanRange.startsWith('<')) {
+      const threshold = parseFloat(cleanRange.substring(1));
+      if (!isNaN(threshold)) return numValue >= threshold;
+    }
+    
+    // Handle ">number"
+    if (cleanRange.startsWith('>')) {
+      const threshold = parseFloat(cleanRange.substring(1));
+      if (!isNaN(threshold)) return numValue <= threshold;
+    }
+    
+    return false;
+  };
+
   // Submit results
   const submitResultMutation = useMutation({
     mutationFn: async ({ id, data }: { id: string; data: typeof resultData }) => {
@@ -318,7 +357,8 @@ const Laboratory = () => {
       queryClient.invalidateQueries({ queryKey: ['activity-log'] });
       setIsResultDialogOpen(false);
       setSelectedOrder(null);
-      setResultData({ result_value: '', result_notes: '', is_abnormal: false });
+      setResultData({ result_value: '', result_notes: '', is_abnormal: false, result_unit: '' });
+      setPreviousResults([]);
       toast.success('Results submitted');
     },
     onError: (error: Error) => {
@@ -340,12 +380,14 @@ const Laboratory = () => {
         test_name: data.test_name.trim(),
         category: data.category.trim(),
         price: data.price,
+        normal_range: data.normal_range?.trim() || null,
+        unit: data.unit?.trim() || null,
       });
       if (error) throw error;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['lab-tests'] });
-      setNewTest({ test_code: '', test_name: '', category: '', price: 0 });
+      setNewTest({ test_code: '', test_name: '', category: '', price: 0, normal_range: '', unit: '' });
       setIsAddTestDialogOpen(false);
       toast.success('Test added successfully');
     },
@@ -367,6 +409,8 @@ const Laboratory = () => {
         test_name: data.test_name.trim(),
         category: data.category.trim(),
         price: data.price,
+        normal_range: data.normal_range || null,
+        unit: data.unit || null,
       }).eq('id', data.id);
       if (error) throw error;
     },
@@ -627,7 +671,7 @@ const Laboratory = () => {
                                 }`}
                               >
                                 <div className="font-medium text-sm">{test.test_name}</div>
-                                <div className="text-xs text-gray-500">{test.test_code} • {test.category} • ${test.price}</div>
+                                <div className="text-xs text-gray-500">{test.test_code} • {test.category} • {test.price}</div>
                               </button>
                             ))
                           ) : (
@@ -649,7 +693,7 @@ const Laboratory = () => {
                             >
                               <div>
                                 <div className="font-medium text-sm text-gray-800">{test.name}</div>
-                                <div className="text-xs text-gray-600">{test.code} • ${test.price}</div>
+                                <div className="text-xs text-gray-600">{test.code} • {test.price}</div>
                               </div>
                               <button
                                 type="button"
@@ -913,32 +957,124 @@ const Laboratory = () => {
       </Card>
 
       {/* Dialogs for Lab Orders Tab */}
-      {/* Result Entry Dialog */}
+      {/* Result Entry Dialog - Enhanced with Reference Ranges and Auto-Abnormal Detection */}
       <Dialog open={isResultDialogOpen} onOpenChange={setIsResultDialogOpen}>
-        <DialogContent>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Enter Test Results</DialogTitle>
+            <DialogTitle>Enter Test Results - Enhanced Entry Form</DialogTitle>
           </DialogHeader>
           {selectedOrder && (
-            <form onSubmit={(e) => { e.preventDefault(); submitResultMutation.mutate({ id: selectedOrder.id, data: resultData }); }} className="space-y-4">
-              <div className="p-3 bg-muted rounded-lg">
-                <p className="font-medium">{selectedOrder.lab_tests?.test_name}</p>
-                <p className="text-sm text-muted-foreground">Patient: {selectedOrder.patients?.first_name} {selectedOrder.patients?.last_name}</p>
+            <form onSubmit={(e) => { 
+              e.preventDefault();
+              // Auto-check abnormal if result falls outside normal range
+              const shouldBeFlagged = checkAbnormal(resultData.result_value, selectedOrder.lab_tests?.normal_range);
+              const finalData = { ...resultData, is_abnormal: resultData.is_abnormal || shouldBeFlagged };
+              submitResultMutation.mutate({ id: selectedOrder.id, data: finalData }); 
+            }} className="space-y-4">
+              {/* Test Information Card */}
+              <div className="p-4 bg-blue-50 rounded-lg border border-blue-200">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-xs font-semibold text-gray-600 uppercase">Test</p>
+                    <p className="font-medium text-lg">{selectedOrder.lab_tests?.test_name}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-semibold text-gray-600 uppercase">Patient</p>
+                    <p className="font-medium">{selectedOrder.patients?.first_name} {selectedOrder.patients?.last_name}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-semibold text-gray-600 uppercase">Order #</p>
+                    <p className="font-medium">{selectedOrder.order_number}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-semibold text-gray-600 uppercase">Category</p>
+                    <p className="font-medium">{selectedOrder.lab_tests?.category}</p>
+                  </div>
+                </div>
               </div>
+
+              {/* Normal Range & Units Reference Box */}
+              {(selectedOrder.lab_tests?.normal_range || selectedOrder.lab_tests?.unit) && (
+                <div className="p-3 bg-green-50 rounded-lg border border-green-200">
+                  <p className="text-xs font-semibold text-green-700 uppercase mb-2">Reference Values</p>
+                  <div className="space-y-1 text-sm">
+                    {selectedOrder.lab_tests?.normal_range && (
+                      <div>
+                        <span className="font-medium text-gray-700">Normal Range:</span>
+                        <span className="ml-2 text-green-700 font-semibold">{selectedOrder.lab_tests.normal_range}</span>
+                      </div>
+                    )}
+                    {selectedOrder.lab_tests?.unit && (
+                      <div>
+                        <span className="font-medium text-gray-700">Unit:</span>
+                        <span className="ml-2 text-gray-700">{selectedOrder.lab_tests.unit}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Result Value Input */}
               <div className="space-y-2">
-                <Label>Result Value *</Label>
-                <Input value={resultData.result_value} onChange={(e) => setResultData({ ...resultData, result_value: e.target.value })} placeholder="Enter result value" required />
+                <Label className="font-semibold">Result Value *</Label>
+                <div className="flex gap-2">
+                  <Input 
+                    value={resultData.result_value} 
+                    onChange={(e) => {
+                      const newValue = e.target.value;
+                      setResultData(prev => ({ ...prev, result_value: newValue }));
+                      // Auto-flag if outside normal range
+                      if (checkAbnormal(newValue, selectedOrder.lab_tests?.normal_range) && !resultData.is_abnormal) {
+                        setResultData(prev => ({ ...prev, is_abnormal: true }));
+                      }
+                    }}
+                    placeholder="Enter numeric value or text result" 
+                    required 
+                    className="flex-1"
+                  />
+                  {selectedOrder.lab_tests?.unit && (
+                    <div className="w-32 px-3 py-2 border border-gray-300 rounded bg-gray-50 flex items-center">
+                      <span className="text-sm font-medium text-gray-600">{selectedOrder.lab_tests.unit}</span>
+                    </div>
+                  )}
+                </div>
               </div>
+
+              {/* Clinical Notes */}
               <div className="space-y-2">
-                <Label>Notes</Label>
-                <Textarea value={resultData.result_notes} onChange={(e) => setResultData({ ...resultData, result_notes: e.target.value })} placeholder="Additional notes" rows={3} />
+                <Label className="font-semibold">Clinical Notes</Label>
+                <Textarea 
+                  value={resultData.result_notes} 
+                  onChange={(e) => setResultData(prev => ({ ...prev, result_notes: e.target.value }))} 
+                  placeholder="Additional clinical observations or findings" 
+                  rows={3} 
+                />
               </div>
-              <div className="flex items-center gap-2">
-                <input type="checkbox" id="is_abnormal" checked={resultData.is_abnormal} onChange={(e) => setResultData({ ...resultData, is_abnormal: e.target.checked })} className="rounded" />
-                <Label htmlFor="is_abnormal" className="text-red-600 font-medium">Mark as Abnormal Result</Label>
+
+              {/* Abnormal Flag with Auto-Detection Alert */}
+              <div className="space-y-2">
+                <div className="p-3 bg-red-50 rounded-lg border border-red-200 flex items-center gap-3">
+                  <input 
+                    type="checkbox" 
+                    id="is_abnormal" 
+                    checked={resultData.is_abnormal} 
+                    onChange={(e) => setResultData(prev => ({ ...prev, is_abnormal: e.target.checked }))} 
+                    className="w-4 h-4 rounded" 
+                  />
+                  <Label htmlFor="is_abnormal" className="text-red-700 font-semibold cursor-pointer flex-1 mb-0">
+                    ⚠️ Mark as Abnormal Result
+                  </Label>
+                </div>
+                {checkAbnormal(resultData.result_value, selectedOrder.lab_tests?.normal_range) && (
+                  <div className="p-3 bg-amber-100 border border-amber-400 rounded-lg text-sm text-amber-800 flex gap-2">
+                    <span>ℹ️</span>
+                    <span><strong>Auto-flagged:</strong> Result appears to be outside normal range ({selectedOrder.lab_tests?.normal_range})</span>
+                  </div>
+                )}
               </div>
-              <Button type="submit" className="w-full" disabled={submitResultMutation.isPending}>
-                {submitResultMutation.isPending ? 'Submitting...' : 'Submit Results'}
+
+              <Button type="submit" className="w-full bg-blue-600 hover:bg-blue-700" disabled={submitResultMutation.isPending}>
+                {submitResultMutation.isPending ? 'Submitting Results...' : 'Submit Results'}
               </Button>
             </form>
           )}
@@ -1018,7 +1154,7 @@ const Laboratory = () => {
                     {selectedOrder.result_notes && (
                       <div>
                         <p className="text-sm font-medium text-muted-foreground">Notes</p>
-                        <p className="text-base">{selectedOrder.result_notes}</p>
+                        <p className="text-base whitespace-normal break-words w-full max-h-[300px] overflow-y-auto p-3 bg-gray-50 rounded-lg border border-gray-200">{selectedOrder.result_notes}</p>
                       </div>
                     )}
                     {selectedOrder.is_abnormal && (
@@ -1160,6 +1296,33 @@ const Laboratory = () => {
                         required
                       />
                     </div>
+
+                    {/* Reference Values Section */}
+                    <div className="border-t pt-4 space-y-4">
+                      <div className="bg-blue-50 p-3 rounded-lg">
+                        <p className="text-sm font-semibold text-blue-900 mb-2">Reference Values (Optional)</p>
+                        <p className="text-xs text-blue-700">Set normal ranges and units for this test. These will help identify abnormal results automatically.</p>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label>Normal Range (e.g., 70-100, less than 150, greater than 60)</Label>
+                        <Input 
+                          value={newTest.normal_range}
+                          onChange={(e) => setNewTest({...newTest, normal_range: e.target.value})}
+                          placeholder="e.g., 70-100 or 150 or 60"
+                        />
+                        <p className="text-xs text-gray-500">Format: '70-100' for range, use '&lt;150' for less than, '&gt;60' for greater than in placeholders</p>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label>Unit of Measurement (e.g., mg/dL, mmol/L)</Label>
+                        <Input 
+                          value={newTest.unit}
+                          onChange={(e) => setNewTest({...newTest, unit: e.target.value})}
+                          placeholder="e.g., mg/dL, mmol/L, g/dL"
+                        />
+                      </div>
+                    </div>
                     <Button type="submit" className="w-full" disabled={createTestMutation.isPending}>
                       {createTestMutation.isPending ? 'Adding...' : 'Add Test'}
                     </Button>
@@ -1263,6 +1426,33 @@ const Laboratory = () => {
                                           step="100"
                                           required
                                         />
+                                      </div>
+
+                                      {/* Reference Values Section */}
+                                      <div className="border-t pt-4 space-y-4">
+                                        <div className="bg-blue-50 p-3 rounded-lg">
+                                          <p className="text-sm font-semibold text-blue-900 mb-2">Reference Values (Optional)</p>
+                                          <p className="text-xs text-blue-700">Update normal ranges and units for this test.</p>
+                                        </div>
+
+                                        <div className="space-y-2">
+                          <Label>Normal Range (e.g., 70-100, less than 150, greater than 60)</Label>
+                          <Input 
+                            value={editingTest.normal_range || ''}
+                            onChange={(e) => setEditingTest({...editingTest, normal_range: e.target.value})}
+                            placeholder="e.g., 70-100 or 150 or 60"
+                          />
+                          <p className="text-xs text-gray-500">Format: '70-100' for range, use '&lt;150' for less than, '&gt;60' for greater than in placeholders</p>
+                                        </div>
+
+                                        <div className="space-y-2">
+                                          <Label>Unit of Measurement (e.g., mg/dL, mmol/L)</Label>
+                                          <Input 
+                                            value={editingTest.unit || ''}
+                                            onChange={(e) => setEditingTest({...editingTest, unit: e.target.value})}
+                                            placeholder="e.g., mg/dL, mmol/L, g/dL"
+                                          />
+                                        </div>
                                       </div>
                                       <Button type="submit" className="w-full" disabled={updateTestMutation.isPending}>
                                         {updateTestMutation.isPending ? 'Updating...' : 'Update Test'}

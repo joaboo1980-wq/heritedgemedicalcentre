@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
+import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { useState, useEffect } from 'react';
 import StatsCard from '@/components/dashboard/StatsCard';
 import { 
@@ -27,6 +28,8 @@ import {
   usePendingLabOrders,
   useWeeklyAppointments,
   useActivityLog,
+  useSystemAlerts,
+  useStaffOnDuty,
 } from '@/hooks/useDashboard';
 
 const formatCurrency = (value: number) => {
@@ -59,6 +62,8 @@ const Dashboard = () => {
   const { data: pendingLabOrders, isLoading: labLoading } = usePendingLabOrders();
   const { data: weeklyAppointments, isLoading: weeklyLoading } = useWeeklyAppointments();
   const { data: activityLog, isLoading: activityLoading } = useActivityLog();
+  const { data: systemAlerts, isLoading: alertsLoading } = useSystemAlerts();
+  const { data: staffOnDuty, isLoading: dutyLoading } = useStaffOnDuty();
   
   const [selectedActivity, setSelectedActivity] = useState<ActivityItem | null>(null);
   const [visibleActivities, setVisibleActivities] = useState<Set<string>>(new Set());
@@ -307,38 +312,56 @@ const Dashboard = () => {
             </p>
           </CardHeader>
           <CardContent>
-            <div className="space-y-3">
-              <div className="p-3 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900 rounded-lg">
-                <div className="flex items-start gap-2">
-                  <div className="w-2 h-2 rounded-full bg-red-500 mt-1 flex-shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium text-sm text-red-900 dark:text-red-200">Low Inventory Alert</p>
-                    <p className="text-xs text-red-700 dark:text-red-300">Paracetamol stock is running low (17 units remaining)</p>
-                  </div>
-                  <Badge variant="secondary" className="bg-red-500 text-white ml-2">warning</Badge>
-                </div>
+            {alertsLoading ? (
+              <div className="space-y-3">
+                {[1, 2, 3].map((i) => (
+                  <Skeleton key={i} className="h-16" />
+                ))}
               </div>
-              <div className="p-3 bg-pink-50 dark:bg-pink-950/30 border border-pink-200 dark:border-pink-900 rounded-lg">
-                <div className="flex items-start gap-2">
-                  <div className="w-2 h-2 rounded-full bg-pink-500 mt-1 flex-shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium text-sm text-pink-900 dark:text-pink-200">Equipment Maintenance</p>
-                    <p className="text-xs text-pink-700 dark:text-pink-300">Mill Machine #2 scheduled for maintenance tomorrow</p>
-                  </div>
-                  <Badge variant="secondary" className="bg-pink-500 text-white ml-2">info</Badge>
-                </div>
+            ) : systemAlerts && systemAlerts.length > 0 ? (
+              <div className="space-y-3">
+                {systemAlerts.map((alert) => {
+                  const bgColor = alert.type === 'error' 
+                    ? 'bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-900' 
+                    : alert.type === 'warning'
+                    ? 'bg-yellow-50 dark:bg-yellow-950/30 border-yellow-200 dark:border-yellow-900'
+                    : 'bg-blue-50 dark:bg-blue-950/30 border-blue-200 dark:border-blue-900';
+                  
+                  const dotColor = alert.type === 'error' ? 'bg-red-500' : alert.type === 'warning' ? 'bg-yellow-500' : 'bg-blue-500';
+                  const textColor = alert.type === 'error'
+                    ? 'text-red-900 dark:text-red-200'
+                    : alert.type === 'warning'
+                    ? 'text-yellow-900 dark:text-yellow-200'
+                    : 'text-blue-900 dark:text-blue-200';
+                  
+                  const badgeColors = alert.type === 'error'
+                    ? 'bg-red-500 text-white'
+                    : alert.type === 'warning'
+                    ? 'bg-yellow-500 text-white'
+                    : 'bg-blue-500 text-white';
+
+                  return (
+                    <div key={alert.id} className={`p-3 ${bgColor} border rounded-lg`}>
+                      <div className="flex items-start gap-2">
+                        <div className={`w-2 h-2 rounded-full ${dotColor} mt-1 flex-shrink-0`} />
+                        <div className="flex-1 min-w-0">
+                          <p className={`font-medium text-sm ${textColor}`}>{alert.title}</p>
+                          <p className={`text-xs ${textColor} opacity-75`}>{alert.message}</p>
+                        </div>
+                        <Badge variant="secondary" className={`${badgeColors} ml-2 flex-shrink-0`}>
+                          {alert.priority}
+                        </Badge>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-              <div className="p-3 bg-purple-50 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-900 rounded-lg">
-                <div className="flex items-start gap-2">
-                  <div className="w-2 h-2 rounded-full bg-purple-500 mt-1 flex-shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium text-sm text-purple-900 dark:text-purple-200">Staff Schedule</p>
-                    <p className="text-xs text-purple-700 dark:text-purple-300">Dr. Johnson requested schedule change for next week</p>
-                  </div>
-                  <Badge variant="secondary" className="bg-purple-500 text-white ml-2">info</Badge>
-                </div>
+            ) : (
+              <div className="text-center py-8 text-muted-foreground">
+                <CheckCircle2 className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                <p>No active alerts</p>
               </div>
-            </div>
+            )}
           </CardContent>
         </Card>
 
@@ -613,82 +636,123 @@ const Dashboard = () => {
         </div>
       )}
 
-      {/* Activity Detail Modal */}
-      {selectedActivity && (
+      {/* Staff On Duty Section */}
+      <Card className="overflow-hidden shadow-lg">
+        <CardHeader className="bg-gradient-to-r from-green-600 via-emerald-500 to-teal-500 text-white pb-4">
+          <CardTitle className="flex items-center gap-2">
+            <Users className="h-5 w-5" />
+            Staff on Duty Today
+          </CardTitle>
+          {staffOnDuty && staffOnDuty.length > 0 && (
+            <p className="text-sm text-white/80 mt-2">
+              {staffOnDuty.length} staff member{staffOnDuty.length !== 1 ? 's' : ''} on duty
+            </p>
+          )}
+        </CardHeader>
+        <CardContent className="pt-6">
+          {dutyLoading ? (
+            <div className="space-y-3">
+              {[1, 2, 3].map((i) => (
+                <Skeleton key={i} className="h-20" />
+              ))}
+            </div>
+          ) : staffOnDuty && staffOnDuty.length > 0 ? (
+            <div className="space-y-3">
+              {staffOnDuty.map((staff) => (
+                <div
+                  key={staff.id}
+                  className="flex items-center justify-between p-4 rounded-lg border border-green-200 dark:border-green-900/30 bg-green-50/50 dark:bg-green-950/20 hover:bg-green-100/50 dark:hover:bg-green-950/40 transition-colors"
+                >
+                  <div className="flex items-center gap-3 flex-1">
+                    <Avatar className="h-10 w-10">
+                      <AvatarImage src={staff.avatar_url} />
+                      <AvatarFallback className="bg-green-600 text-white">
+                        {staff.staffName.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="flex-1">
+                      <p className="font-semibold text-foreground">
+                        {staff.staffName}
+                        {staff.role === 'doctor' && ' (Dr.)'}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {staff.department} • {staff.role.replace('_', ' ')}
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        {staff.startTime} - {staff.endTime} ({staff.shiftType})
+                      </p>
+                      {staff.location && (
+                        <p className="text-xs text-muted-foreground">📍 {staff.location}</p>
+                      )}
+                    </div>
+                  </div>
+                  <Badge className="bg-green-600 hover:bg-green-700 flex-shrink-0">
+                    On Duty
+                  </Badge>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-center py-12 text-muted-foreground">
+              <Users className="h-12 w-12 mx-auto mb-2 opacity-30" />
+              <p>No staff on duty today</p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Department Staff Modal */}
+      {selectedDepartment && (
         <div className="fixed inset-0 bg-black/50 dark:bg-black/70 flex items-center justify-center z-50 p-4">
-          <Card className="w-full max-w-md animate-in fade-in duration-200">
-            <CardHeader className="flex flex-row items-center justify-between pb-4 border-b">
-              <CardTitle className="flex items-center gap-2">
-                <span className="text-2xl">{selectedActivity.icon}</span>
-                Activity Details
-              </CardTitle>
+          <Card className="w-full max-w-2xl animate-in fade-in duration-200 max-h-[80vh] overflow-y-auto">
+            <CardHeader className="flex flex-row items-center justify-between pb-4 border-b sticky top-0 bg-white dark:bg-slate-950">
+              <div>
+                <CardTitle className="text-lg">{selectedDepartment.name} Department</CardTitle>
+                <p className="text-sm text-muted-foreground mt-1">
+                  {selectedDepartment.value} staff member{selectedDepartment.value !== 1 ? 's' : ''} ({selectedDepartment.percentage}% of total)
+                </p>
+              </div>
               <button
-                onClick={() => setSelectedActivity(null)}
+                onClick={() => setSelectedDepartment(null)}
                 className="text-muted-foreground hover:text-foreground transition-colors"
               >
                 <X className="h-5 w-5" />
               </button>
             </CardHeader>
             <CardContent className="pt-6 space-y-4">
-              <div>
-                <p className="text-sm font-medium text-muted-foreground mb-1">Activity</p>
-                <p className="text-foreground font-medium">{selectedActivity.description}</p>
-              </div>
-              
-              <div>
-                <p className="text-sm font-medium text-muted-foreground mb-1">Time</p>
-                <p className="text-foreground">{selectedActivity.timeAgo}</p>
-                {selectedActivity.created_at && (
-                  <p className="text-xs text-muted-foreground">
-                    {format(new Date(selectedActivity.created_at), 'PPpp')}
-                  </p>
-                )}
-              </div>
-              
-              <div>
-                <p className="text-sm font-medium text-muted-foreground mb-1">Type</p>
-                <Badge variant="outline" className="capitalize">
-                  {selectedActivity.type.replace('_', ' ')}
-                </Badge>
-              </div>
-
-              {selectedActivity.user_role && (
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground mb-1">Performed By</p>
-                  <Badge className="bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
-                    {selectedActivity.user_role}
-                  </Badge>
+              {selectedDepartment.staffMembers && selectedDepartment.staffMembers.length > 0 ? (
+                <div className="space-y-4">
+                  {selectedDepartment.staffMembers.map((staff: any) => (
+                    <div
+                      key={staff.id}
+                      className="p-4 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-muted/50 transition-colors"
+                    >
+                      <div className="flex items-start justify-between mb-2">
+                        <div>
+                          <p className="font-semibold text-foreground">
+                            {staff.first_name} {staff.last_name}
+                          </p>
+                          <p className="text-sm text-muted-foreground capitalize">
+                            {staff.role.replace('_', ' ')}
+                          </p>
+                        </div>
+                        <Badge variant="outline" className="capitalize">
+                          {staff.role.replace('_', ' ')}
+                        </Badge>
+                      </div>
+                      <div className="space-y-1 text-sm text-muted-foreground">
+                        <p>📧 {staff.email}</p>
+                        <p>📱 {staff.phone}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-8 text-muted-foreground">
+                  <Users className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                  <p>No staff members in this department</p>
                 </div>
               )}
-
-              {selectedActivity.patient_name && (
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground mb-1">Patient</p>
-                  <p className="text-foreground">{selectedActivity.patient_name}</p>
-                </div>
-              )}
-
-              {selectedActivity.department && (
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground mb-1">Department</p>
-                  <p className="text-foreground">{selectedActivity.department}</p>
-                </div>
-              )}
-
-              {selectedActivity.status && (
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground mb-1">Status</p>
-                  <Badge className={getStatusColor(selectedActivity.status)}>
-                    {selectedActivity.status}
-                  </Badge>
-                </div>
-              )}
-
-              <div className="pt-4 border-t">
-                <p className="text-xs text-muted-foreground text-center">
-                  This activity will auto-hide after 24 hours
-                </p>
-              </div>
             </CardContent>
           </Card>
         </div>

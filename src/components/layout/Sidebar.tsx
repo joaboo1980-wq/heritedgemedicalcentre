@@ -25,7 +25,6 @@ import {
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/hooks/useAuth';
 import { useSidebar } from '@/contexts/SidebarContext';
-import { ThemeToggle } from '@/components/ThemeToggle';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import usePermissions, { ModuleName } from '@/hooks/usePermissions';
@@ -62,13 +61,11 @@ const navItems: NavItem[] = [
   { icon: DollarSign, label: 'Accounts', href: '/accounts', module: 'accounts' },
   { icon: BarChart3, label: 'Reports', href: '/reports', module: 'reports' },
   { icon: FileText, label: 'Generate Report', href: '/generate-report', module: 'generate_reports' },
-  { icon: FileText, label: 'Academic Documents', href: '/academic-documents', module: 'user_management' },
 ];
 
 const adminItems = [
   { icon: Calendar, label: 'All Appointments', href: '/admin/appointments' },
   { icon: FileText, label: 'Submitted Reports', href: '/submitted-reports' },
-  { icon: FileText, label: 'Review Documents', href: '/admin/academic-documents' },
   { icon: Settings, label: 'User Management', href: '/admin/users' },
 ];
 
@@ -226,19 +223,6 @@ const Sidebar = () => {
 
       {/* User Profile */}
       <div className="p-4 border-t border-white/10">
-        <div className="flex items-center gap-2 mb-3">
-          <ThemeToggle />
-          {!isCollapsed && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="ml-auto text-white hover:bg-white/10"
-              onClick={() => {/* Add logout functionality */}}
-            >
-              <Settings className="h-5 w-5" />
-            </Button>
-          )}
-        </div>
         <div className="flex items-center gap-3">
           <Avatar className="h-10 w-10 border-2 border-white/20 flex-shrink-0">
             <AvatarImage src={profile?.avatar_url || undefined} />

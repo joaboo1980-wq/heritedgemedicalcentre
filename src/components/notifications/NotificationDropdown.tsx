@@ -8,9 +8,13 @@ import {
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { useNotifications } from '@/hooks/useNotifications';
+import { useNavigate } from 'react-router-dom';
 import NotificationItem from './NotificationItem';
+import { useState } from 'react';
 
 const NotificationDropdown = () => {
+  const navigate = useNavigate();
+  const [isOpen, setIsOpen] = useState(false);
   const {
     notifications,
     unreadCount,
@@ -21,8 +25,13 @@ const NotificationDropdown = () => {
     clearAll,
   } = useNotifications();
 
+  const handleViewAll = () => {
+    setIsOpen(false);
+    navigate('/notifications');
+  };
+
   return (
-    <DropdownMenu>
+    <DropdownMenu open={isOpen} onOpenChange={setIsOpen}>
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" size="icon" className="relative">
           <Bell className="h-5 w-5 text-muted-foreground" />
@@ -33,7 +42,7 @@ const NotificationDropdown = () => {
           )}
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-80 p-0">
+      <DropdownMenuContent align="end" className="w-80 p-0" onCloseAutoFocus={(e) => e.preventDefault()}>
         {/* Header */}
         <div className="flex items-center justify-between p-3 border-b">
           <h3 className="font-semibold text-sm">Notifications</h3>
@@ -43,7 +52,10 @@ const NotificationDropdown = () => {
                 variant="ghost"
                 size="sm"
                 className="h-7 text-xs"
-                onClick={markAllAsRead}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  markAllAsRead();
+                }}
               >
                 <Check className="h-3 w-3 mr-1" />
                 Mark all read
@@ -54,7 +66,10 @@ const NotificationDropdown = () => {
                 variant="ghost"
                 size="sm"
                 className="h-7 text-xs text-muted-foreground hover:text-destructive"
-                onClick={clearAll}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  clearAll();
+                }}
               >
                 <Trash2 className="h-3 w-3" />
               </Button>
@@ -92,7 +107,15 @@ const NotificationDropdown = () => {
           <>
             <Separator />
             <div className="p-2">
-              <Button variant="ghost" size="sm" className="w-full text-xs">
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                className="w-full text-xs"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleViewAll();
+                }}
+              >
                 View all notifications
               </Button>
             </div>

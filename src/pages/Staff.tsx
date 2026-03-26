@@ -54,6 +54,9 @@ interface StaffMember {
   department_id: string | null;
   departments?: Department | null;
   avatar_url: string | null;
+  phone?: string;
+  academic_qualifications?: any[];
+  professional_qualifications?: any[];
   roles: AppRole[];
 }
 
@@ -110,6 +113,10 @@ const Staff = () => {
   const [isScheduleDialogOpen, setIsScheduleDialogOpen] = useState(false);
   const [isDeleteConfirmDialogOpen, setIsDeleteConfirmDialogOpen] = useState(false);
   const [staffToDelete, setStaffToDelete] = useState<StaffMember | null>(null);
+  const [academicQualifications, setAcademicQualifications] = useState<any[]>([]);
+  const [professionalQualifications, setProfessionalQualifications] = useState<any[]>([]);
+  const [newAcademicQual, setNewAcademicQual] = useState({ degree: '', institution: '', year: '', field_of_study: '' });
+  const [newProfessionalQual, setNewProfessionalQual] = useState({ title: '', organization: '', date_obtained: '', license_number: '', expiry_date: '' });
 
   // Fetch departments
   const { data: departments } = useQuery({
@@ -215,6 +222,33 @@ const Staff = () => {
     onError: (error: Error) => {
       console.error('Delete error:', error);
       toast.error(error.message || 'Failed to delete staff member');
+    },
+  });
+
+  // Update staff details mutation  
+  const updateStaffMutation = useMutation({
+    mutationFn: async (staffData: any) => {
+      const { error } = await supabase
+        .from('profiles')
+        .update({
+          department_id: staffData.department_id,
+          phone: staffData.phone,
+          academic_qualifications: staffData.academic_qualifications,
+          professional_qualifications: staffData.professional_qualifications,
+        })
+        .eq('user_id', staffData.user_id);
+
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['staff-directory'] });
+      toast.success('Staff details updated successfully');
+      setIsEditDetailsDialogOpen(false);
+      setAcademicQualifications([]);
+      setProfessionalQualifications([]);
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || 'Failed to update staff details');
     },
   });
 
@@ -427,6 +461,8 @@ const Staff = () => {
                           <DropdownMenuItem
                             onClick={() => {
                               setSelectedStaff(member);
+                              setAcademicQualifications(member.academic_qualifications || []);
+                              setProfessionalQualifications(member.professional_qualifications || []);
                               setIsEditDetailsDialogOpen(true);
                             }}
                           >
@@ -540,6 +576,8 @@ const Staff = () => {
                             <DropdownMenuItem
                               onClick={() => {
                                 setSelectedStaff(member);
+                                setAcademicQualifications(member.academic_qualifications || []);
+                                setProfessionalQualifications(member.professional_qualifications || []);
                                 setIsEditDetailsDialogOpen(true);
                               }}
                             >
@@ -641,13 +679,46 @@ const Staff = () => {
                   <p className="text-sm text-muted-foreground">Department</p>
                   <p className="font-medium">{selectedStaff.department || 'Not assigned'}</p>
                 </div>
-                {selectedStaff.phone && (
-                  <div>
-                    <p className="text-sm text-muted-foreground">Phone</p>
-                    <p className="font-medium">{selectedStaff.phone}</p>
-                  </div>
-                )}
+                <div>
+                  <p className="text-sm text-muted-foreground">Phone</p>
+                  <p className="font-medium">{selectedStaff.phone || '-'}</p>
+                </div>
               </div>
+
+              {/* Academic Qualifications */}
+              {selectedStaff.academic_qualifications && selectedStaff.academic_qualifications.length > 0 && (
+                <div className="border-t pt-4">
+                  <h4 className="font-semibold mb-3 text-primary">Academic Qualifications</h4>
+                  <div className="space-y-3">
+                    {selectedStaff.academic_qualifications.map((qual: any, idx: number) => (
+                      <div key={idx} className="bg-blue-50 p-3 rounded-lg border border-blue-200">
+                        <p className="font-medium text-blue-900">{qual.degree}</p>
+                        <p className="text-sm text-blue-700">{qual.institution}</p>
+                        {qual.field_of_study && <p className="text-sm text-blue-700">Field: {qual.field_of_study}</p>}
+                        {qual.year && <p className="text-xs text-blue-600">Year: {qual.year}</p>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Professional Qualifications */}
+              {selectedStaff.professional_qualifications && selectedStaff.professional_qualifications.length > 0 && (
+                <div className="border-t pt-4">
+                  <h4 className="font-semibold mb-3 text-primary">Professional Qualifications</h4>
+                  <div className="space-y-3">
+                    {selectedStaff.professional_qualifications.map((qual: any, idx: number) => (
+                      <div key={idx} className="bg-green-50 p-3 rounded-lg border border-green-200">
+                        <p className="font-medium text-green-900">{qual.title}</p>
+                        <p className="text-sm text-green-700">{qual.organization}</p>
+                        {qual.license_number && <p className="text-sm text-green-700">License: {qual.license_number}</p>}
+                        {qual.date_obtained && <p className="text-xs text-green-600">Obtained: {qual.date_obtained}</p>}
+                        {qual.expiry_date && <p className="text-xs text-green-600">Expires: {qual.expiry_date}</p>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <div className="flex justify-end gap-4">
                 <Button
@@ -664,7 +735,7 @@ const Staff = () => {
 
       {/* Edit Details Dialog */}
       <Dialog open={isEditDetailsDialogOpen} onOpenChange={setIsEditDetailsDialogOpen}>
-        <DialogContent className="sm:max-w-2xl">
+        <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Edit Staff Details</DialogTitle>
           </DialogHeader>
@@ -677,6 +748,18 @@ const Staff = () => {
               <div className="space-y-2">
                 <label className="text-sm font-medium">Email</label>
                 <Input value={selectedStaff.email} readOnly className="bg-muted" />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Phone</label>
+                <Input 
+                  value={selectedStaff.phone || ''} 
+                  onChange={(e) => {
+                    if (selectedStaff) {
+                      selectedStaff.phone = e.target.value;
+                    }
+                  }}
+                  placeholder="Enter phone number"
+                />
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium">Department</label>
@@ -715,6 +798,187 @@ const Staff = () => {
                   ))}
                 </div>
               </div>
+
+              {/* Academic Qualifications */}
+              <div className="border-t pt-4">
+                <h4 className="font-semibold mb-3 text-primary">Academic Qualifications</h4>
+                <div className="space-y-3">
+                  {(selectedStaff.academic_qualifications || []).map((qual: any, idx: number) => (
+                    <div key={idx} className="bg-blue-50 p-3 rounded-lg border border-blue-200 flex justify-between items-start">
+                      <div>
+                        <p className="font-medium text-blue-900">{qual.degree}</p>
+                        <p className="text-sm text-blue-700">{qual.institution}</p>
+                        {qual.field_of_study && <p className="text-sm text-blue-700">Field: {qual.field_of_study}</p>}
+                        {qual.year && <p className="text-xs text-blue-600">Year: {qual.year}</p>}
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-red-600 hover:bg-red-100"
+                        onClick={() => {
+                          const updated = selectedStaff.academic_qualifications.filter((_: any, i: number) => i !== idx);
+                          if (selectedStaff) selectedStaff.academic_qualifications = updated;
+                          setAcademicQualifications(updated);
+                        }}
+                      >
+                        Remove
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+                
+                <div className="mt-4 p-4 bg-blue-50 rounded-lg border border-blue-200 space-y-3">
+                  <p className="text-sm font-medium text-blue-900">Add New Academic Qualification</p>
+                  <div>
+                    <label className="text-xs font-medium">Degree</label>
+                    <Input
+                      placeholder="e.g., Bachelor of Science"
+                      value={newAcademicQual.degree}
+                      onChange={(e) => setNewAcademicQual({...newAcademicQual, degree: e.target.value})}
+                      className="mt-1"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium">Institution</label>
+                    <Input
+                      placeholder="e.g., University of..."
+                      value={newAcademicQual.institution}
+                      onChange={(e) => setNewAcademicQual({...newAcademicQual, institution: e.target.value})}
+                      className="mt-1"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-xs font-medium">Field of Study</label>
+                      <Input
+                        placeholder="e.g., Medicine"
+                        value={newAcademicQual.field_of_study}
+                        onChange={(e) => setNewAcademicQual({...newAcademicQual, field_of_study: e.target.value})}
+                        className="mt-1"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium">Year</label>
+                      <Input
+                        type="number"
+                        placeholder="2023"
+                        value={newAcademicQual.year}
+                        onChange={(e) => setNewAcademicQual({...newAcademicQual, year: e.target.value})}
+                        className="mt-1"
+                      />
+                    </div>
+                  </div>
+                  <Button
+                    size="sm"
+                    className="w-full bg-blue-600 hover:bg-blue-700"
+                    onClick={() => {
+                      if (newAcademicQual.degree && newAcademicQual.institution) {
+                        const updated = [...(academicQualifications || []), newAcademicQual];
+                        setAcademicQualifications(updated);
+                        if (selectedStaff) selectedStaff.academic_qualifications = updated;
+                        setNewAcademicQual({ degree: '', institution: '', year: '', field_of_study: '' });
+                      }
+                    }}
+                  >
+                    Add Qualification
+                  </Button>
+                </div>
+              </div>
+
+              {/* Professional Qualifications */}
+              <div className="border-t pt-4">
+                <h4 className="font-semibold mb-3 text-primary">Professional Qualifications</h4>
+                <div className="space-y-3">
+                  {(selectedStaff.professional_qualifications || []).map((qual: any, idx: number) => (
+                    <div key={idx} className="bg-green-50 p-3 rounded-lg border border-green-200 flex justify-between items-start">
+                      <div>
+                        <p className="font-medium text-green-900">{qual.title}</p>
+                        <p className="text-sm text-green-700">{qual.organization}</p>
+                        {qual.license_number && <p className="text-sm text-green-700">License: {qual.license_number}</p>}
+                        {qual.date_obtained && <p className="text-xs text-green-600">Obtained: {qual.date_obtained}</p>}
+                        {qual.expiry_date && <p className="text-xs text-green-600">Expires: {qual.expiry_date}</p>}
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-red-600 hover:bg-red-100"
+                        onClick={() => {
+                          const updated = selectedStaff.professional_qualifications.filter((_: any, i: number) => i !== idx);
+                          if (selectedStaff) selectedStaff.professional_qualifications = updated;
+                          setProfessionalQualifications(updated);
+                        }}
+                      >
+                        Remove
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="mt-4 p-4 bg-green-50 rounded-lg border border-green-200 space-y-3">
+                  <p className="text-sm font-medium text-green-900">Add New Professional Qualification</p>
+                  <div>
+                    <label className="text-xs font-medium">Title/Certification</label>
+                    <Input
+                      placeholder="e.g., Medical Board Certification"
+                      value={newProfessionalQual.title}
+                      onChange={(e) => setNewProfessionalQual({...newProfessionalQual, title: e.target.value})}
+                      className="mt-1"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium">Organization</label>
+                    <Input
+                      placeholder="e.g., Medical Council"
+                      value={newProfessionalQual.organization}
+                      onChange={(e) => setNewProfessionalQual({...newProfessionalQual, organization: e.target.value})}
+                      className="mt-1"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-xs font-medium">Date Obtained</label>
+                      <Input
+                        type="date"
+                        value={newProfessionalQual.date_obtained}
+                        onChange={(e) => setNewProfessionalQual({...newProfessionalQual, date_obtained: e.target.value})}
+                        className="mt-1"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium">License Number</label>
+                      <Input
+                        placeholder="License #"
+                        value={newProfessionalQual.license_number}
+                        onChange={(e) => setNewProfessionalQual({...newProfessionalQual, license_number: e.target.value})}
+                        className="mt-1"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium">Expiry Date</label>
+                    <Input
+                      type="date"
+                      value={newProfessionalQual.expiry_date}
+                      onChange={(e) => setNewProfessionalQual({...newProfessionalQual, expiry_date: e.target.value})}
+                      className="mt-1"
+                    />
+                  </div>
+                  <Button
+                    size="sm"
+                    className="w-full bg-green-600 hover:bg-green-700"
+                    onClick={() => {
+                      if (newProfessionalQual.title && newProfessionalQual.organization) {
+                        const updated = [...(professionalQualifications || []), newProfessionalQual];
+                        setProfessionalQualifications(updated);
+                        if (selectedStaff) selectedStaff.professional_qualifications = updated;
+                        setNewProfessionalQual({ title: '', organization: '', date_obtained: '', license_number: '', expiry_date: '' });
+                      }
+                    }}
+                  >
+                    Add Qualification
+                  </Button>
+                </div>
+              </div>
               <div className="flex justify-end gap-4 pt-4">
                 <Button
                   variant="outline"
@@ -724,11 +988,19 @@ const Staff = () => {
                 </Button>
                 <Button
                   onClick={() => {
-                    // Save changes logic
-                    setIsEditDetailsDialogOpen(false);
+                    if (selectedStaff) {
+                      updateStaffMutation.mutate({
+                        user_id: selectedStaff.user_id,
+                        department_id: selectedStaff.department_id,
+                        phone: selectedStaff.phone,
+                        academic_qualifications: selectedStaff.academic_qualifications || academicQualifications,
+                        professional_qualifications: selectedStaff.professional_qualifications || professionalQualifications,
+                      });
+                    }
                   }}
+                  disabled={updateStaffMutation.isPending}
                 >
-                  Save Changes
+                  {updateStaffMutation.isPending ? 'Saving...' : 'Save Changes'}
                 </Button>
               </div>
             </div>
