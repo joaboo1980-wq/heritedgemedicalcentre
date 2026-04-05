@@ -8,6 +8,7 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
+import { Combobox } from '@/components/ui/combobox';
 import {
   Select,
   SelectContent,
@@ -66,7 +67,7 @@ export const AssignPatientModal = ({
       try {
         const { data, error } = await supabase
           .from('patients')
-          .select('id, first_name, last_name, patient_number')
+          .select('id, first_name, last_name, patient_number, phone')
           .order('first_name');
         if (error) {
           console.error('Error fetching patients:', error);
@@ -174,26 +175,15 @@ export const AssignPatientModal = ({
             <Label htmlFor="patient">
               Patient <span className="text-red-500">*</span>
             </Label>
-            <Select value={formData.patient_id} onValueChange={(value) =>
-              setFormData({ ...formData, patient_id: value })
-            }>
-              <SelectTrigger>
-                <SelectValue placeholder={patientsLoading ? 'Loading patients...' : 'Select patient'} />
-              </SelectTrigger>
-              <SelectContent>
-                {patientsLoading ? (
-                  <div className="p-2 text-sm text-muted-foreground">Loading patients...</div>
-                ) : patients && patients.length > 0 ? (
-                  patients.map((patient) => (
-                    <SelectItem key={patient.id} value={patient.id}>
-                      {patient.first_name} {patient.last_name}
-                    </SelectItem>
-                  ))
-                ) : (
-                  <div className="p-2 text-sm text-muted-foreground">No patients found</div>
-                )}
-              </SelectContent>
-            </Select>
+            <Combobox
+              options={patients?.map((p) => ({
+                value: p.id,
+                label: `${p.first_name} ${p.last_name} (${p.patient_number})${p.phone ? ` - ${p.phone}` : ''}`,
+              })) || []}
+              value={formData.patient_id}
+              onValueChange={(value) => setFormData({ ...formData, patient_id: value })}
+              placeholder={patientsLoading ? 'Loading patients...' : 'Search and select patient'}
+            />
           </div>
 
           {/* Nurse Selection */}

@@ -2,7 +2,7 @@ import { useState, useContext, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { AuthContext } from '@/contexts/AuthContext';
-import { withSessionValidation } from '@/utils/sessionValidationAPI';
+// Session validation handled automatically by Supabase JWT
 import { useAuth } from '@/hooks/useAuth';
 import { usePatientLatestVitals } from '@/hooks/useNurseTriageAssignment';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Combobox } from '@/components/ui/combobox';
 import { PatientConsultationHistory } from '@/components/doctor/PatientConsultationHistory';
 import {
   Table,
@@ -97,7 +98,6 @@ const DoctorExamination = () => {
   const queryClient = useQueryClient();
   const authContext = useContext(AuthContext);
   const userId = authContext?.user?.id;
-  const sessionToken = authContext?.sessionToken;
   const [searchTerm, setSearchTerm] = useState('');
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
@@ -106,8 +106,6 @@ const DoctorExamination = () => {
   const [selectedExamination, setSelectedExamination] = useState<MedicalExamination | null>(null);
   const [editingExamination, setEditingExamination] = useState<any>(null);
   const [selectedPatientId, setSelectedPatientId] = useState('');
-  const [patientSearch, setPatientSearch] = useState('');
-  const [showPatientList, setShowPatientList] = useState(false);
 
   const [newExamination, setNewExamination] = useState({
     patient_id: '',
@@ -206,19 +204,12 @@ const DoctorExamination = () => {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('patients')
-        .select('id, first_name, last_name, patient_number, date_of_birth')
+        .select('id, first_name, last_name, patient_number, date_of_birth, phone')
         .order('first_name');
       if (error) throw error;
       return data as Patient[];
     },
   });
-
-  const filteredPatients = patients?.filter(
-    (p) =>
-      p.first_name.toLowerCase().includes(patientSearch.toLowerCase()) ||
-      p.last_name.toLowerCase().includes(patientSearch.toLowerCase()) ||
-      p.patient_number.toLowerCase().includes(patientSearch.toLowerCase())
-  );
 
   // Fetch examinations
   const { data: examinations, isLoading } = useQuery({
@@ -246,88 +237,81 @@ const DoctorExamination = () => {
   // Create examination mutation
   const createExaminationMutation = useMutation({
     mutationFn: async (data: typeof newExamination) => {
-      if (!userId || !sessionToken) {
-        throw new Error('Session not found. Please log in again.');
+      if (!userId) {
+        throw new Error('Not authenticated. Please log in again.');
       }
 
-      return withSessionValidation(
-        userId,
-        sessionToken,
-        async () => {
-          // Validate required fields
-          if (!data.patient_id?.trim()) {
-            console.warn('[DoctorExamination] Patient is required');
-            throw new Error('Patient is required');
-          }
-          if (!data.chief_complaint?.trim()) {
-            console.warn('[DoctorExamination] Chief complaint is required');
-            throw new Error('Chief complaint is required');
-          }
-          if (!data.assessment_diagnosis?.trim()) {
-            console.warn('[DoctorExamination] Assessment/diagnosis is required');
-            throw new Error('Assessment/diagnosis is required');
-          }
+      // Validate required fields
+      if (!data.patient_id?.trim()) {
+        console.warn('[DoctorExamination] Patient is required');
+        throw new Error('Patient is required');
+      }
+      if (!data.chief_complaint?.trim()) {
+        console.warn('[DoctorExamination] Chief complaint is required');
+        throw new Error('Chief complaint is required');
+      }
+      if (!data.assessment_diagnosis?.trim()) {
+        console.warn('[DoctorExamination] Assessment/diagnosis is required');
+        throw new Error('Assessment/diagnosis is required');
+      }
 
-          try {
-            // Calculate BMI if weight and height are provided
-            let bmi = null;
-            if (data.triage_weight && data.triage_height) {
-              const heightInMeters = parseFloat(data.triage_height) / 100;
-              bmi = parseFloat(data.triage_weight) / (heightInMeters * heightInMeters);
-            }
+      try {
+        // Calculate BMI if weight and height are provided
+        let bmi = null;
+        if (data.triage_weight && data.triage_height) {
+          const heightInMeters = parseFloat(data.triage_height) / 100;
+          bmi = parseFloat(data.triage_weight) / (heightInMeters * heightInMeters);
+        }
 
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const { data: result, error } = await (supabase as any)
-              .from('medical_examinations')
-              .insert({
-                patient_id: data.patient_id,
-                examined_by: user?.id,
-                chief_complaint: data.chief_complaint,
-                triage_temperature: data.triage_temperature ? parseFloat(data.triage_temperature) : null,
-                triage_blood_pressure: data.triage_blood_pressure || null,
-                triage_pulse_rate: data.triage_pulse_rate ? parseInt(data.triage_pulse_rate) : null,
-                triage_respiratory_rate: data.triage_respiratory_rate ? parseInt(data.triage_respiratory_rate) : null,
-                triage_oxygen_saturation: data.triage_oxygen_saturation ? parseFloat(data.triage_oxygen_saturation) : null,
-                triage_weight: data.triage_weight ? parseFloat(data.triage_weight) : null,
-                triage_height: data.triage_height ? parseFloat(data.triage_height) : null,
-                triage_bmi: bmi,
-                history_of_present_illness: data.history_of_present_illness || null,
-                past_medical_history: data.past_medical_history || null,
-                past_surgical_history: data.past_surgical_history || null,
-                medication_list: data.medication_list || null,
-                allergies: data.allergies || null,
-                family_history: data.family_history || null,
-                social_history: data.social_history || null,
-                general_appearance: data.general_appearance || null,
-                heent_examination: data.heent_examination || null,
-                cardiovascular_examination: data.cardiovascular_examination || null,
-                respiratory_examination: data.respiratory_examination || null,
-                abdominal_examination: data.abdominal_examination || null,
-                neurological_examination: data.neurological_examination || null,
-                musculoskeletal_examination: data.musculoskeletal_examination || null,
-                skin_examination: data.skin_examination || null,
-                other_systems: data.other_systems || null,
-                assessment_diagnosis: data.assessment_diagnosis,
-                plan_treatment: data.plan_treatment || null,
-                medications_prescribed: data.medications_prescribed || null,
-                follow_up_date: data.follow_up_date || null,
-                referrals: data.referrals || null,
-              })
-              .select();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { data: result, error } = await (supabase as any)
+          .from('medical_examinations')
+          .insert({
+            patient_id: data.patient_id,
+            examined_by: user?.id,
+            chief_complaint: data.chief_complaint,
+            triage_temperature: data.triage_temperature ? parseFloat(data.triage_temperature) : null,
+            triage_blood_pressure: data.triage_blood_pressure || null,
+            triage_pulse_rate: data.triage_pulse_rate ? parseInt(data.triage_pulse_rate) : null,
+            triage_respiratory_rate: data.triage_respiratory_rate ? parseInt(data.triage_respiratory_rate) : null,
+            triage_oxygen_saturation: data.triage_oxygen_saturation ? parseFloat(data.triage_oxygen_saturation) : null,
+            triage_weight: data.triage_weight ? parseFloat(data.triage_weight) : null,
+            triage_height: data.triage_height ? parseFloat(data.triage_height) : null,
+            triage_bmi: bmi,
+            history_of_present_illness: data.history_of_present_illness || null,
+            past_medical_history: data.past_medical_history || null,
+            past_surgical_history: data.past_surgical_history || null,
+            medication_list: data.medication_list || null,
+            allergies: data.allergies || null,
+            family_history: data.family_history || null,
+            social_history: data.social_history || null,
+            general_appearance: data.general_appearance || null,
+            heent_examination: data.heent_examination || null,
+            cardiovascular_examination: data.cardiovascular_examination || null,
+            respiratory_examination: data.respiratory_examination || null,
+            abdominal_examination: data.abdominal_examination || null,
+            neurological_examination: data.neurological_examination || null,
+            musculoskeletal_examination: data.musculoskeletal_examination || null,
+            skin_examination: data.skin_examination || null,
+            other_systems: data.other_systems || null,
+            assessment_diagnosis: data.assessment_diagnosis,
+            plan_treatment: data.plan_treatment || null,
+            medications_prescribed: data.medications_prescribed || null,
+            follow_up_date: data.follow_up_date || null,
+            referrals: data.referrals || null,
+          })
+          .select();
 
-            if (error) {
-              console.error('[DoctorExamination] Error creating examination:', error);
-              throw error;
-            }
-            console.log('[DoctorExamination] Examination created successfully');
-            return result;
-          } catch (err) {
-            console.error('[DoctorExamination] Examination creation failed:', err);
-            throw err;
-          }
-        },
-        'Create Medical Examination'
-      );
+        if (error) {
+          console.error('[DoctorExamination] Error creating examination:', error);
+          throw error;
+        }
+        console.log('[DoctorExamination] Examination created successfully');
+        return result;
+      } catch (err) {
+        console.error('[DoctorExamination] Examination creation failed:', err);
+        throw err;
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['medical-examinations'] });
@@ -386,17 +370,14 @@ const DoctorExamination = () => {
   // ===== UPDATE EXAMINATION MUTATION =====
   const updateExaminationMutation = useMutation({
     mutationFn: async (data: any) => {
-      if (!userId || !sessionToken) {
-        throw new Error('Session not found');
+      if (!userId) {
+        throw new Error('Not authenticated. Please log in again.');
       }
-      return withSessionValidation(
-        userId,
-        sessionToken,
-        async () => {
-          const { id, ...updateData } = data;
 
-          // Calculate BMI if weight and height are provided
-          let bmi = null;
+      const { id, ...updateData } = data;
+
+      // Calculate BMI if weight and height are provided
+      let bmi = null;
           if (updateData.triage_weight && updateData.triage_height) {
             const heightInMeters = parseFloat(updateData.triage_height) / 100;
             bmi = parseFloat(updateData.triage_weight) / (heightInMeters * heightInMeters);
@@ -419,23 +400,20 @@ const DoctorExamination = () => {
             follow_up_date: updateData.follow_up_date || null,
           };
 
-          console.log('[DoctorExamination] Updating examination:', id, updatePayload);
+      console.log('[DoctorExamination] Updating examination:', id, updatePayload);
 
-          const { error } = await (supabase as any)
-            .from('medical_examinations')
-            .update(updatePayload)
-            .eq('id', id);
+      const { error } = await (supabase as any)
+        .from('medical_examinations')
+        .update(updatePayload)
+        .eq('id', id);
 
-          if (error) {
-            console.error('[DoctorExamination] Update error:', error);
-            throw error;
-          }
+      if (error) {
+        console.error('[DoctorExamination] Update error:', error);
+        throw error;
+      }
 
-          console.log('[DoctorExamination] Examination updated successfully');
-          return true;
-        },
-        'Update Medical Examination'
-      );
+      console.log('[DoctorExamination] Examination updated successfully');
+      return true;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['medical-examinations'] });
@@ -453,38 +431,32 @@ const DoctorExamination = () => {
   // ===== DELETE EXAMINATION MUTATION =====
   const deleteExaminationMutation = useMutation({
     mutationFn: async (examId: string) => {
-      if (!userId || !sessionToken) {
-        throw new Error('Session not found');
+      if (!userId) {
+        throw new Error('Not authenticated. Please log in again.');
       }
-      return withSessionValidation(
-        userId,
-        sessionToken,
-        async () => {
-          console.log('[DoctorExamination] Deleting examination:', examId);
-          console.log('[DoctorExamination] Current user ID:', userId);
 
-          const { error, status } = await (supabase as any)
-            .from('medical_examinations')
-            .delete()
-            .eq('id', examId);
+      console.log('[DoctorExamination] Deleting examination:', examId);
+      console.log('[DoctorExamination] Current user ID:', userId);
 
-          console.log('[DoctorExamination] Delete response status:', status);
+      const { error, status } = await (supabase as any)
+        .from('medical_examinations')
+        .delete()
+        .eq('id', examId);
 
-          if (error) {
-            console.error('[DoctorExamination] Delete RLS error details:', {
-              code: error.code,
-              message: error.message,
-              details: error.details,
-              hint: error.hint,
-            });
-            throw new Error(`Delete failed: ${error.message || 'Unknown error'}`);
-          }
+      console.log('[DoctorExamination] Delete response status:', status);
 
-          console.log('[DoctorExamination] Examination deleted successfully');
-          return true;
-        },
-        'Delete Medical Examination'
-      );
+      if (error) {
+        console.error('[DoctorExamination] Delete RLS error details:', {
+          code: error.code,
+          message: error.message,
+          details: error.details,
+          hint: error.hint,
+        });
+        throw new Error(`Delete failed: ${error.message || 'Unknown error'}`);
+      }
+
+      console.log('[DoctorExamination] Examination deleted successfully');
+      return true;
     },
     onSuccess: () => {
       console.log('[DoctorExamination] Delete success - invalidating queries');
@@ -652,39 +624,20 @@ const DoctorExamination = () => {
             {/* Patient Selection */}
             <div className="space-y-2">
               <Label>Select Patient</Label>
-              <div className="relative">
-                <Input
-                  placeholder="Search patient..."
-                  value={patientSearch}
-                  onChange={(e) => {
-                    setPatientSearch(e.target.value);
-                    setShowPatientList(true);
-                  }}
-                  onFocus={() => setShowPatientList(true)}
-                />
-                {showPatientList && filteredPatients && filteredPatients.length > 0 && (
-                  <div className="absolute top-full left-0 right-0 border rounded-md bg-white shadow-lg z-50 max-h-60 overflow-y-auto">
-                    {filteredPatients.map((p) => (
-                      <button
-                        key={p.id}
-                        type="button"
-                        onClick={() => {
-                          setSelectedPatientId(p.id);
-                          setNewExamination({ ...newExamination, patient_id: p.id });
-                          setPatientSearch(`${p.first_name} ${p.last_name}`);
-                          setShowPatientList(false);
-                        }}
-                        className="w-full text-left p-3 hover:bg-gray-100 border-b last:border-b-0"
-                      >
-                        <div className="font-medium">{p.first_name} {p.last_name}</div>
-                        <div className="text-sm text-muted-foreground">{p.patient_number}</div>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
+              <Combobox
+                options={patients?.map((p) => ({
+                  value: p.id,
+                  label: `${p.first_name} ${p.last_name}${p.patient_number ? ` (${p.patient_number})` : ''}${p.phone ? ` - ${p.phone}` : ''}`,
+                })) || []}
+                value={newExamination.patient_id}
+                onValueChange={(value) => {
+                  setNewExamination({ ...newExamination, patient_id: value });
+                  setSelectedPatientId(value);
+                }}
+                placeholder="Search and select patient"
+              />
               {selectedPatientId && (
-                <div className="text-sm text-green-600">Patient selected: {patientSearch}</div>
+                <div className="text-sm text-green-600">Patient selected successfully</div>
               )}
             </div>
 

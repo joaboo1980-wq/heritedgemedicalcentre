@@ -7,7 +7,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { toast } from 'sonner';
-import { Eye, EyeOff, Lock, CheckCircle, AlertCircle } from 'lucide-react';
+import { Eye, EyeOff, Lock, CheckCircle, AlertCircle, Check, X } from 'lucide-react';
+import { validatePassword, isPasswordValid } from '@/utils/passwordValidator';
 
 const ResetPassword = () => {
   const navigate = useNavigate();
@@ -75,10 +76,8 @@ const ResetPassword = () => {
     return () => subscription.unsubscribe();
   }, []);
 
-  const validatePassword = (pwd: string) => {
-    // At least 8 characters
-    return pwd.length >= 8;
-  };
+  const passwordRequirements = validatePassword(password);
+  const passwordValid = isPasswordValid(password);
 
   const handleResetPassword = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -94,8 +93,8 @@ const ResetPassword = () => {
       return;
     }
 
-    if (!validatePassword(password)) {
-      setError('Password must be at least 8 characters long');
+    if (!passwordValid) {
+      setError('Password does not meet all requirements');
       return;
     }
 
@@ -206,11 +205,12 @@ const ResetPassword = () => {
                   <Input
                     id="password"
                     type={showPassword ? 'text' : 'password'}
-                    placeholder="At least 8 characters"
+                    placeholder="Create a strong password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     disabled={isLoading}
                     required
+                    className={password && !passwordValid ? 'border-amber-500 focus:border-amber-500 focus:ring-amber-500' : ''}
                   />
                   <button
                     type="button"
@@ -220,6 +220,39 @@ const ResetPassword = () => {
                     {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
                 </div>
+                
+                {/* Password Requirements Checklist */}
+                {password && (
+                  <div className="mt-3 space-y-2 p-3 bg-gray-50 rounded-lg">
+                    <p className="text-xs font-semibold text-gray-700">Password Requirements:</p>
+                    <div className="space-y-1">
+                      <div className={`flex items-center gap-2 text-sm ${passwordRequirements.minLength ? 'text-green-600' : 'text-gray-500'}`}>
+                        {passwordRequirements.minLength ? (
+                          <Check className="h-4 w-4 flex-shrink-0" />
+                        ) : (
+                          <X className="h-4 w-4 flex-shrink-0" />
+                        )}
+                        <span>At least 8 characters</span>
+                      </div>
+                      <div className={`flex items-center gap-2 text-sm ${passwordRequirements.hasUppercase ? 'text-green-600' : 'text-gray-500'}`}>
+                        {passwordRequirements.hasUppercase ? (
+                          <Check className="h-4 w-4 flex-shrink-0" />
+                        ) : (
+                          <X className="h-4 w-4 flex-shrink-0" />
+                        )}
+                        <span>One uppercase letter (A-Z)</span>
+                      </div>
+                      <div className={`flex items-center gap-2 text-sm ${passwordRequirements.hasNumber ? 'text-green-600' : 'text-gray-500'}`}>
+                        {passwordRequirements.hasNumber ? (
+                          <Check className="h-4 w-4 flex-shrink-0" />
+                        ) : (
+                          <X className="h-4 w-4 flex-shrink-0" />
+                        )}
+                        <span>One number (0-9)</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="space-y-2">
@@ -244,17 +277,19 @@ const ResetPassword = () => {
                 </div>
               </div>
 
-              <Alert>
-                <AlertCircle className="h-4 w-4" />
-                <AlertDescription>
-                  Password must be at least 8 characters long.
+              <Alert className={passwordValid ? 'border-green-200 bg-green-50' : 'border-amber-200 bg-amber-50'}>
+                <AlertCircle className={`h-4 w-4 ${passwordValid ? 'text-green-600' : 'text-amber-600'}`} />
+                <AlertDescription className={passwordValid ? 'text-green-800' : 'text-amber-800'}>
+                  {passwordValid 
+                    ? 'Password meets all security requirements' 
+                    : 'Password does not meet security requirements. See checklist above.'}
                 </AlertDescription>
               </Alert>
 
               <Button
                 type="submit"
                 className="w-full"
-                disabled={isLoading || !password || !confirmPassword}
+                disabled={isLoading || !password || !confirmPassword || !passwordValid || password !== confirmPassword}
               >
                 {isLoading ? 'Resetting...' : 'Reset Password'}
               </Button>

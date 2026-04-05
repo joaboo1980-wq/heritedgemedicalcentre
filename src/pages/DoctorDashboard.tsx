@@ -31,6 +31,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
+import { Combobox } from '@/components/ui/combobox';
 import { PatientConsultationHistory } from '@/components/doctor/PatientConsultationHistory';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
@@ -59,6 +60,7 @@ interface Patient {
   date_of_birth: string;
   gender: string;
   blood_type: string | null;
+  phone?: string | null;
 }
 
 interface Prescription {
@@ -293,7 +295,7 @@ const DoctorDashboard = () => {
         // Get all patients and filter those with appointments from this doctor
         const { data, error } = await supabase
           .from('patients')
-          .select('id, patient_number, first_name, last_name, date_of_birth, gender, blood_type');
+          .select('id, patient_number, first_name, last_name, date_of_birth, gender, blood_type, phone');
 
         if (error) {
           console.error('[DoctorDashboard] Error fetching patients:', error);
@@ -432,7 +434,7 @@ const DoctorDashboard = () => {
       try {
         const { data, error } = await supabase
           .from('patients')
-          .select('id, first_name, last_name, patient_number')
+          .select('id, first_name, last_name, patient_number, phone')
           .order('first_name');
         
         if (error) {
@@ -2293,25 +2295,21 @@ const cancelPrescriptionMutation = useMutation({
           <p className="mb-4 text-gray-600">Create a new prescription with multiple medications for the selected patient.</p>
 
           {/* Patient Selection */}
-          <div className="mb-4">
-            <label className="block text-sm font-medium text-gray-700 mb-1">Patient *</label>
-            <select
+          <div className="mb-4 space-y-2">
+            <Label>Patient *</Label>
+            <Combobox
+              options={activePatients?.map((p) => ({
+                value: p.id,
+                label: `${p.first_name} ${p.last_name} (${p.patient_number})${p.phone ? ` - ${p.phone}` : ''}`,
+              })) || []}
               value={prescriptionForm.patient_id}
-              onChange={(e) => {
-                const patientId = e.target.value;
-                setPrescriptionForm({ ...prescriptionForm, patient_id: patientId });
-                const patient = activePatients?.find((p) => p.id === patientId);
+              onValueChange={(value) => {
+                setPrescriptionForm({ ...prescriptionForm, patient_id: value });
+                const patient = activePatients?.find((p) => p.id === value);
                 if (patient) setSelectedPrescriptionPatient(patient);
               }}
-              className="w-full border border-gray-300 rounded px-3 py-2"
-            >
-              <option value="">Select patient</option>
-              {activePatients?.map((patient) => (
-                <option key={patient.id} value={patient.id}>
-                  {patient.first_name} {patient.last_name} ({patient.patient_number})
-                </option>
-              ))}
-            </select>
+              placeholder="Search and select patient"
+            />
           </div>
 
           {/* Medication Search and Selection */}
@@ -2522,19 +2520,20 @@ const cancelPrescriptionMutation = useMutation({
                 }} className="space-y-4">
                   <div className="space-y-2">
                     <Label>Patient *</Label>
-                    <Select value={newLabOrder.patient_id} onValueChange={(v) => {
-                      setNewLabOrder({ ...newLabOrder, patient_id: v });
-                      // Reset selected tests when patient changes
-                      setSelectedTestDetails([]);
-                      setNewLabOrder(prev => ({ ...prev, test_ids: [] }));
-                    }}>
-                      <SelectTrigger><SelectValue placeholder="Select patient" /></SelectTrigger>
-                      <SelectContent>
-                        {patientsList?.map((p: any) => (
-                          <SelectItem key={p.id} value={p.id}>{p.first_name} {p.last_name} ({p.patient_number})</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <Combobox
+                      options={patientsList?.map((p: any) => ({
+                        value: p.id,
+                        label: `${p.first_name} ${p.last_name} (${p.patient_number})${p.phone ? ` - ${p.phone}` : ''}`,
+                      })) || []}
+                      value={newLabOrder.patient_id}
+                      onValueChange={(v) => {
+                        setNewLabOrder({ ...newLabOrder, patient_id: v });
+                        // Reset selected tests when patient changes
+                        setSelectedTestDetails([]);
+                        setNewLabOrder(prev => ({ ...prev, test_ids: [] }));
+                      }}
+                      placeholder="Search and select patient"
+                    />
                   </div>
                   <div className="space-y-2">
                     <Label>Tests * {testsLoading && <span className="text-xs text-gray-500">(loading...)</span>}</Label>
@@ -3618,21 +3617,17 @@ const cancelPrescriptionMutation = useMutation({
 
               {/* Right Column: Examination Form */}
               <div className="lg:col-span-2 space-y-4 max-h-96 overflow-y-auto">
-              <div>
-                <label className="block text-sm font-medium mb-1">Patient *</label>
-                <select
-                  className="w-full border rounded px-3 py-2"
+              <div className="space-y-2">
+                <Label>Patient *</Label>
+                <Combobox
+                  options={activePatients?.map((p) => ({
+                    value: p.id,
+                    label: `${p.first_name} ${p.last_name}${p.patient_number ? ` (${p.patient_number})` : ''}${p.phone ? ` - ${p.phone}` : ''}`,
+                  })) || []}
                   value={newExaminationForm.patient_id}
-                  onChange={(e) => setNewExaminationForm({ ...newExaminationForm, patient_id: e.target.value })}
-                  required
-                >
-                  <option value="">Select a patient</option>
-                  {activePatients?.map((patient) => (
-                    <option key={patient.id} value={patient.id}>
-                      {patient.first_name} {patient.last_name}
-                    </option>
-                  ))}
-                </select>
+                  onValueChange={(value) => setNewExaminationForm({ ...newExaminationForm, patient_id: value })}
+                  placeholder="Search and select patient"
+                />
               </div>
 
               <div>

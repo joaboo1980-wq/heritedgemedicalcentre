@@ -5,7 +5,7 @@ import { getProductionAuthRedirectUrl } from '@/utils/authRedirectUrl';
 import { generateStrongPassword } from '@/utils/passwordGenerator';
 import { useAuth } from '@/hooks/useAuth';
 import { AuthContext } from '@/contexts/AuthContext';
-import { withSessionValidation } from '@/utils/sessionValidationAPI';
+
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -64,7 +64,6 @@ const UserManagement = () => {
   const queryClient = useQueryClient();
   const authContext = useContext(AuthContext);
   const userId = authContext?.user?.id;
-  const sessionToken = authContext?.sessionToken;
   const [searchTerm, setSearchTerm] = useState('');
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [newUser, setNewUser] = useState({
@@ -112,103 +111,95 @@ const UserManagement = () => {
   // Create user mutation
   const createUserMutation = useMutation({
     mutationFn: async (userData: typeof newUser) => {
-      if (!userId || !sessionToken) {
-        throw new Error('Session not found. Please log in again.');
+      if (!userId) {
+        throw new Error('Not authenticated. Please log in again.');
+      }
+      // Validate inputs
+      if (!userData.email || !userData.full_name) {
+        throw new Error('Email and full name are required');
       }
 
-      return withSessionValidation(
-        userId,
-        sessionToken,
-        async () => {
-          // Validate inputs
-          if (!userData.email || !userData.full_name) {
-            throw new Error('Email and full name are required');
-          }
+      try {
+        // Generate a strong random temporary password
+        const temporaryPassword = generateStrongPassword(16);
+        console.log('[UserCreation] Generated temporary password for:', userData.email);
 
-          try {
-            // Generate a strong random temporary password
-            const temporaryPassword = generateStrongPassword(16);
-            console.log('[UserCreation] Generated temporary password for:', userData.email);
+        // Get the current admin's session before creating the new user
+        const { data: { session: adminSession } } = await supabase.auth.getSession();
+        
+        if (!adminSession) {
+          throw new Error('Admin session not found');
+        }
 
-            // Get the current admin's session before creating the new user
-            const { data: { session: adminSession } } = await supabase.auth.getSession();
-            
-            if (!adminSession) {
-              throw new Error('Admin session not found');
-            }
+        // Create auth user with temporary password
+        const { data: authData, error: authError } = await supabase.auth.signUp({
+          email: userData.email.trim().toLowerCase(),
+          password: temporaryPassword,
+          options: {
+            data: {
+              full_name: userData.full_name,
+            },
+          },
+        });
 
-            // Create auth user with temporary password
-            const { data: authData, error: authError } = await supabase.auth.signUp({
-              email: userData.email.trim().toLowerCase(),
-              password: temporaryPassword,
-              options: {
-                data: {
-                  full_name: userData.full_name,
-                },
-              },
-            });
+        if (authError) {
+          console.error('Auth error details:', authError);
+          throw authError;
+        }
 
-            if (authError) {
-              console.error('Auth error details:', authError);
-              throw authError;
-            }
+        if (!authData.user) {
+          throw new Error('User creation failed - no user returned');
+        }
 
-            if (!authData.user) {
-              throw new Error('User creation failed - no user returned');
-            }
+        const newUserId = authData.user.id;
 
-            const newUserId = authData.user.id;
+        // Create profile
+        const { error: profileError } = await supabase.from('profiles').insert({
+          user_id: newUserId,
+          full_name: userData.full_name.trim(),
+          email: userData.email.trim().toLowerCase(),
+        });
 
-            // Create profile
-            const { error: profileError } = await supabase.from('profiles').insert({
-              user_id: newUserId,
-              full_name: userData.full_name.trim(),
-              email: userData.email.trim().toLowerCase(),
-            });
+        if (profileError) {
+          console.error('Profile error:', profileError);
+          throw profileError;
+        }
 
-            if (profileError) {
-              console.error('Profile error:', profileError);
-              throw profileError;
-            }
+        // Assign role
+        const { error: roleError } = await supabase.from('user_roles').insert({
+          user_id: newUserId,
+          role: userData.role,
+        });
 
-            // Assign role
-            const { error: roleError } = await supabase.from('user_roles').insert({
-              user_id: newUserId,
-              role: userData.role,
-            });
+        if (roleError) {
+          console.error('Role error:', roleError);
+          throw roleError;
+        }
 
-            if (roleError) {
-              console.error('Role error:', roleError);
-              throw roleError;
-            }
+        // Restore the admin's session to prevent auto-login of new user
+        const { error: restoreError } = await supabase.auth.setSession(adminSession);
+        if (restoreError) {
+          console.error('Error restoring admin session:', restoreError);
+          // Continue anyway, the user was created successfully
+        }
 
-            // Restore the admin's session to prevent auto-login of new user
-            const { error: restoreError } = await supabase.auth.setSession(adminSession);
-            if (restoreError) {
-              console.error('Error restoring admin session:', restoreError);
-              // Continue anyway, the user was created successfully
-            }
+        // Send password reset email so user can set their own password
+        // Always send to production domain so email links work on all devices
+        const { error: resetError } = await supabase.auth.resetPasswordForEmail(userData.email.trim().toLowerCase(), {
+          redirectTo: getProductionAuthRedirectUrl('/reset-password'),
+        });
 
-            // Send password reset email so user can set their own password
-            // Always send to production domain so email links work on all devices
-            const { error: resetError } = await supabase.auth.resetPasswordForEmail(userData.email.trim().toLowerCase(), {
-              redirectTo: getProductionAuthRedirectUrl('/reset-password'),
-            });
+        if (resetError) {
+          console.error('Error sending reset email:', resetError);
+          // Log but don't fail - user creation was successful
+          throw new Error('User created but failed to send password reset email. User can use "Forgot Password" to reset.');
+        }
 
-            if (resetError) {
-              console.error('Error sending reset email:', resetError);
-              // Log but don't fail - user creation was successful
-              throw new Error('User created but failed to send password reset email. User can use "Forgot Password" to reset.');
-            }
-
-            return authData.user;
-          } catch (error) {
-            console.error('User creation error:', error);
-            throw error;
-          }
-        },
-        'Create User'
-      );
+        return authData.user;
+      } catch (error) {
+        console.error('User creation error:', error);
+        throw error;
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['staff-management'] });
@@ -231,41 +222,33 @@ const UserManagement = () => {
   // Add role mutation
   const addRoleMutation = useMutation({
     mutationFn: async ({ userId, role }: { userId: string; role: AppRole }) => {
-      if (!userId || !sessionToken) {
-        throw new Error('Session not found. Please log in again.');
+      if (!userId) {
+        throw new Error('Not authenticated. Please log in again.');
+      }
+      if (!userId?.trim()) {
+        console.warn('[UserManagement] User ID is required');
+        throw new Error('User ID is required');
+      }
+      if (!role?.trim()) {
+        console.warn('[UserManagement] Role is required');
+        throw new Error('Role is required');
       }
 
-      return withSessionValidation(
-        userId,
-        sessionToken,
-        async () => {
-          if (!userId?.trim()) {
-            console.warn('[UserManagement] User ID is required');
-            throw new Error('User ID is required');
-          }
-          if (!role?.trim()) {
-            console.warn('[UserManagement] Role is required');
-            throw new Error('Role is required');
-          }
-
-          try {
-            const { error } = await supabase.from('user_roles').insert({
-              user_id: userId,
-              role: role,
-            });
-            if (error) {
-              console.error('[UserManagement] Error adding role:', error);
-              throw error;
-            }
-            console.log('[UserManagement] Role added successfully');
-            return { success: true };
-          } catch (err) {
-            console.error('[UserManagement] Role addition failed:', err);
-            throw err;
-          }
-        },
-        'Add Role'
-      );
+      try {
+        const { error } = await supabase.from('user_roles').insert({
+          user_id: userId,
+          role: role,
+        });
+        if (error) {
+          console.error('[UserManagement] Error adding role:', error);
+          throw error;
+        }
+        console.log('[UserManagement] Role added successfully');
+        return { success: true };
+      } catch (err) {
+        console.error('[UserManagement] Role addition failed:', err);
+        throw err;
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['staff-management'] });
@@ -280,42 +263,34 @@ const UserManagement = () => {
   // Remove role mutation
   const removeRoleMutation = useMutation({
     mutationFn: async ({ userId, role }: { userId: string; role: AppRole }) => {
-      if (!userId || !sessionToken) {
-        throw new Error('Session not found. Please log in again.');
+      if (!userId) {
+        throw new Error('Not authenticated. Please log in again.');
+      }
+      if (!userId?.trim()) {
+        console.warn('[UserManagement] User ID is required');
+        throw new Error('User ID is required');
+      }
+      if (!role?.trim()) {
+        console.warn('[UserManagement] Role is required');
+        throw new Error('Role is required');
       }
 
-      return withSessionValidation(
-        userId,
-        sessionToken,
-        async () => {
-          if (!userId?.trim()) {
-            console.warn('[UserManagement] User ID is required');
-            throw new Error('User ID is required');
-          }
-          if (!role?.trim()) {
-            console.warn('[UserManagement] Role is required');
-            throw new Error('Role is required');
-          }
-
-          try {
-            const { error } = await supabase
-              .from('user_roles')
-              .delete()
-              .eq('user_id', userId)
-              .eq('role', role);
-            if (error) {
-              console.error('[UserManagement] Error removing role:', error);
-              throw error;
-            }
-            console.log('[UserManagement] Role removed successfully');
-            return { success: true };
-          } catch (err) {
-            console.error('[UserManagement] Role removal failed:', err);
-            throw err;
-          }
-        },
-        'Remove Role'
-      );
+      try {
+        const { error } = await supabase
+          .from('user_roles')
+          .delete()
+          .eq('user_id', userId)
+          .eq('role', role);
+        if (error) {
+          console.error('[UserManagement] Error removing role:', error);
+          throw error;
+        }
+        console.log('[UserManagement] Role removed successfully');
+        return { success: true };
+      } catch (err) {
+        console.error('[UserManagement] Role removal failed:', err);
+        throw err;
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['staff-management'] });

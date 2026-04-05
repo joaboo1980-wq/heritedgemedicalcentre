@@ -1,4 +1,4 @@
-import React, { createContext, useEffect, useState } from 'react';
+import React, { createContext, useEffect, useState, useRef } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
@@ -21,7 +21,6 @@ interface AuthContextType {
   session: Session | null;
   profile: Profile | null;
   roles: AppRole[];
-  sessionToken: string | null;
   loading: boolean;
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
@@ -42,18 +41,15 @@ const getDeviceInfo = (): string => {
   return `${browserInfo} on ${osInfo}`;
 };
 
-// Helper function to generate session token
-const generateSessionToken = (): string => {
-  return `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-};
-
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [roles, setRoles] = useState<AppRole[]>([]);
-  const [sessionToken, setSessionToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  
+  // Track refresh timer to prevent multiple simultaneous refreshes
+  const refreshTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const fetchUserData = async (userId: string): Promise<void> => {
     try {
@@ -101,59 +97,61 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  // Check session validity every 60 seconds
+  // Automatic token refresh every 45 minutes (assuming 1-hour expiration)
+  // Supabase refreshes tokens automatically, but we schedule an explicit refresh to stay ahead
   useEffect(() => {
-    if (!sessionToken || !user) return;
+    if (!session?.user) return;
 
-    const intervalId = setInterval(async () => {
-      try {
-        const { data: isValid, error } = await supabase.rpc('is_session_valid', {
-          p_user_id: user.id,
-          p_session_token: sessionToken,
-        });
+    console.log('[AUTH] Setting up automatic token refresh');
 
-        if (error) {
-          console.error('[Session] Validation error:', error);
-          return;
-        }
-
-        if (!isValid) {
-          // Session was invalidated (probably logged in from another device)
-          console.warn('[Session] Session invalidated from another device');
-          localStorage.removeItem('session_token');
-          localStorage.removeItem('user_id');
-          
-          setSessionToken(null);
-          setUser(null);
-          setSession(null);
-          setProfile(null);
-          setRoles([]);
-          
-          toast.warning(
-            'Your session has ended. You were logged in from another device. Please log in again.'
-          );
-        }
-      } catch (err) {
-        console.error('[Session] Validation exception:', err);
+    const scheduleRefresh = () => {
+      // Refresh 15 minutes before expiration (token expires in ~60 min, refresh at 45 min)
+      if (refreshTimerRef.current) {
+        clearTimeout(refreshTimerRef.current);
       }
-    }, 60000); // Check every 60 seconds
 
-    return () => clearInterval(intervalId);
-  }, [sessionToken, user]);
+      refreshTimerRef.current = setTimeout(async () => {
+        try {
+          console.log('[AUTH] Automatic token refresh triggered');
+          
+          // Get current session and refresh if needed
+          const { data, error } = await supabase.auth.refreshSession();
+          
+          if (error) {
+            console.error('[AUTH] Token refresh failed:', error);
+            // If refresh fails, user will need to log in again
+            return;
+          }
+          
+          if (data.session) {
+            console.log('[AUTH] Token refreshed successfully');
+            setSession(data.session);
+            // Reschedule the next refresh
+            scheduleRefresh();
+          }
+        } catch (err) {
+          console.error('[AUTH] Token refresh error:', err);
+        }
+      }, 45 * 60 * 1000); // 45 minutes
+    };
+
+    scheduleRefresh();
+
+    return () => {
+      if (refreshTimerRef.current) {
+        clearTimeout(refreshTimerRef.current);
+      }
+    };
+  }, [session?.user]);
 
   useEffect(() => {
-    // Restore session token from localStorage if it exists
-    const savedSessionToken = localStorage.getItem('session_token');
-    const savedUserId = localStorage.getItem('user_id');
-    
-    if (savedSessionToken) {
-      setSessionToken(savedSessionToken);
-    }
+    console.log('[AUTH] Initializing auth state listener');
 
     // Set up auth state listener
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event, session) => {
         try {
+          console.log('[AUTH] Auth state changed:', event);
           setSession(session);
           setUser(session?.user ?? null);
           
@@ -167,7 +165,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           } else {
             setProfile(null);
             setRoles([]);
-            setSessionToken(null);
             setLoading(false);
           }
         } catch (error) {
@@ -177,9 +174,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     );
 
-    // Check for existing session
+    // Check for existing session (from Supabase's internal storage)
     supabase.auth.getSession().then(({ data: { session } }) => {
       try {
+        console.log('[AUTH] Retrieved existing session');
         setSession(session);
         setUser(session?.user ?? null);
         
@@ -199,16 +197,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      console.log('[AUTH] Cleaning up auth subscription');
+      subscription.unsubscribe();
+      if (refreshTimerRef.current) {
+        clearTimeout(refreshTimerRef.current);
+      }
+    };
   }, []);
 
   const signIn = async (email: string, password: string) => {
     try {
-      // Step 1: Standard Supabase login
+      // Step 1: Standard Supabase login (JWT is kept in memory automatically)
       const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       
       if (error) {
-        console.error('[Auth] Sign in error:', error);
+        console.error('[AUTH] Sign in error:', error);
         return { error: error as Error };
       }
 
@@ -216,68 +220,62 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return { error: new Error('No user returned from login') };
       }
 
-      // Step 2: Generate unique session token
-      const newSessionToken = generateSessionToken();
+      console.log('[AUTH] User authenticated:', data.user.id);
+      
+      // Step 2: Enforce single-session policy - invalidate old sessions for audit/tracking
       const deviceInfo = getDeviceInfo();
-
-      // Step 3: Enforce single-session policy - invalidate old sessions and create new one
-      const { data: sessionResult, error: sessionError } = await supabase.rpc(
+      const { error: sessionError } = await supabase.rpc(
         'enforce_single_session',
         {
           p_user_id: data.user.id,
-          p_new_session_token: newSessionToken,
+          p_new_session_token: `secure_session_${Date.now()}`, // Minimal token for audit logging only
           p_device_info: deviceInfo,
         }
       );
 
       if (sessionError) {
-        console.error('[Auth] Session enforcement error:', sessionError);
-        // Still allow login even if session tracking fails
-        toast.warning('Login successful but session tracking failed. Please try again.');
+        console.warn('[AUTH] Session enforcement warning (non-critical):', sessionError);
+        // Non-fatal error - JWT is still valid, session tracking just failed
       } else {
-        console.log('[Auth] Session created:', sessionResult);
+        console.log('[AUTH] Session tracking enforced');
       }
 
-      // Step 4: Store session token in localStorage
-      localStorage.setItem('session_token', newSessionToken);
-      localStorage.setItem('user_id', data.user.id);
-      localStorage.setItem('login_timestamp', new Date().toISOString());
-
-      // Step 5: Update auth context
-      setSessionToken(newSessionToken);
+      // NOTE: Token is now kept in memory by Supabase and will be automatically refreshed
+      // No localStorage usage for security
       
       return { error: null };
     } catch (err: any) {
-      console.error('[Auth] Sign in exception:', err);
+      console.error('[AUTH] Sign in exception:', err);
       return { error: err as Error };
     }
   };
 
   const signOut = async () => {
     try {
-      const userId = user?.id;
+      console.log('[AUTH] Signing out user');
 
       // Optional: Invalidate all sessions (more secure but prevents other device access)
-      // if (userId) {
-      //   await supabase.rpc('logout_all_sessions', { p_user_id: userId });
+      // if (user?.id) {
+      //   await supabase.rpc('logout_all_sessions', { p_user_id: user.id });
       // }
 
-      // Sign out from Supabase
+      // Sign out from Supabase (clears JWT from memory)
       await supabase.auth.signOut();
 
-      // Clear local storage
-      localStorage.removeItem('session_token');
-      localStorage.removeItem('user_id');
-      localStorage.removeItem('login_timestamp');
+      // Clear any scheduled refresh timers
+      if (refreshTimerRef.current) {
+        clearTimeout(refreshTimerRef.current);
+      }
 
-      // Clear context
+      // Clear context state
       setUser(null);
       setSession(null);
       setProfile(null);
       setRoles([]);
-      setSessionToken(null);
+      
+      console.log('[AUTH] User signed out successfully');
     } catch (error) {
-      console.error('[Auth] Sign out error:', error);
+      console.error('[AUTH] Sign out error:', error);
       throw error;
     }
   };
@@ -286,7 +284,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const isAdmin = hasRole('admin');
 
   const isSessionValid = (): boolean => {
-    return !!sessionToken && !!user;
+    // Session is valid if user is authenticated and session exists
+    // JWT expiration is handled automatically by Supabase
+    return !!user && !!session;
   };
 
   return (
@@ -295,7 +295,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       session,
       profile,
       roles,
-      sessionToken,
       loading,
       signIn,
       signOut,

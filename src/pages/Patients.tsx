@@ -38,6 +38,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Combobox } from '@/components/ui/combobox';
 import { Badge } from '@/components/ui/badge';
 import {
   DropdownMenu,
@@ -276,12 +277,62 @@ const Patients = () => {
         return [];
       }
     },
+    staleTime: 0,
+    refetchOnMount: true,
+    refetchOnWindowFocus: true,
   });
 
   // Create patient mutation
   const createPatientMutation = useMutation({
     mutationFn: async (patientData: typeof newPatient) => {
       console.log('[MUTATION] Patient creation initiated with data:', patientData);
+      
+      // Check for duplicate patient registration by unique identifiers (phone and email)
+      console.log('[DUPLICATE CHECK] Checking for existing patient with same phone or email...');
+      
+      // Phone number check (if phone is provided)
+      if (patientData.phone?.trim()) {
+        console.log('[DUPLICATE CHECK] Checking for existing patient with phone:', patientData.phone);
+        const { data: existingByPhone, error: checkError1 } = await supabase
+          .from('patients')
+          .select('id, first_name, last_name, patient_number, phone')
+          .eq('phone', patientData.phone.trim());
+        
+        if (checkError1) {
+          console.log('[DUPLICATE CHECK] Error checking phone duplicates:', checkError1);
+          throw new Error('Error checking for duplicate patients');
+        }
+        
+        if (existingByPhone && existingByPhone.length > 0) {
+          const existingPatient = existingByPhone[0];
+          console.log('[DUPLICATE CHECK] Found existing patient by phone:', existingPatient);
+          throw new Error(
+            `A patient with the phone number "${patientData.phone}" already exists (${existingPatient.first_name} ${existingPatient.last_name}, Patient #${existingPatient.patient_number}). Please verify the information or use the existing record.`
+          );
+        }
+      }
+
+      // Email address check (if email is provided)
+      if (patientData.email?.trim()) {
+        console.log('[DUPLICATE CHECK] Checking for existing patient with email:', patientData.email);
+        const { data: existingByEmail, error: checkError2 } = await supabase
+          .from('patients')
+          .select('id, first_name, last_name, patient_number, email')
+          .eq('email', patientData.email.trim());
+        
+        if (checkError2) {
+          console.log('[DUPLICATE CHECK] Error checking email duplicates:', checkError2);
+          throw new Error('Error checking for duplicate patients');
+        }
+        
+        if (existingByEmail && existingByEmail.length > 0) {
+          const existingPatient = existingByEmail[0];
+          console.log('[DUPLICATE CHECK] Found existing patient by email:', existingPatient);
+          throw new Error(
+            `A patient with the email "${patientData.email}" already exists (${existingPatient.first_name} ${existingPatient.last_name}, Patient #${existingPatient.patient_number}). Please verify the information or use the existing record.`
+          );
+        }
+      }
       
       // Use RPC function for atomic patient_number generation
       const { data, error } = await supabase.rpc('insert_patient', {
@@ -495,6 +546,14 @@ const Patients = () => {
                   toast.error('Gender is required');
                   return;
                 }
+                if (!newPatient.emergency_contact_name?.trim()) {
+                  toast.error('Emergency contact name is required');
+                  return;
+                }
+                if (!newPatient.emergency_contact_phone?.trim()) {
+                  toast.error('Emergency contact phone is required');
+                  return;
+                }
                 
                 createPatientMutation.mutate(newPatient);
               }}
@@ -631,23 +690,25 @@ const Patients = () => {
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="emergency_contact_name">Emergency Contact Name</Label>
+                  <Label htmlFor="emergency_contact_name">Emergency Contact Name *</Label>
                   <Input
                     id="emergency_contact_name"
                     value={newPatient.emergency_contact_name}
                     onChange={(e) =>
                       setNewPatient({ ...newPatient, emergency_contact_name: e.target.value })
                     }
+                    required
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="emergency_contact_phone">Emergency Contact Phone</Label>
+                  <Label htmlFor="emergency_contact_phone">Emergency Contact Phone *</Label>
                   <Input
                     id="emergency_contact_phone"
                     value={newPatient.emergency_contact_phone}
                     onChange={(e) =>
                       setNewPatient({ ...newPatient, emergency_contact_phone: e.target.value })
                     }
+                    required
                   />
                 </div>
               </div>
@@ -1223,27 +1284,23 @@ const Patients = () => {
               <Label htmlFor="doctor" className="text-sm font-medium">
                 Doctor *
               </Label>
-              <Select
+              <Combobox
+                options={
+                  doctors && doctors.length > 0
+                    ? doctors.map((doctor: any) => ({
+                        value: doctor.id,
+                        label: `Dr. ${doctor.first_name} ${doctor.last_name}`,
+                      }))
+                    : []
+                }
                 value={appointmentForm.doctor_id}
                 onValueChange={(value) =>
                   setAppointmentForm({ ...appointmentForm, doctor_id: value })
                 }
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Select doctor" />
-                </SelectTrigger>
-                <SelectContent side="bottom" align="start" className="z-50">
-                  {doctors && doctors.length > 0 ? (
-                    doctors.map((doctor: any) => (
-                      <SelectItem key={doctor.id} value={doctor.id}>
-                        Dr. {doctor.first_name} {doctor.last_name}
-                      </SelectItem>
-                    ))
-                  ) : (
-                    <div className="p-2 text-sm text-gray-500">No doctors available</div>
-                  )}
-                </SelectContent>
-              </Select>
+                placeholder="Select doctor"
+                searchPlaceholder="Search doctor name..."
+                emptyText="No doctor found."
+              />
             </div>
 
             {/* Date */}

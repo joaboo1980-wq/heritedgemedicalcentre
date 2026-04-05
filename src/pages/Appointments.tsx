@@ -21,6 +21,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Combobox } from '@/components/ui/combobox';
 import { Badge } from '@/components/ui/badge';
 import { Calendar } from '@/components/ui/calendar';
 import {
@@ -223,7 +224,7 @@ const Appointments = () => {
       try {
         const { data, error } = await supabase
           .from('patients')
-          .select('id, first_name, last_name, patient_number')
+          .select('id, first_name, last_name, patient_number, phone')
           .order('first_name');
         if (error) {
           console.error('[Appointments] Error fetching patients list:', error);
@@ -236,6 +237,9 @@ const Appointments = () => {
         return [];
       }
     },
+    staleTime: 0, // Treat data as immediately stale to ensure fresh refetch
+    refetchOnMount: true,
+    refetchOnWindowFocus: true,
   });
 
   // Fetch doctors from user_roles
@@ -323,6 +327,9 @@ const Appointments = () => {
         return [];
       }
     },
+    staleTime: 0, // Treat data as immediately stale to ensure fresh refetch
+    refetchOnMount: true,
+    refetchOnWindowFocus: true,
   });
 
   // Create appointment mutation
@@ -606,23 +613,21 @@ const Appointments = () => {
             >
               <div className="space-y-2">
                 <Label>Patient *</Label>
-                <Select
+                <Combobox
+                  options={
+                    patientsList?.map((p) => ({
+                      value: p.id,
+                      label: `${p.first_name} ${p.last_name} (${p.patient_number})${p.phone ? ` - ${p.phone}` : ''}`,
+                    })) || []
+                  }
                   value={newAppointment.patient_id}
                   onValueChange={(value) =>
                     setNewAppointment({ ...newAppointment, patient_id: value })
                   }
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select patient" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {patientsList?.map((p) => (
-                      <SelectItem key={p.id} value={p.id}>
-                        {p.first_name} {p.last_name} ({p.patient_number})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                  placeholder="Select patient"
+                  searchPlaceholder="Search patient name or number..."
+                  emptyText="No patient found."
+                />
               </div>
 
               <div className="space-y-2">
