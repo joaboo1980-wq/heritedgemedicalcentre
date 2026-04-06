@@ -35,6 +35,7 @@ import {
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
+import { validateConsultation } from '@/utils/consultationValidation';
 import { Plus, Search, Stethoscope, Calendar, User, Heart, Thermometer, Wind } from 'lucide-react';
 import { format } from 'date-fns';
 import PermissionGuard from '@/components/layout/PermissionGuard';
@@ -241,18 +242,31 @@ const DoctorExamination = () => {
         throw new Error('Not authenticated. Please log in again.');
       }
 
-      // Validate required fields
-      if (!data.patient_id?.trim()) {
-        console.warn('[DoctorExamination] Patient is required');
-        throw new Error('Patient is required');
-      }
-      if (!data.chief_complaint?.trim()) {
-        console.warn('[DoctorExamination] Chief complaint is required');
-        throw new Error('Chief complaint is required');
-      }
-      if (!data.assessment_diagnosis?.trim()) {
-        console.warn('[DoctorExamination] Assessment/diagnosis is required');
-        throw new Error('Assessment/diagnosis is required');
+      // Validate all consultation requirements
+      const validation = await validateConsultation(supabase, {
+        patient_id: data.patient_id,
+        chief_complaint: data.chief_complaint,
+        assessment_diagnosis: data.assessment_diagnosis,
+        triage_temperature: data.triage_temperature,
+        triage_blood_pressure: data.triage_blood_pressure,
+        triage_pulse_rate: data.triage_pulse_rate,
+        triage_respiratory_rate: data.triage_respiratory_rate,
+        triage_oxygen_saturation: data.triage_oxygen_saturation,
+        triage_weight: data.triage_weight,
+        triage_height: data.triage_height,
+        history_of_present_illness: data.history_of_present_illness,
+        general_appearance: data.general_appearance,
+        heent_examination: data.heent_examination,
+        cardiovascular_examination: data.cardiovascular_examination,
+        respiratory_examination: data.respiratory_examination,
+        abdominal_examination: data.abdominal_examination,
+        neurological_examination: data.neurological_examination,
+        plan_treatment: data.plan_treatment,
+        follow_up_date: data.follow_up_date,
+      });
+
+      if (!validation.isValid) {
+        throw new Error(validation.error);
       }
 
       try {
@@ -367,7 +381,6 @@ const DoctorExamination = () => {
     createExaminationMutation.mutate(newExamination);
   };
 
-  // ===== UPDATE EXAMINATION MUTATION =====
   const updateExaminationMutation = useMutation({
     mutationFn: async (data: any) => {
       if (!userId) {
@@ -376,29 +389,56 @@ const DoctorExamination = () => {
 
       const { id, ...updateData } = data;
 
+      // Validate all consultation requirements
+      const validation = await validateConsultation(supabase, {
+        patient_id: updateData.patient_id || selectedExamination?.patient_id || '',
+        chief_complaint: updateData.chief_complaint,
+        assessment_diagnosis: updateData.assessment_diagnosis,
+        triage_temperature: updateData.triage_temperature,
+        triage_blood_pressure: updateData.triage_blood_pressure,
+        triage_pulse_rate: updateData.triage_pulse_rate,
+        triage_respiratory_rate: updateData.triage_respiratory_rate,
+        triage_oxygen_saturation: updateData.triage_oxygen_saturation,
+        triage_weight: updateData.triage_weight,
+        triage_height: updateData.triage_height,
+        history_of_present_illness: updateData.history_of_present_illness,
+        general_appearance: updateData.general_appearance,
+        heent_examination: updateData.heent_examination,
+        cardiovascular_examination: updateData.cardiovascular_examination,
+        respiratory_examination: updateData.respiratory_examination,
+        abdominal_examination: updateData.abdominal_examination,
+        neurological_examination: updateData.neurological_examination,
+        plan_treatment: updateData.plan_treatment,
+        follow_up_date: updateData.follow_up_date,
+      });
+
+      if (!validation.isValid) {
+        throw new Error(validation.error);
+      }
+
       // Calculate BMI if weight and height are provided
       let bmi = null;
-          if (updateData.triage_weight && updateData.triage_height) {
-            const heightInMeters = parseFloat(updateData.triage_height) / 100;
-            bmi = parseFloat(updateData.triage_weight) / (heightInMeters * heightInMeters);
-          }
+      if (updateData.triage_weight && updateData.triage_height) {
+        const heightInMeters = parseFloat(updateData.triage_height) / 100;
+        bmi = parseFloat(updateData.triage_weight) / (heightInMeters * heightInMeters);
+      }
 
-          // Prepare update object with proper parsing
-          const updatePayload = {
-            chief_complaint: updateData.chief_complaint,
-            assessment_diagnosis: updateData.assessment_diagnosis,
-            triage_temperature: updateData.triage_temperature ? parseFloat(updateData.triage_temperature) : null,
-            triage_blood_pressure: updateData.triage_blood_pressure || null,
-            triage_pulse_rate: updateData.triage_pulse_rate ? parseInt(updateData.triage_pulse_rate) : null,
-            triage_respiratory_rate: updateData.triage_respiratory_rate ? parseInt(updateData.triage_respiratory_rate) : null,
-            triage_oxygen_saturation: updateData.triage_oxygen_saturation ? parseFloat(updateData.triage_oxygen_saturation) : null,
-            triage_weight: updateData.triage_weight ? parseFloat(updateData.triage_weight) : null,
-            triage_height: updateData.triage_height ? parseFloat(updateData.triage_height) : null,
-            triage_bmi: bmi,
-            plan_treatment: updateData.plan_treatment || null,
-            medications_prescribed: updateData.medications_prescribed || null,
-            follow_up_date: updateData.follow_up_date || null,
-          };
+      // Prepare update object with proper parsing
+      const updatePayload = {
+        chief_complaint: updateData.chief_complaint,
+        assessment_diagnosis: updateData.assessment_diagnosis,
+        triage_temperature: updateData.triage_temperature ? parseFloat(updateData.triage_temperature) : null,
+        triage_blood_pressure: updateData.triage_blood_pressure || null,
+        triage_pulse_rate: updateData.triage_pulse_rate ? parseInt(updateData.triage_pulse_rate) : null,
+        triage_respiratory_rate: updateData.triage_respiratory_rate ? parseInt(updateData.triage_respiratory_rate) : null,
+        triage_oxygen_saturation: updateData.triage_oxygen_saturation ? parseFloat(updateData.triage_oxygen_saturation) : null,
+        triage_weight: updateData.triage_weight ? parseFloat(updateData.triage_weight) : null,
+        triage_height: updateData.triage_height ? parseFloat(updateData.triage_height) : null,
+        triage_bmi: bmi,
+        plan_treatment: updateData.plan_treatment || null,
+        medications_prescribed: updateData.medications_prescribed || null,
+        follow_up_date: updateData.follow_up_date || null,
+      };
 
       console.log('[DoctorExamination] Updating examination:', id, updatePayload);
 

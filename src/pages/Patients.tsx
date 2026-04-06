@@ -51,7 +51,9 @@ import { toast } from 'sonner';
 import { Plus, Search, Eye, Edit, Users, MoreHorizontal, Calendar, History, Trash2 } from 'lucide-react';
 import { format } from 'date-fns';
 import PermissionGuard from '@/components/layout/PermissionGuard';
+import { validatePatientRegistration } from '@/utils/patientRegistrationValidation';
 import { AssignPatientModal } from '@/components/nursing/AssignPatientModal';
+import { validateAppointmentConflicts } from '@/utils/appointmentValidation';
 
 interface Patient {
   id: string;
@@ -287,51 +289,23 @@ const Patients = () => {
     mutationFn: async (patientData: typeof newPatient) => {
       console.log('[MUTATION] Patient creation initiated with data:', patientData);
       
-      // Check for duplicate patient registration by unique identifiers (phone and email)
-      console.log('[DUPLICATE CHECK] Checking for existing patient with same phone or email...');
-      
-      // Phone number check (if phone is provided)
-      if (patientData.phone?.trim()) {
-        console.log('[DUPLICATE CHECK] Checking for existing patient with phone:', patientData.phone);
-        const { data: existingByPhone, error: checkError1 } = await supabase
-          .from('patients')
-          .select('id, first_name, last_name, patient_number, phone')
-          .eq('phone', patientData.phone.trim());
-        
-        if (checkError1) {
-          console.log('[DUPLICATE CHECK] Error checking phone duplicates:', checkError1);
-          throw new Error('Error checking for duplicate patients');
-        }
-        
-        if (existingByPhone && existingByPhone.length > 0) {
-          const existingPatient = existingByPhone[0];
-          console.log('[DUPLICATE CHECK] Found existing patient by phone:', existingPatient);
-          throw new Error(
-            `A patient with the phone number "${patientData.phone}" already exists (${existingPatient.first_name} ${existingPatient.last_name}, Patient #${existingPatient.patient_number}). Please verify the information or use the existing record.`
-          );
-        }
-      }
+      // Validate all registration requirements (Phase 1 & 2)
+      const validation = await validatePatientRegistration(supabase, {
+        first_name: patientData.first_name,
+        last_name: patientData.last_name,
+        gender: patientData.gender,
+        date_of_birth: patientData.date_of_birth,
+        phone: patientData.phone,
+        email: patientData.email,
+        address: patientData.address,
+        emergency_contact_name: patientData.emergency_contact_name,
+        emergency_contact_phone: patientData.emergency_contact_phone,
+        insurance_provider: patientData.insurance_provider,
+        insurance_number: patientData.insurance_number,
+      });
 
-      // Email address check (if email is provided)
-      if (patientData.email?.trim()) {
-        console.log('[DUPLICATE CHECK] Checking for existing patient with email:', patientData.email);
-        const { data: existingByEmail, error: checkError2 } = await supabase
-          .from('patients')
-          .select('id, first_name, last_name, patient_number, email')
-          .eq('email', patientData.email.trim());
-        
-        if (checkError2) {
-          console.log('[DUPLICATE CHECK] Error checking email duplicates:', checkError2);
-          throw new Error('Error checking for duplicate patients');
-        }
-        
-        if (existingByEmail && existingByEmail.length > 0) {
-          const existingPatient = existingByEmail[0];
-          console.log('[DUPLICATE CHECK] Found existing patient by email:', existingPatient);
-          throw new Error(
-            `A patient with the email "${patientData.email}" already exists (${existingPatient.first_name} ${existingPatient.last_name}, Patient #${existingPatient.patient_number}). Please verify the information or use the existing record.`
-          );
-        }
+      if (!validation.isValid) {
+        throw new Error(validation.error);
       }
       
       // Use RPC function for atomic patient_number generation
@@ -448,6 +422,20 @@ const Patients = () => {
       if (!appointmentData.doctor_id) throw new Error('Doctor is required');
       if (!appointmentData.appointment_date) throw new Error('Appointment date is required');
       if (!appointmentData.appointment_time) throw new Error('Appointment time is required');
+
+      // Validate appointment conflicts
+      const validation = await validateAppointmentConflicts(
+        supabase,
+        selectedPatient.id,
+        appointmentData.doctor_id,
+        appointmentData.appointment_date,
+        appointmentData.appointment_time,
+        appointmentData.duration_minutes
+      );
+
+      if (!validation.isValid) {
+        throw new Error(validation.error);
+      }
 
       const { error } = await supabase
         .from('appointments')

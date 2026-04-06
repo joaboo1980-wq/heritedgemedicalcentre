@@ -10,6 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { validatePatientRegistration } from '@/utils/patientRegistrationValidation';
 import {
   Dialog,
   DialogContent,
@@ -52,6 +53,7 @@ import WaitingRoom from '@/components/dashboard/WaitingRoom';
 import { AddToTriageQueueButton } from '@/components/dashboard/AddToTriageQueueDialog';
 import { CheckInAndAssignDialog } from '@/components/dashboard/CheckInAndAssignDialog';
 import { useTriageQueueStats } from '@/hooks/useTriageQueue';
+import { validateAppointmentConflicts } from '@/utils/appointmentValidation';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -123,51 +125,18 @@ const ReceptionDashboard = () => {
         throw new Error('Not authenticated. Please log in again.');
       }
 
-      // Check for duplicate patient registration by unique identifiers
-      console.log('[Reception] Checking for existing patient with same phone or email...');
-      
-      // Check: Phone number match (if phone is provided)
-      if (data.phone?.trim()) {
-        console.log('[Reception] Checking for existing patient with phone:', data.phone);
-        const { data: existingByPhone, error: checkError1 } = await supabase
-          .from('patients')
-          .select('id, first_name, last_name, patient_number, phone')
-          .eq('phone', data.phone.trim());
-        
-        if (checkError1) {
-          console.error('[Reception] Error checking phone duplicates:', checkError1);
-          throw new Error('Error checking for duplicate patients');
-        }
-        
-        if (existingByPhone && existingByPhone.length > 0) {
-          const existingPatient = existingByPhone[0];
-          console.log('[Reception] Found existing patient by phone:', existingPatient);
-          throw new Error(
-            `A patient with the phone number "${data.phone}" already exists (${existingPatient.first_name} ${existingPatient.last_name}, Patient #${existingPatient.patient_number}). Please verify the information or use the existing record.`
-          );
-        }
-      }
+      // Validate all registration requirements (Phase 1 & 2)
+      const validation = await validatePatientRegistration(supabase, {
+        first_name: data.first_name,
+        last_name: data.last_name,
+        gender: data.gender,
+        date_of_birth: data.date_of_birth,
+        phone: data.phone,
+        email: data.email,
+      });
 
-      // Check: Email address match (if email is provided)
-      if (data.email?.trim()) {
-        console.log('[Reception] Checking for existing patient with email:', data.email);
-        const { data: existingByEmail, error: checkError2 } = await supabase
-          .from('patients')
-          .select('id, first_name, last_name, patient_number, email')
-          .eq('email', data.email.trim());
-        
-        if (checkError2) {
-          console.error('[Reception] Error checking email duplicates:', checkError2);
-          throw new Error('Error checking for duplicate patients');
-        }
-        
-        if (existingByEmail && existingByEmail.length > 0) {
-          const existingPatient = existingByEmail[0];
-          console.log('[Reception] Found existing patient by email:', existingPatient);
-          throw new Error(
-            `A patient with the email "${data.email}" already exists (${existingPatient.first_name} ${existingPatient.last_name}, Patient #${existingPatient.patient_number}). Please verify the information or use the existing record.`
-          );
-        }
+      if (!validation.isValid) {
+        throw new Error(validation.error);
       }
 
       const { error } = await supabase
@@ -221,6 +190,20 @@ const ReceptionDashboard = () => {
       // Validate patient exists
       if (!selectedPatient) {
         throw new Error(`Patient not found in available patients list. Patient ID: ${data.patient_id}`);
+      }
+
+      // Validate appointment conflicts
+      const validation = await validateAppointmentConflicts(
+        supabase,
+        data.patient_id,
+        data.doctor_id,
+        data.appointment_date,
+        data.appointment_time,
+        30  // Default 30 minute appointment duration
+      );
+
+      if (!validation.isValid) {
+        throw new Error(validation.error);
       }
       
       console.log('[ReceptionDashboard] Sending payload:', {
@@ -290,6 +273,23 @@ const ReceptionDashboard = () => {
       }
 
       const { appointment_id, ...updateData } = data;
+      
+      // Validate if date/time is being changed
+      if (updateData.appointment_date || updateData.appointment_time) {
+        const validation = await validateAppointmentConflicts(
+          supabase,
+          updateData.patient_id || editForm.patient_id,
+          updateData.doctor_id || editForm.doctor_id,
+          updateData.appointment_date || editForm.appointment_date,
+          updateData.appointment_time || editForm.appointment_time,
+          30
+        );
+        
+        if (!validation.isValid) {
+          throw new Error(validation.error);
+        }
+      }
+      
       const { error } = await supabase
         .from('appointments')
         .update(updateData)
@@ -320,11 +320,29 @@ const ReceptionDashboard = () => {
         throw new Error('Not authenticated. Please log in again.');
       }
 
-      const { appointment_id, ...updateData } = data;
+      // Get current appointment details
+      if (!selectedAppointment) {
+        throw new Error('Appointment details not found');
+      }
+
+      // Validate the new date/time
+      const validation = await validateAppointmentConflicts(
+        supabase,
+        selectedAppointment.patient_id,
+        selectedAppointment.doctor_id,
+        data.appointment_date,
+        data.appointment_time,
+        30
+      );
+      
+      if (!validation.isValid) {
+        throw new Error(validation.error);
+      }
+
       const { error } = await supabase
         .from('appointments')
-        .update(updateData)
-        .eq('id', appointment_id);
+        .update({ appointment_date: data.appointment_date, appointment_time: data.appointment_time })
+        .eq('id', data.appointment_id);
       if (error) throw error;
       return { success: true };
     },
@@ -387,10 +405,10 @@ const ReceptionDashboard = () => {
       if (doctorIds.length > 0) {
         const { data: doctorData } = await supabase
           .from('profiles')
-          .select('id, full_name')
-          .in('id', doctorIds);
+          .select('user_id, full_name')
+          .in('user_id', doctorIds);
         doctors = (doctorData || []).reduce((acc: any, d: any) => {
-          acc[d.id] = d;
+          acc[d.user_id] = d;
           return acc;
         }, {});
       }

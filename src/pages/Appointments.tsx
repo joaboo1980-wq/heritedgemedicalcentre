@@ -36,6 +36,7 @@ import { toast } from 'sonner';
 import { Plus, Clock, User, Calendar as CalendarIcon, CheckCircle, XCircle, AlertCircle, MessageSquare, RefreshCw } from 'lucide-react';
 import { format, isSameDay, parseISO, isAfter, isBefore, startOfDay, endOfDay } from 'date-fns';
 import PermissionGuard from '@/components/layout/PermissionGuard';
+import { validateAppointmentConflicts } from '@/utils/appointmentValidation';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -343,6 +344,21 @@ const Appointments = () => {
         if (!data.doctor_id) {
           throw new Error('Please select a doctor.');
         }
+        
+        // Validate appointment conflicts
+        const validation = await validateAppointmentConflicts(
+          supabase,
+          data.patient_id,
+          data.doctor_id,
+          data.appointment_date,
+          data.appointment_time,
+          data.duration_minutes
+        );
+        
+        if (!validation.isValid) {
+          throw new Error(validation.error);
+        }
+        
         console.log('[Appointments] Creating appointment with data:', data);
         console.log('[Appointments] Doctor ID being used:', data.doctor_id);
         console.log('[Appointments] Available doctors:', doctors);

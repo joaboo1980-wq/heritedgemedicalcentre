@@ -35,6 +35,8 @@ import { Combobox } from '@/components/ui/combobox';
 import { PatientConsultationHistory } from '@/components/doctor/PatientConsultationHistory';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
+import { validateAppointmentConflicts } from '@/utils/appointmentValidation';
+import { validateConsultation } from '@/utils/consultationValidation';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -729,6 +731,25 @@ const DoctorDashboard = () => {
   const rescheduleAppointmentMutation = useMutation({
     mutationFn: async ({ appointmentId, date, time }: { appointmentId: string; date: string; time: string }) => {
       try {
+        // Get current appointment details
+        if (!selectedAppointment) {
+          throw new Error('Appointment details not found');
+        }
+
+        // Validate the new date/time
+        const validation = await validateAppointmentConflicts(
+          supabase,
+          selectedAppointment.patient_id,
+          selectedAppointment.doctor_id,
+          date,
+          time,
+          30
+        );
+        
+        if (!validation.isValid) {
+          throw new Error(validation.error);
+        }
+
         const { error } = await supabase
           .from('appointments')
           .update({ appointment_date: date, appointment_time: time + ':00', status: 'scheduled' })
@@ -753,17 +774,44 @@ const DoctorDashboard = () => {
 
   const createDiagnosisMutation = useMutation({
     mutationFn: async (examinationData: any) => {
-    const { data, error } = await (supabase as any)
-      .from('medical_examinations')
-      .insert([
-        {
-          patient_id: selectedPatient?.id,
-          examined_by: doctorId,
-          examination_date: new Date().toISOString(),
-          ...examinationData,
-        },
-      ]);
-    if (error) throw error;
+      // Validate consultation data
+      const validation = await validateConsultation(supabase, {
+        patient_id: selectedPatient?.id || '',
+        chief_complaint: examinationData.chief_complaint,
+        assessment_diagnosis: examinationData.assessment_diagnosis,
+        triage_temperature: examinationData.triage_temperature,
+        triage_blood_pressure: examinationData.triage_blood_pressure,
+        triage_pulse_rate: examinationData.triage_pulse_rate,
+        triage_respiratory_rate: examinationData.triage_respiratory_rate,
+        triage_oxygen_saturation: examinationData.triage_oxygen_saturation,
+        triage_weight: examinationData.triage_weight,
+        triage_height: examinationData.triage_height,
+        history_of_present_illness: examinationData.history_of_present_illness,
+        general_appearance: examinationData.general_appearance,
+        heent_examination: examinationData.heent_examination,
+        cardiovascular_examination: examinationData.cardiovascular_examination,
+        respiratory_examination: examinationData.respiratory_examination,
+        abdominal_examination: examinationData.abdominal_examination,
+        neurological_examination: examinationData.neurological_examination,
+        plan_treatment: examinationData.plan_treatment,
+        follow_up_date: examinationData.follow_up_date,
+      });
+
+      if (!validation.isValid) {
+        throw new Error(validation.error);
+      }
+
+      const { data, error } = await (supabase as any)
+        .from('medical_examinations')
+        .insert([
+          {
+            patient_id: selectedPatient?.id,
+            examined_by: doctorId,
+            examination_date: new Date().toISOString(),
+            ...examinationData,
+          },
+        ]);
+      if (error) throw error;
   },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['patient-examinations'] });
